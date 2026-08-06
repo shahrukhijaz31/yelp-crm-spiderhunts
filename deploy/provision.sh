@@ -124,7 +124,13 @@ HOSTNAME=127.0.0.1
 # connection_limit caps Prisma's pool. Default is (cpus*2+1) = 25 here, and with
 # two slots briefly overlapping during a deploy that is 50 connections from this
 # app alone — against a cluster shared with four other databases.
-DATABASE_URL=postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?schema=public&connection_limit=8
+#
+# QUOTED, and it must stay quoted. systemd's EnvironmentFile format does not
+# require quotes and strips them if present, but deploy.sh also sources this
+# file with `.` — and there, the unquoted `&` before connection_limit is a shell
+# control operator. The assignment would run in a background subshell and never
+# reach the parent, leaving DATABASE_URL unset with no error at all.
+DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?schema=public&connection_limit=8"
 EOF
   chmod 600 "${ENV_DIR}/env"
 else

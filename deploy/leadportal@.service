@@ -22,6 +22,14 @@ Wants=network-online.target
 # 503 from /api/health, not have systemd tear it down.
 After=postgresql.service
 
+# These belong in [Unit], not [Service] — systemd silently ignores them under
+# [Service] ("Unknown key name"), which would leave Restart=always looping
+# forever on a release that can never start.
+# Five failures in a minute is a broken release, not a flaky one: stop
+# restarting so `systemctl is-active` tells the truth and the deploy aborts.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
 [Service]
 Type=simple
 User=leadportal
@@ -39,10 +47,6 @@ ExecStart=/usr/bin/node server.js
 
 Restart=always
 RestartSec=2
-# Five failures in a minute is a broken release, not a flaky one. Stop
-# restarting so `systemctl is-active` tells the truth and the deploy aborts.
-StartLimitBurst=5
-StartLimitIntervalSec=60
 
 # stdout/stderr -> journald, which timestamps and rotates. The app already
 # prefixes its errors with the route. Read with:
