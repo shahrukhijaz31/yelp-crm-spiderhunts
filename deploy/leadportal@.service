@@ -51,6 +51,11 @@ ExecStart=/usr/bin/node server.js
 
 Restart=always
 RestartSec=2
+# Node exits 143 (128+SIGTERM) when systemd stops it, and systemd would
+# otherwise record that ordinary stop as a failure. A slot left sitting in
+# "failed" after every deploy is noise that hides a real failure when one
+# happens.
+SuccessExitStatus=143
 
 # stdout/stderr -> journald, which timestamps and rotates. The app already
 # prefixes its errors with the route. Read with:

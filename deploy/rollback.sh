@@ -64,6 +64,18 @@ EOF
 
 nginx -t || die "nginx rejected the generated upstream; traffic unchanged."
 systemctl reload nginx
+
+# Same drain as deploy.sh: nginx's old workers still hold keepalive connections
+# to the old port, and killing that backend immediately drops whatever is in
+# flight on them.
+sleep 10
 systemctl stop "leadportal@${LIVE}" || true
 
-log "Rolled back to ${TARGET} (${PREV_SHA})."
+# Move the boot-time enablement with the traffic. Without this the rollback
+# survives only until the next reboot: systemd would start the slot that is no
+# longer serving and leave the live one stopped, and the site would come back
+# up with nothing behind nginx.
+systemctl enable  "leadportal@${TARGET}" >/dev/null 2>&1 || true
+systemctl disable "leadportal@${LIVE}"   >/dev/null 2>&1 || true
+
+log "Rolled back to ${TARGET} (${PREV_SHA}); it is now the slot that starts at boot."
