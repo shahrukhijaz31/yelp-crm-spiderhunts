@@ -205,6 +205,20 @@ curl -fsS --max-time 5 --resolve "${DOMAIN}:443:127.0.0.1" \
   || warn "Health check through nginx did not answer; investigate before the next deploy."
 
 # --- 7. Retire the old slot ------------------------------------------------
+# Drain before stopping. `systemctl reload nginx` starts new workers on the new
+# config, but the OLD workers keep running until their existing connections
+# finish — and those workers still hold keepalive connections to the OLD port.
+# Stopping that backend immediately kills whatever is still in flight on them,
+# which is measurable: an unthrottled probe across a deploy caught exactly one
+# failed request out of 233 at this point in the sequence.
+#
+# 10s comfortably covers a drain here (`keepalive 32` in the upstream, and the
+# slowest normal request is a CSV import at a couple of seconds). The old slot
+# is idle for this window, not serving new traffic — nginx already stopped
+# routing to it — so the wait costs nothing but deploy time.
+log "Draining connections from ${LIVE} before stopping it"
+sleep 10
+
 log "Stopping leadportal@${LIVE}"
 systemctl stop "leadportal@${LIVE}" || true
 systemctl enable "leadportal@${IDLE}" >/dev/null 2>&1 || true
