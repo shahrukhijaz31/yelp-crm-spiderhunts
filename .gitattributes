@@ -1,0 +1,35 @@
+# Normalise line endings in the repository.
+#
+# This repo is developed on Windows (`core.autocrlf=true`) and deployed to
+# Ubuntu. Without this file, a single editor save can commit CRLF into a shell
+# script, and the VPS then fails it with a message that names the wrong problem:
+#
+#   /usr/bin/env: 'bash\r': No such file or directory
+#
+# `* text=auto` normalises to LF in the repository. The explicit `eol=lf` rules
+# below go further and force LF *in the working tree too*, for the files where
+# a CRLF would break something on the server no matter what git thinks.
+
+* text=auto
+
+# Executed by the shell on Linux — a trailing \r breaks the shebang.
+*.sh            text eol=lf
+
+# Parsed by nginx and systemd, both of which treat \r as part of the value.
+*.conf          text eol=lf
+*.service       text eol=lf
+
+# Read by the Prisma CLI and by dotenv; \r ends up inside DATABASE_URL.
+*.prisma        text eol=lf
+.env.example    text eol=lf
+
+# Parsed by Papa Parse; \r in the final column of a header row would break the
+# alias matching in lib/parseLeadsCsv.ts.
+*.csv           text eol=lf
+
+# Binary — never touch.
+*.ico           binary
+*.png           binary
+*.jpg           binary
+*.woff          binary
+*.woff2         binary
