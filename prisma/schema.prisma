@@ -1,0 +1,94 @@
+// Prisma schema for the Leads Portal.
+//
+// The model here mirrors `lib/types.ts` exactly — that file stays the single
+// source of truth for the app, and `lib/leadDb.ts` maps rows onto it. Prisma
+// field names are camelCase (so queries read like the TS type) while the
+// columns are snake_case via `@map`.
+//
+// Generator/datasource shape is Prisma 7: the client is generated into the
+// repo at `lib/generated/prisma`, the connection string lives in
+// `prisma.config.ts`, and the runtime connects through the `@prisma/adapter-pg`
+// driver adapter rather than a bundled query engine.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Mirrors the `CallStatus` union in `lib/types.ts`. The values are the same
+/// snake_case keys the UI already stores, so no translation layer is needed;
+/// the human labels ("Called - No answer") stay in `CALL_STATUS_LABELS`, which
+/// keeps copy changes out of the database.
+enum CallStatus {
+  not_called
+  no_answer
+  voicemail
+  interested
+  not_interested
+  do_not_call
+  bad_number
+
+  @@map("call_status")
+}
+
+model Lead {
+  /// cuid rather than an auto-increment int: leads get referenced from exports
+  /// and (later) external systems, so the id must be safe to hand out and not
+  /// leak row counts.
+  id String @id @default(cuid())
+
+  // --- Scraped fields (match the scraper CSV columns) ---
+  name String
+  /// Never null in the UI — an absent address is the empty string.
+  address String @default("")
+  /// The CSV `categories` column is a list, and the UI renders it as one, so
+  /// it is stored as a Postgres text[] instead of being flattened to a string.
+  categories String[] @default([])
+  /// Nullable to match the type, though `cleanLeads` means stored rows have one.
+  phone   String?
+  website String?
+  rating  Float?
+  owner   String?
+  /// Yelp listing URL — present in the scraper CSV and in the export.
+  url String?
+
+  // --- Agent-owned fields ---
+  status CallStatus @default(not_called)
+  notes  String     @default("")
+  /// Date only: the UI works in `YYYY-MM-DD` strings and never has a time here.
+  callbackDate DateTime? @map("callback_date") @db.Date
+
+  // --- Meeting detail, layered on top of callbackDate (see lib/meetings.ts) ---
+  /// 24-hour `HH:MM`. A string, not a `time` column: it is a label on the
+  /// callback date rather than an instant, and a real time type would invite a
+  /// timezone conversion that must never happen here.
+  meetingTime        String?   @map("meeting_time")
+  meetingAttendees   String?   @map("meeting_attendees")
+  meetingNotes       String    @default("") @map("meeting_notes")
+  meetingCompletedAt DateTime? @map("meeting_completed_at") @db.Date
+
+  // --- Provenance / bookkeeping ---
+  /// Written by server-side duplicate detection. Nothing sets it to true yet —
+  /// today `cleanLeads` drops repeats at ingest — but the column exists so that
+  /// change has somewhere to write without another migration.
+  isDuplicate Boolean @default(false) @map("is_duplicate")
+  /// Which CSV upload a row came from, so an import can be traced or filtered.
+  sourceBatch String?  @map("source_batch")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  /// Indexes follow the queries the UI actually runs: the stat bar and filters
+  /// group by status, the Callbacks/Meetings views range-scan on callbackDate,
+  /// and the import view scopes by batch. There is deliberately no unique
+  /// constraint on phone — duplicate handling is a flag (`isDuplicate`), not a
+  /// database rejection, so a repeat can be surfaced rather than refused.
+  @@index([status])
+  @@index([callbackDate])
+  @@index([sourceBatch])
+  @@index([isDuplicate])
+  @@map("leads")
+}

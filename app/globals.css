@@ -1,26 +1,286 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Two themes, one token set.
+ *
+ * Every colour is a `--c-*` variable defined twice — once per theme — and the
+ * Tailwind theme below only ever *points* at those variables. Components never
+ * name a theme: `bg-surface` is correct in both, so adding a third theme later
+ * means adding one block here and touching nothing else.
+ *
+ * DARK — "graphite & signal red". Neither end is pure (#0D0F14 base, #E9E7E4
+ * text, never #000/#FFF): full-contrast dark UI is what makes eyes ache after
+ * three hours.
+ *
+ * LIGHT — cool slate office palette. Sharper hairlines and near-black cool ink
+ * for legibility under daylight, with the same red accent carried across.
+ *
+ * In both: red is reserved for the accent, the active view and time-critical
+ * state, so no status colour is allowed to compete with it.
+ */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces, from recessed to raised */
+  --c-base: #0d0f14;
+  --c-recessed: #0f1218;
+  --c-surface: #15181f;
+  --c-rail: #1a1e26;
+  --c-hover: #1c212a;
+  --c-on-accent: #0d0f14;
+
+  /* Hairlines */
+  --c-line: #262b34;
+  --c-line-2: #333945;
+
+  /* Text ramp — warm off-white down to dim */
+  --c-fg: #e9e7e4;
+  --c-fg-2: #b3b8c2;
+  --c-fg-3: #7d8593;
+  --c-fg-4: #59616e;
+
+  /* Accent — signal red */
+  --c-accent: #e5484d;
+  --c-accent-2: #ff6b6f;
+  --c-accent-3: #a3282d;
+  --c-accent-soft: #2a1417;
+
+  /* Status hues — deliberately clear of the accent's red */
+  --c-st-neutral: #98a2b3;
+  --c-st-gold: #e3a93f;
+  --c-st-gold-bg: #251e10;
+  --c-st-gold-line: #4a3b18;
+  --c-st-sky: #58a9e6;
+  --c-st-sky-bg: #11212e;
+  --c-st-sky-line: #1f3c52;
+  --c-st-green: #46c48b;
+  --c-st-green-bg: #0f2620;
+  --c-st-green-line: #1d4234;
+  --c-st-orchid: #b87be0;
+  --c-st-orchid-bg: #241a2e;
+  --c-st-orchid-line: #3d2b4d;
+  --c-st-steel: #8a94a3;
+  --c-st-steel-bg: #1b1f27;
+  --c-st-steel-line: #2f353f;
+
+  /* Flags */
+  --c-warn: #e0685f;
+  --c-dup: #97a0e8;
+  --c-dup-bg: #181c2e;
+  --c-dup-line: #2b3154;
+
+  /* Save confirmation wash */
+  --c-saved-flash: color-mix(in srgb, var(--c-st-green) 11%, transparent);
+  --c-saved-flash-hold: color-mix(in srgb, var(--c-st-green) 9%, transparent);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Cool slate rather than flat white — easier on the eye over a full shift.
+     "Recessed" inverts its meaning here: on light, deeper means darker. */
+  --c-base: #eef1f6;
+  --c-recessed: #e7ebf2;
+  --c-surface: #ffffff;
+  --c-rail: #e3e8f1;
+  --c-hover: #eff4fc;
+  --c-on-accent: #ffffff;
+
+  /* Sharper hairlines than the dark theme needs, for crisp column separation */
+  --c-line: #d5dce6;
+  --c-line-2: #b7c1d0;
+
+  /* Near-black cool ink, stepping down to a legible mid grey */
+  --c-fg: #0f1724;
+  --c-fg-2: #384358;
+  --c-fg-3: #5c6878;
+  --c-fg-4: #8a94a4;
+
+  /* Same signal red, darkened so it holds contrast on white */
+  --c-accent: #d1272d;
+  --c-accent-2: #ad1b21;
+  --c-accent-3: #f0b3b5;
+  --c-accent-soft: #fdecec;
+
+  /* Status hues re-picked for light: deep text on a pale tint of the same hue,
+     never the dark theme's colours dropped onto white. */
+  --c-st-neutral: #5c6878;
+  --c-st-gold: #855408;
+  --c-st-gold-bg: #fdf3dc;
+  --c-st-gold-line: #e3c684;
+  --c-st-sky: #14567d;
+  --c-st-sky-bg: #e3f0fb;
+  --c-st-sky-line: #9bc9ea;
+  --c-st-green: #12633c;
+  --c-st-green-bg: #e1f3e8;
+  --c-st-green-line: #8fd0ac;
+  --c-st-orchid: #6a2a8b;
+  --c-st-orchid-bg: #f5e9fc;
+  --c-st-orchid-line: #cda6e4;
+  --c-st-steel: #4a5566;
+  --c-st-steel-bg: #eaeef4;
+  --c-st-steel-line: #b7c1d0;
+
+  /* Flags */
+  --c-warn: #b52d24;
+  --c-dup: #3f47ad;
+  --c-dup-bg: #e9ebfb;
+  --c-dup-line: #b3baef;
+
+  /* The wash needs more weight to register against white */
+  --c-saved-flash: color-mix(in srgb, var(--c-st-green) 20%, transparent);
+  --c-saved-flash-hold: color-mix(in srgb, var(--c-st-green) 16%, transparent);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-base: var(--c-base);
+  --color-recessed: var(--c-recessed);
+  --color-surface: var(--c-surface);
+  --color-rail: var(--c-rail);
+  --color-hover: var(--c-hover);
+  --color-on-accent: var(--c-on-accent);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-line: var(--c-line);
+  --color-line-2: var(--c-line-2);
+
+  --color-fg: var(--c-fg);
+  --color-fg-2: var(--c-fg-2);
+  --color-fg-3: var(--c-fg-3);
+  --color-fg-4: var(--c-fg-4);
+
+  --color-accent: var(--c-accent);
+  --color-accent-2: var(--c-accent-2);
+  --color-accent-3: var(--c-accent-3);
+  --color-accent-soft: var(--c-accent-soft);
+
+  --color-st-neutral: var(--c-st-neutral);
+  --color-st-gold: var(--c-st-gold);
+  --color-st-gold-bg: var(--c-st-gold-bg);
+  --color-st-gold-line: var(--c-st-gold-line);
+  --color-st-sky: var(--c-st-sky);
+  --color-st-sky-bg: var(--c-st-sky-bg);
+  --color-st-sky-line: var(--c-st-sky-line);
+  --color-st-green: var(--c-st-green);
+  --color-st-green-bg: var(--c-st-green-bg);
+  --color-st-green-line: var(--c-st-green-line);
+  --color-st-orchid: var(--c-st-orchid);
+  --color-st-orchid-bg: var(--c-st-orchid-bg);
+  --color-st-orchid-line: var(--c-st-orchid-line);
+  --color-st-steel: var(--c-st-steel);
+  --color-st-steel-bg: var(--c-st-steel-bg);
+  --color-st-steel-line: var(--c-st-steel-line);
+
+  --color-warn: var(--c-warn);
+  --color-dup: var(--c-dup);
+  --color-dup-bg: var(--c-dup-bg);
+  --color-dup-line: var(--c-dup-line);
+
+  /* Type */
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-instrument);
+  --font-mono: var(--font-plex-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--c-base);
+  color: var(--c-fg);
+  font-family: var(--font-instrument), system-ui, sans-serif;
+}
+
+/* Native form controls need telling, or they render light-on-light. */
+select option {
+  background: var(--c-rail);
+  color: var(--c-fg);
+}
+
+/* The date picker indicator is black-on-dark by default; only dark needs it. */
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+}
+
+/* Every number in this app is meant to be compared down a column. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Headline numerals: Fraunces dialled soft and slightly wonky. */
+.display-num {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 40;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+.eyebrow {
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--c-fg-3);
+}
+
+/* Sticky table header sits above row content while scrolling. */
+.lead-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/*
+ * Save confirmation: a green wash that fades off the row. Applied to the cells
+ * rather than the <tr>, because the working columns paint their own recessed
+ * background over anything set on the row itself.
+ */
+@keyframes saved-flash {
+  0% {
+    background-color: var(--c-saved-flash);
+  }
+  35% {
+    background-color: var(--c-saved-flash-hold);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.row-saved > td {
+  animation: saved-flash 1.8s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-saved > td {
+    animation-duration: 0.01ms;
+  }
+}
+
+/* Warning flags are annotations, not chips: no fill, dashed underline. */
+.flag-underline {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+/*
+ * Theme-toggle icons swap in CSS rather than from React state — no mounted
+ * guard, no hydration mismatch, and the hidden label is genuinely hidden from
+ * screen readers too.
+ */
+.theme-when-light {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-when-dark {
+  display: none;
+}
+
+:root[data-theme="light"] .theme-when-light {
+  display: revert;
+}
+
+* {
+  scrollbar-color: var(--c-line-2) transparent;
 }

@@ -1,0 +1,232 @@
+"use client";
+
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useLeads } from "./LeadsProvider";
+import { describeCleaning } from "@/lib/cleanLeads";
+import type { Lead } from "@/lib/types";
+
+const EXPECTED_COLUMNS = [
+  "name",
+  "address",
+  "categories",
+  "phone_number",
+  "website",
+  "rating",
+  "owner",
+  "url",
+];
+
+type Notice = { tone: "ok" | "error"; message: string; lines?: string[] };
+
+/**
+ * The Import view. The CSV button used to be crammed into the filter rail;
+ * given its own screen it can explain the expected columns and report what
+ * happened, which matters when someone drops in the wrong export.
+ *
+ * Parsing still lives in `lib/parseLeadsCsv`, but it now runs on the server:
+ * the file is posted to `POST /api/leads/upload`, which parses it, writes the
+ * rows to Postgres and hands back the stored leads. The component's job is the
+ * file handoff and the report, exactly as before.
+ */
+
+/** What `POST /api/leads/upload` returns on success. */
+interface UploadResult {
+  leads: Lead[];
+  imported: number;
+  removedNoPhone: number;
+  removedDuplicates: number;
+  warnings: string[];
+}
+export default function ImportPanel() {
+  const { replaceLeads, leads } = useLeads();
+  const router = useRouter();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+
+  async function handleFile(file: File) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch("/api/leads/upload", { method: "POST", body });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        // The route explains itself — a bad header row, an empty file, or
+        // Postgres being unreachable all come back with a usable message.
+        setNotice({
+          tone: "error",
+          message: `Could not import ${file.name}: ${payload.message ?? response.statusText}`,
+          lines: payload.warnings,
+        });
+        return;
+      }
+
+      const result = payload as UploadResult;
+      replaceLeads(result.leads);
+
+      // "Imported 120 leads. 15 duplicates and 8 missing numbers were
+      // automatically filtered out." — the second sentence only appears when
+      // something actually was.
+      const cleaned = describeCleaning({
+        leads: result.leads,
+        removedNoPhone: result.removedNoPhone,
+        removedDuplicates: result.removedDuplicates,
+      });
+      setNotice({
+        tone: "ok",
+        message: `Imported ${result.imported} lead${result.imported === 1 ? "" : "s"}.${
+          cleaned ? ` ${cleaned}` : ""
+        }`,
+        lines: result.warnings,
+      });
+    } catch {
+      setNotice({
+        tone: "error",
+        message: `Could not upload ${file.name}. Check your connection and try again.`,
+      });
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <header>
+        <h1 className="display-num text-[26px] leading-none text-fg">Import leads</h1>
+        <p className="mt-2.5 text-[13px] leading-relaxed text-fg-3">
+          Load a CSV from the scraper. The file is saved to the database and
+          replaces the current worklist. Rows without a dialable phone number,
+          and repeats of a row already in the file, are removed automatically.
+        </p>
+      </header>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void handleFile(file);
+        }}
+      />
+
+      <div
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          const file = event.dataTransfer.files?.[0];
+          if (file) void handleFile(file);
+        }}
+        className={`flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors ${
+          dragging ? "border-accent bg-accent-soft/40" : "border-line-2 bg-surface"
+        }`}
+      >
+        <UploadIcon />
+        <div>
+          <p className="text-[14px] font-medium text-fg">
+            Drop a CSV here, or choose a file
+          </p>
+          <p className="mt-1 text-[12.5px] text-fg-4">
+            Currently holding {leads.length} lead{leads.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-60"
+        >
+          {busy ? "Uploading…" : "Choose CSV file"}
+        </button>
+      </div>
+
+      {notice && (
+        <div
+          className={`rounded-xl border px-4 py-3 ${
+            notice.tone === "ok"
+              ? "border-st-green-line bg-st-green-bg"
+              : "border-accent-3 bg-accent-soft"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <p
+              className={`text-[13px] ${
+                notice.tone === "ok" ? "text-st-green" : "text-accent-2"
+              }`}
+            >
+              {notice.message}
+            </p>
+            {notice.tone === "ok" && (
+              <button
+                type="button"
+                onClick={() => router.push("/")}
+                className="shrink-0 text-[12px] font-medium text-fg-2 underline underline-offset-4 hover:text-fg"
+              >
+                Go to worklist
+              </button>
+            )}
+          </div>
+          {notice.lines && notice.lines.length > 0 && (
+            <ul className="mt-2 flex flex-col gap-1 border-t border-line pt-2">
+              {notice.lines.map((line) => (
+                <li key={line} className="text-[12px] text-fg-3">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      <section className="rounded-xl border border-line bg-surface px-5 py-4">
+        <h2 className="eyebrow">Expected columns</h2>
+        <ul className="mt-3 flex flex-wrap gap-1.5">
+          {EXPECTED_COLUMNS.map((column) => (
+            <li
+              key={column}
+              className="rounded border border-line bg-recessed px-2 py-1 font-mono text-[11.5px] text-fg-2"
+            >
+              {column}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-[12.5px] leading-relaxed text-fg-4">
+          Common aliases (<span className="font-mono">phone</span>,{" "}
+          <span className="font-mono">business_name</span>,{" "}
+          <span className="font-mono">link</span>) are accepted; unrecognised
+          columns are ignored with a warning. Rows without a name are skipped,
+          and a phone with fewer than seven digits counts as no phone at all, so
+          that row is filtered out rather than imported.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-7 w-7 text-fg-4">
+      <path
+        d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
