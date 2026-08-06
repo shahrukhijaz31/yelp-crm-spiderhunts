@@ -92,3 +92,48 @@ export function displayWebsite(website: string): string {
     .replace(/^www\./i, "")
     .replace(/\/$/, "");
 }
+
+/**
+ * A scraped website value as something safe to put in `href`, or null if it
+ * cannot be one.
+ *
+ * The scraper emits whatever Yelp shows, which is usually a bare domain —
+ * `acecarspa.com`. A browser reads that as a *relative* path, so the link
+ * opened `https://leadportal.…/acecarspa.com` instead of the business's site.
+ * Anything without an `http(s)://` scheme gets one here.
+ *
+ * The null return is not just tidiness. This string comes from a third-party
+ * page and lands in an anchor, so `javascript:` (and `data:`) must not survive
+ * the trip — a value crafted into a listing would otherwise run when an agent
+ * clicked the link. Only http and https get a URL back; everything else is
+ * rendered as plain text by the caller.
+ *
+ * Done at render rather than at ingest so the ~thousands of rows already in the
+ * table are fixed too, without a migration or a re-scrape.
+ */
+export function websiteHref(website: string): string | null {
+  const trimmed = website.trim();
+  if (!trimmed) return null;
+
+  // A leading `word:` is only a scheme if there is no dot in the word —
+  // otherwise `example.com:8080` reads as one, and a host:port would be both
+  // rejected as a foreign scheme and left without the `https://` it needs.
+  const candidate = /^([a-z][a-z0-9+.-]*):/i.exec(trimmed)?.[1];
+  const scheme = candidate && !candidate.includes(".") ? candidate : null;
+  if (scheme && !/^https?$/i.test(scheme)) return null;
+
+  // Leading slashes stripped so a protocol-relative `//example.com` does not
+  // become `https:///example.com`.
+  const absolute = scheme ? trimmed : `https://${trimmed.replace(/^\/+/, "")}`;
+
+  try {
+    const url = new URL(absolute);
+    // Belt and braces: a scheme that slipped past the check above (say a
+    // leading-dot oddity) still cannot leave here as anything but http(s).
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    // Not a URL at all — "n/a" survives `nullable()`, "call for details" does
+    // not parse. Better as unlinked text than a link that goes nowhere.
+    return null;
+  }
+}

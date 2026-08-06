@@ -6,7 +6,7 @@ import CallbackCell from "./CallbackCell";
 import NotesCell from "./NotesCell";
 import StatusSelect from "./StatusSelect";
 import WhatsAppLink from "./WhatsAppLink";
-import { callbackState, displayWebsite } from "@/lib/leadUtils";
+import { callbackState, displayWebsite, websiteHref } from "@/lib/leadUtils";
 import type { Lead, LeadEditableFields } from "@/lib/types";
 
 /** How long the green confirmation wash and the "Saved" chip stay up. */
@@ -96,6 +96,10 @@ export default function LeadRow({
         ? "border-l-accent"
         : "border-l-transparent";
 
+  // The scraper stores whatever Yelp displayed, usually a bare domain, which is
+  // a relative path to a browser. Null means it is not a linkable address.
+  const websiteUrl = lead.website ? websiteHref(lead.website) : null;
+
   const dirty = draft !== null;
 
   return (
@@ -157,18 +161,27 @@ export default function LeadRow({
       </td>
 
       <td className="px-3 py-2">
-        {lead.website ? (
+        {!lead.website ? (
+          <Flag>No website</Flag>
+        ) : websiteUrl ? (
           <a
-            href={lead.website}
+            href={websiteUrl}
             target="_blank"
             rel="noopener noreferrer"
-            title={lead.website}
+            title={websiteUrl}
             className="block truncate text-[12.5px] text-fg-2 underline decoration-fg-4/40 underline-offset-2 transition-colors hover:text-fg hover:decoration-fg-2"
           >
             {displayWebsite(lead.website)}
           </a>
         ) : (
-          <Flag>No website</Flag>
+          // Scraped text that is not a usable address. Still shown — an agent
+          // may recognise it — but not as a link that would go nowhere.
+          <span
+            title={lead.website}
+            className="block truncate text-[12.5px] text-fg-4"
+          >
+            {displayWebsite(lead.website)}
+          </span>
         )}
       </td>
 
