@@ -78,8 +78,14 @@ log "Live slot: ${LIVE}    Deploying into: ${IDLE} (port ${IDLE_PORT})"
 # --- 2. Fetch the requested revision ---------------------------------------
 log "Fetching ${GIT_REF}"
 git -C "$REPO_DIR" fetch --prune origin
-git -C "$REPO_DIR" checkout -q --detach "origin/${GIT_REF}" 2>/dev/null \
-  || git -C "$REPO_DIR" checkout -q --detach "$GIT_REF"
+# -f, and a hard reset afterwards: this checkout is a build artefact, not
+# somewhere anyone should be editing. Without it, one stray local change — an
+# scp'd hotfix, a half-finished experiment — aborts every future deploy with
+# "local changes would be overwritten". Anything genuinely worth keeping belongs
+# in a commit, so discarding here is the correct behaviour rather than a risk.
+git -C "$REPO_DIR" checkout -qf --detach "origin/${GIT_REF}" 2>/dev/null \
+  || git -C "$REPO_DIR" checkout -qf --detach "$GIT_REF"
+git -C "$REPO_DIR" reset -q --hard HEAD
 SHA="$(git -C "$REPO_DIR" rev-parse --short HEAD)"
 log "Building ${SHA} ($(git -C "$REPO_DIR" log -1 --pretty=%s))"
 
