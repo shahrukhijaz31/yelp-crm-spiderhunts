@@ -76,10 +76,15 @@ cd "$REPO_DIR"
 set -a; . "$ENV_FILE"; set +a
 
 log "Installing dependencies (npm ci)"
-# `npm ci` needs devDependencies: TypeScript, Tailwind and the Prisma CLI all
-# run at build time. The result never ships — `output: standalone` traces only
-# what the running server actually imports.
-npm ci --no-audit --no-fund
+# --include=dev is REQUIRED, not decorative. The env sourced just above sets
+# NODE_ENV=production, and npm silently omits devDependencies in that case —
+# which here means no @tailwindcss/postcss, no typescript and no prisma CLI, so
+# the build fails partway through on a missing PostCSS plugin.
+#
+# Those dev packages never reach the server that runs: `output: standalone`
+# traces only what the running server actually imports, and the built release is
+# copied out of .next/standalone, not out of node_modules.
+npm ci --include=dev --no-audit --no-fund
 
 log "Generating Prisma Client"
 npx prisma generate
