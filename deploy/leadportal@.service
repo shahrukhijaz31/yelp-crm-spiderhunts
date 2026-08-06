@@ -1,0 +1,79 @@
+# Lead Portal — systemd template unit, one instance per colour slot.
+# /etc/systemd/system/leadportal@.service
+#
+#   systemctl start leadportal@blue     (port 3031)
+#   systemctl start leadportal@green    (port 3032)
+#
+# A template rather than a single unit because deploys are blue/green: the new
+# release is started and health-checked on its own port while the old one is
+# still serving, and nginx only points at it once it answers. One unit would
+# mean stop-then-start — a visible outage on every deploy.
+#
+# systemd rather than PM2: systemd is already PID 1 on this box, already starts
+# things at boot, already has journald, and provides the sandboxing below. PM2
+# would be a second supervisor needing its own unit to survive a reboot.
+
+[Unit]
+Description=Lead Portal (Next.js) — %i slot
+After=network-online.target postgresql.service
+Wants=network-online.target
+# After, not Requires: this shares a PostgreSQL cluster with four other
+# databases. A brief Postgres blip should let the app stay up and serve its own
+# 503 from /api/health, not have systemd tear it down.
+After=postgresql.service
+
+[Service]
+Type=simple
+User=leadportal
+Group=leadportal
+
+# Next's standalone server.js resolves everything relative to its own directory.
+WorkingDirectory=/var/www/vhosts/leadportal/%i/.next/standalone
+
+# Shared config first, then the per-slot PORT. Later files win, which is what
+# lets both slots share one DATABASE_URL on different ports.
+EnvironmentFile=/etc/leadportal/env
+EnvironmentFile=/etc/leadportal/slot-%i.env
+
+ExecStart=/usr/bin/node server.js
+
+Restart=always
+RestartSec=2
+# Five failures in a minute is a broken release, not a flaky one. Stop
+# restarting so `systemctl is-active` tells the truth and the deploy aborts.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# stdout/stderr -> journald, which timestamps and rotates. The app already
+# prefixes its errors with the route. Read with:
+#   journalctl -u leadportal@blue -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=leadportal-%i
+
+# --- Hardening -------------------------------------------------------------
+# The process needs exactly three things: read its release directory, connect
+# to Postgres, listen on a loopback port. This matters more than usual here —
+# nine other sites share this kernel.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# ProtectSystem=strict makes the filesystem read-only; Next still writes its
+# runtime cache, so that one directory is punched back out.
+ReadWritePaths=/var/www/vhosts/leadportal/%i/.next
+
+# The box has 47GB, but a runaway render should kill this process rather than
+# pressure the nine other tenants.
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

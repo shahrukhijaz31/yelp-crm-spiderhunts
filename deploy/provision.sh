@@ -1,208 +1,224 @@
 #!/usr/bin/env bash
 #
-# Lead Portal — one-time VPS bootstrap. Ubuntu 22.04 / 24.04.
+# Lead Portal — one-time setup on the Contabo VPS (169.58.34.205).
 #
-#   scp deploy/provision.sh root@169.58.34.205:/root/
-#   ssh root@169.58.34.205 'bash /root/provision.sh'
+#   ssh leadportal 'bash /root/deploy/provision.sh'
 #
-# Idempotent: safe to re-run. It installs nothing it finds already present and
-# never overwrites the password file, the certificate or the env file once they
-# exist, so a re-run cannot silently rotate a credential out from under you.
+# THIS SERVER IS NOT EMPTY. It runs ~10 live sites (leadquasar.com,
+# spideychat, xiangqiplay.online, zayrclothing.com, maison-fayard, saleshandy,
+# bvr-preview) behind one nginx, on one PostgreSQL 17 cluster. Everything below
+# is written to add a tenant beside them and touch nothing that already exists.
 #
-# What it does NOT do: check out the code or start the app. That is deploy.sh,
-# so that the first deploy and every later one take exactly the same path and
-# the deploy script is never a special case on day one.
+# What this script deliberately DOES NOT do, and why:
+#   * No `apt-get install nginx/postgresql/nodejs/certbot` — all four are
+#     already present (nginx 1.24.0, PostgreSQL 17.10, Node v22.23.1,
+#     certbot 2.9.0). Installing the `postgresql` metapackage in particular
+#     would add a SECOND cluster on port 5433 beside the live one.
+#   * No `default_server` and no `server_name _` — nothing currently claims
+#     default on :80/:443, and taking it would silently capture every request
+#     for every hostname that does not match another vhost.
+#   * No `rm /etc/nginx/sites-enabled/default` — it does not exist here.
+#   * No `ufw --force enable` and no rule changes — ufw is already active with
+#     22/80/443 open, which is exactly what is needed.
+#   * No changes to any existing vhost, database, or user.
+#
+# Idempotent: safe to re-run. Never overwrites an existing secret.
 
 set -euo pipefail
 
-APP_NAME="lead-portal"
-APP_USER="leadportal"
-APP_ROOT="/var/www/${APP_NAME}"
-ENV_DIR="/etc/${APP_NAME}"
-CERT_DIR="/etc/ssl/${APP_NAME}"
-NODE_MAJOR=22
+SITE="leadportal"
+APP_ROOT="/var/www/vhosts/${SITE}"
+ENV_DIR="/etc/${SITE}"
 DB_NAME="lead_portal"
 DB_USER="leadportal"
-SERVER_IP="169.58.34.205"
+DOMAIN="leadportal.169-58-34-205.sslip.io"
+WEBROOT="/var/www/certbot"
+BLUE_PORT=3031
+GREEN_PORT=3032
 
-log() { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
+log()  { printf '\n\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
+die()  { printf '\n\033[1;31m[fail]\033[0m %s\n' "$*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || { echo "Run as root." >&2; exit 1; }
+[[ $EUID -eq 0 ]] || die "Run as root."
 
-# --- Packages --------------------------------------------------------------
-log "Installing base packages"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq \
-  curl ca-certificates gnupg git rsync ufw \
-  nginx apache2-utils \
-  postgresql postgresql-contrib \
-  openssl
+# --- Guard rails -----------------------------------------------------------
+# Refuse to run if the server is not the one this was written against, rather
+# than adapting silently and half-configuring something.
+log "Verifying preconditions"
 
-# Node 22 LTS. Ubuntu's own `nodejs` package is far too old — Next.js 16
-# requires >= 20.9, and 24.04 ships 18.x.
-if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed 's/v\([0-9]*\).*/\1/')" -lt 20 ]]; then
-  log "Installing Node.js ${NODE_MAJOR}.x from NodeSource"
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -
-  apt-get install -y -qq nodejs
-else
-  log "Node $(node -v) already present, leaving it alone"
-fi
+command -v nginx   >/dev/null || die "nginx not found — this script expects the existing install."
+command -v psql    >/dev/null || die "psql not found — this script expects PostgreSQL 17 already running."
+command -v certbot >/dev/null || die "certbot not found."
+command -v node    >/dev/null || die "node not found."
+
+NODE_MAJOR="$(node -v | sed 's/v\([0-9]*\).*/\1/')"
+[[ "$NODE_MAJOR" -ge 20 ]] || die "Node $(node -v) is too old; Next.js 16 needs >= 20.9."
+echo "  node $(node -v), nginx $(nginx -v 2>&1 | sed 's/.*\///'), $(psql --version)"
+
+for p in "$BLUE_PORT" "$GREEN_PORT"; do
+  ss -tln | grep -q ":${p} " && die "Port ${p} is already in use. Pick another pair and update deploy.sh."
+done
+echo "  ports ${BLUE_PORT}/${GREEN_PORT} free"
+
+getent hosts "$DOMAIN" >/dev/null || die "${DOMAIN} does not resolve. sslip.io may be down."
+echo "  ${DOMAIN} resolves"
 
 # --- Service account -------------------------------------------------------
-# A system account with no login shell and no home: the app never needs to be
-# a person, and a compromised render process should not get a shell.
-if ! id -u "$APP_USER" >/dev/null 2>&1; then
-  log "Creating service account ${APP_USER}"
-  adduser --system --group --no-create-home --shell /usr/sbin/nologin "$APP_USER"
+# Matches the existing per-site convention (leadquasar, zayr, spideychat):
+# a system account, home at the vhost root, no login shell.
+if ! id -u "$DB_USER" >/dev/null 2>&1; then
+  log "Creating service account ${DB_USER}"
+  adduser --system --group --home "$APP_ROOT" --shell /usr/sbin/nologin "$DB_USER"
 else
-  log "Service account ${APP_USER} already exists"
+  log "Service account ${DB_USER} already exists"
 fi
 
-# --- Directories -----------------------------------------------------------
 log "Creating ${APP_ROOT}"
-mkdir -p "$APP_ROOT"/{releases,blue,green,repo}
-chown -R "${APP_USER}:${APP_USER}" "$APP_ROOT"
-# 750: the service account and root can read it, nobody else on the box can.
+mkdir -p "${APP_ROOT}"/{repo,blue,green}
+chown -R "${DB_USER}:${DB_USER}" "$APP_ROOT"
 chmod 750 "$APP_ROOT"
 
-# --- PostgreSQL ------------------------------------------------------------
-log "Configuring PostgreSQL"
-systemctl enable --now postgresql
+# --- Database on the EXISTING cluster --------------------------------------
+log "Configuring database on the existing PostgreSQL 17 cluster"
+mkdir -p "$ENV_DIR"; chmod 700 "$ENV_DIR"
 
 DB_PASS_FILE="${ENV_DIR}/db-password"
-mkdir -p "$ENV_DIR"
-chmod 700 "$ENV_DIR"
-
 if [[ ! -f "$DB_PASS_FILE" ]]; then
-  # Generated, not chosen: this password is only ever read by the env file, so
-  # there is no reason for a human to know it or to reuse one.
-  openssl rand -base64 32 | tr -d '/+=' | head -c 32 > "$DB_PASS_FILE"
+  openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32 > "$DB_PASS_FILE"
   chmod 600 "$DB_PASS_FILE"
-  log "Generated a database password at ${DB_PASS_FILE}"
+  log "Generated database password (alphanumeric only, so it needs no URL-encoding)"
 else
   log "Reusing existing database password"
 fi
 DB_PASS="$(cat "$DB_PASS_FILE")"
 
-# A dedicated role that owns only this database — not the postgres superuser.
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
   sudo -u postgres psql -qc "CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';"
   log "Created role ${DB_USER}"
 else
   sudo -u postgres psql -qc "ALTER ROLE ${DB_USER} PASSWORD '${DB_PASS}';"
-  log "Updated password for existing role ${DB_USER}"
+  log "Updated password for role ${DB_USER}"
 fi
 
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1; then
   sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
-  log "Created database ${DB_NAME} owned by ${DB_USER}"
+  log "Created database ${DB_NAME} (alongside spideychat, leadquasar, zayr_commerce, saleshandy)"
 else
   log "Database ${DB_NAME} already exists"
 fi
 
-# Prisma needs CREATE on the public schema to apply migrations. On PostgreSQL
-# 15+ the public schema is no longer world-writable, so this is required.
+# PostgreSQL 15+ no longer grants CREATE on public to everyone; Prisma's
+# migrations need it.
 sudo -u postgres psql -q -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
 
-# --- Application environment ----------------------------------------------
-# Postgres listens on loopback only by default on Ubuntu; nothing here changes
-# that, so the database is not reachable from the internet at all.
+# --- Runtime environment ---------------------------------------------------
 if [[ ! -f "${ENV_DIR}/env" ]]; then
   log "Writing ${ENV_DIR}/env"
   cat > "${ENV_DIR}/env" <<EOF
-# Lead Portal — shared runtime environment. Read by every systemd slot.
-# Owned by root, mode 600: the app user cannot read it, systemd injects it.
+# Lead Portal — runtime environment, injected by systemd. root:root 0600.
 NODE_ENV=production
-# Bind to loopback only. nginx is the sole way in; without this the Node
-# process would be reachable directly on the public IP, bypassing Basic Auth.
+# Loopback only: nginx is the sole way in, so the Basic Auth in front of it
+# cannot be bypassed by connecting to the port directly.
 HOSTNAME=127.0.0.1
-DATABASE_URL=postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?schema=public&connection_limit=10
+# connection_limit caps Prisma's pool. Default is (cpus*2+1) = 25 here, and with
+# two slots briefly overlapping during a deploy that is 50 connections from this
+# app alone — against a cluster shared with four other databases.
+DATABASE_URL=postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?schema=public&connection_limit=8
 EOF
   chmod 600 "${ENV_DIR}/env"
 else
-  warn "${ENV_DIR}/env already exists — left untouched. Check DATABASE_URL matches ${DB_PASS_FILE}."
+  warn "${ENV_DIR}/env exists — left untouched."
 fi
 
-log "Writing per-slot port files"
-printf 'PORT=3001\n' > "${ENV_DIR}/slot-blue.env"
-printf 'PORT=3002\n' > "${ENV_DIR}/slot-green.env"
+printf 'PORT=%s\n' "$BLUE_PORT"  > "${ENV_DIR}/slot-blue.env"
+printf 'PORT=%s\n' "$GREEN_PORT" > "${ENV_DIR}/slot-green.env"
 chmod 600 "${ENV_DIR}"/slot-*.env
 
 # --- systemd ---------------------------------------------------------------
 log "Installing systemd template unit"
-install -m 644 "$(dirname "$0")/lead-portal@.service" /etc/systemd/system/lead-portal@.service 2>/dev/null \
-  || warn "lead-portal@.service not next to this script — copy it to /etc/systemd/system/ manually"
+install -m 644 "$(dirname "$0")/leadportal@.service" /etc/systemd/system/leadportal@.service
 systemctl daemon-reload
 
-# --- TLS -------------------------------------------------------------------
-# Self-signed, because Let's Encrypt will not issue for a bare IP address.
-# This gets the Basic Auth password off the wire; it does not prove identity.
-mkdir -p "$CERT_DIR"
-if [[ ! -f "${CERT_DIR}/privkey.pem" ]]; then
-  log "Generating a self-signed certificate for ${SERVER_IP} (10 years)"
-  openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
-    -keyout "${CERT_DIR}/privkey.pem" \
-    -out "${CERT_DIR}/fullchain.pem" \
-    -subj "/CN=${SERVER_IP}" \
-    -addext "subjectAltName=IP:${SERVER_IP}" 2>/dev/null
-  chmod 600 "${CERT_DIR}/privkey.pem"
-  chmod 644 "${CERT_DIR}/fullchain.pem"
-else
-  log "Certificate already present, leaving it alone"
-fi
-
 # --- Basic Auth ------------------------------------------------------------
-HTPASSWD=/etc/nginx/lead-portal.htpasswd
+HTPASSWD="/etc/nginx/${SITE}.htpasswd"
 if [[ ! -f "$HTPASSWD" ]]; then
+  command -v htpasswd >/dev/null || { apt-get update -qq && apt-get install -y -qq apache2-utils; }
   BASIC_USER="agent"
-  BASIC_PASS="$(openssl rand -base64 18 | tr -d '/+=' | head -c 18)"
+  BASIC_PASS="$(openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | head -c 18)"
   htpasswd -bcB "$HTPASSWD" "$BASIC_USER" "$BASIC_PASS" >/dev/null 2>&1
-  chown root:www-data "$HTPASSWD"
-  chmod 640 "$HTPASSWD"
-  printf '\n\033[1;33m  LOGIN: %s / %s\033[0m\n' "$BASIC_USER" "$BASIC_PASS"
-  printf '  Write this down now — it is bcrypt-hashed in %s and cannot be recovered.\n' "$HTPASSWD"
-  printf '  Add more users later with: htpasswd -B %s <name>\n\n' "$HTPASSWD"
+  chown root:www-data "$HTPASSWD"; chmod 640 "$HTPASSWD"
+  printf '\n\033[1;33m  PORTAL LOGIN: %s / %s\033[0m\n' "$BASIC_USER" "$BASIC_PASS"
+  printf '  Write this down — it is bcrypt-hashed and cannot be recovered.\n\n'
 else
   log "Basic Auth file already exists, leaving it alone"
 fi
 
-# --- nginx -----------------------------------------------------------------
-log "Installing nginx vhost"
-SRC="$(dirname "$0")/nginx"
-install -m 644 "${SRC}/lead-portal.conf" /etc/nginx/sites-available/lead-portal
-install -m 644 "${SRC}/lead-portal-upstream.conf" /etc/nginx/conf.d/lead-portal-upstream.conf
-ln -sfn /etc/nginx/sites-available/lead-portal /etc/nginx/sites-enabled/lead-portal
+# --- nginx: HTTP only, so certbot can issue -------------------------------
+# Two-stage on purpose: the TLS block cannot be installed before the
+# certificate exists, because nginx fails to start when ssl_certificate points
+# at a missing file — and that would take down all ten sites, not just this one.
+log "Installing temporary HTTP-only vhost for ACME validation"
+cat > "/etc/nginx/sites-available/${SITE}" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN};
+    location /.well-known/acme-challenge/ { root ${WEBROOT}; }
+    location / { return 200 'provisioning\n'; add_header Content-Type text/plain; }
+}
+EOF
+ln -sfn "/etc/nginx/sites-available/${SITE}" "/etc/nginx/sites-enabled/${SITE}"
 
-# Ubuntu's default vhost also claims default_server on :80, which collides.
-rm -f /etc/nginx/sites-enabled/default
-
-nginx -t
-systemctl enable nginx
+# If the config is bad, unlink before dying. Leaving a broken vhost enabled
+# would not break nginx now (it is still running the old config) but would make
+# the NEXT reload fail — for whoever runs it, on whichever of the ten sites they
+# were actually trying to change. That is a booby trap, not an error.
+if ! nginx -t 2>&1; then
+  rm -f "/etc/nginx/sites-enabled/${SITE}"
+  die "nginx config test failed. Vhost removed; other sites untouched."
+fi
 systemctl reload nginx
 
-# --- Firewall --------------------------------------------------------------
-log "Configuring ufw"
-ufw allow OpenSSH
-ufw allow 80/tcp
-ufw allow 443/tcp
-# 3001/3002 are deliberately NOT opened: the app slots bind to 127.0.0.1 and
-# must only be reachable through nginx. 5432 stays closed for the same reason.
-ufw --force enable
-ufw status verbose
+log "Requesting a Let's Encrypt certificate for ${DOMAIN}"
+# webroot, not --nginx: the nginx plugin rewrites config files, and on a box
+# with ten vhosts that is a blast radius worth avoiding. This is the same
+# method the existing saleshandy-sslip site uses.
+if [[ ! -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
+  certbot certonly --webroot -w "$WEBROOT" -d "$DOMAIN" \
+    --non-interactive --agree-tos --register-unsafely-without-email \
+    || die "Certificate issuance failed. The HTTP vhost is in place; fix and re-run."
+else
+  log "Certificate already exists"
+fi
+
+# --- nginx: the real vhost -------------------------------------------------
+log "Installing the TLS vhost"
+cp "/etc/nginx/sites-available/${SITE}" "/tmp/${SITE}.http-only.bak"
+install -m 644 "$(dirname "$0")/nginx/leadportal.conf" "/etc/nginx/sites-available/${SITE}"
+install -m 644 "$(dirname "$0")/nginx/leadportal-upstream.conf" "/etc/nginx/conf.d/${SITE}-upstream.conf"
+
+# Same reasoning as above: revert to the known-good HTTP-only vhost rather than
+# leaving a config that will fail somebody else's reload later.
+if ! nginx -t 2>&1; then
+  cp "/tmp/${SITE}.http-only.bak" "/etc/nginx/sites-available/${SITE}"
+  rm -f "/etc/nginx/conf.d/${SITE}-upstream.conf"
+  die "TLS vhost failed validation. Reverted to the HTTP-only vhost; other sites untouched."
+fi
+systemctl reload nginx
 
 log "Provisioning complete."
 cat <<EOF
 
-Next: deploy the application.
+  URL:       https://${DOMAIN}
+  App dir:   ${APP_ROOT}
+  Slots:     blue=${BLUE_PORT}  green=${GREEN_PORT}
+  Database:  ${DB_NAME} (role ${DB_USER}) on the existing PG 17 cluster
 
-  ssh root@${SERVER_IP}
-  bash ${APP_ROOT}/repo/deploy/deploy.sh        # after the first clone
+  Untouched: every other vhost, database, and the firewall.
 
-The first deploy needs the repository present:
-
-  git clone <repo-url> ${APP_ROOT}/repo
+Next:
+  git clone <repo> ${APP_ROOT}/repo
   bash ${APP_ROOT}/repo/deploy/deploy.sh
 
 EOF
