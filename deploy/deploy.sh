@@ -26,6 +26,25 @@
 
 set -euo pipefail
 
+# --- 0. Run from a copy, never from the working tree ------------------------
+# Step 2 does `git checkout`, which rewrites the files in this repository —
+# including THIS script. bash does not read a script into memory up front; it
+# reads lazily and remembers a byte offset. Replacing the file underneath a
+# running shell therefore makes it resume at that offset in the NEW file, which
+# silently executes the wrong lines — that is exactly how a deploy ended up
+# running the previous commit's `npm ci` and building without devDependencies.
+#
+# Copying to a temp file and re-exec'ing pins the logic for the whole run.
+if [[ "${DEPLOY_PINNED:-}" != "1" ]]; then
+  _pinned="$(mktemp /tmp/leadportal-deploy.XXXXXX.sh)"
+  cat "$0" > "$_pinned"
+  chmod +x "$_pinned"
+  export DEPLOY_PINNED=1
+  trap 'rm -f "$_pinned"' EXIT
+  bash "$_pinned" "$@"
+  exit $?
+fi
+
 SITE="leadportal"
 APP_USER="leadportal"
 APP_ROOT="/var/www/vhosts/${SITE}"
