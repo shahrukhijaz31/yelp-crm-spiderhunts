@@ -73,12 +73,20 @@ function normaliseAddress(address: string): string {
     .join(" ");
 }
 
+/** The only fields identity is derived from — a database row satisfies it. */
+export type LeadIdentity = Pick<Lead, "name" | "address" | "phone">;
+
 /**
  * Identity keys for one lead. A lead is a duplicate if it collides with an
  * earlier lead on *any* of its keys — the same phone, or the same business
  * name at the same address.
+ *
+ * Exported because `mergeLeads` in `lib/leadDb.ts` matches incoming scraper
+ * rows against rows *already in the table* using exactly this rule. Two
+ * definitions of "same business" — one at CSV ingest, one at merge — would
+ * disagree on the first address abbreviation and let a duplicate through.
  */
-function identityKeys(lead: Lead): string[] {
+export function identityKeys(lead: LeadIdentity): string[] {
   const keys: string[] = [];
 
   const phone = normalisePhone(lead.phone);

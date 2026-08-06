@@ -113,6 +113,21 @@ fi
 sudo -u postgres psql -q -d "$DB_NAME" -c "GRANT ALL ON SCHEMA public TO ${DB_USER};"
 
 # --- Runtime environment ---------------------------------------------------
+# Shared secret for POST /api/leads/ingest, which the Yelp scraper (a separate
+# project on another box) calls. Kept in its own file for the same reason as
+# the database password: it must survive re-running this script, and it has to
+# be readable on its own so it can be handed to the scraper's operator without
+# printing DATABASE_URL alongside it.
+INGEST_TOKEN_FILE="${ENV_DIR}/ingest-token"
+if [[ ! -f "$INGEST_TOKEN_FILE" ]]; then
+  openssl rand -hex 32 > "$INGEST_TOKEN_FILE"
+  chmod 600 "$INGEST_TOKEN_FILE"
+  log "Generated ingest token for the scraper"
+else
+  log "Reusing existing ingest token"
+fi
+INGEST_TOKEN="$(cat "$INGEST_TOKEN_FILE")"
+
 if [[ ! -f "${ENV_DIR}/env" ]]; then
   log "Writing ${ENV_DIR}/env"
   cat > "${ENV_DIR}/env" <<EOF
@@ -131,10 +146,21 @@ HOSTNAME=127.0.0.1
 # control operator. The assignment would run in a background subshell and never
 # reach the parent, leaving DATABASE_URL unset with no error at all.
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?schema=public&connection_limit=8"
+# Bearer token for the scraper's POST /api/leads/ingest. With this unset the
+# route rejects every request rather than accepting anonymous writes, so an
+# empty value here disables scraper ingest — it does not open it up.
+INGEST_TOKEN="${INGEST_TOKEN}"
 EOF
   chmod 600 "${ENV_DIR}/env"
 else
   warn "${ENV_DIR}/env exists — left untouched."
+  # ...except for a key added after that file was first written. Appending is
+  # safe (last assignment wins in both systemd and `.`-sourcing) and skipped
+  # when the key is already there, so re-running never duplicates it.
+  if ! grep -q '^INGEST_TOKEN=' "${ENV_DIR}/env"; then
+    printf 'INGEST_TOKEN="%s"\n' "$INGEST_TOKEN" >> "${ENV_DIR}/env"
+    log "Added INGEST_TOKEN to the existing ${ENV_DIR}/env"
+  fi
 fi
 
 printf 'PORT=%s\n' "$BLUE_PORT"  > "${ENV_DIR}/slot-blue.env"
@@ -220,6 +246,10 @@ cat <<EOF
   App dir:   ${APP_ROOT}
   Slots:     blue=${BLUE_PORT}  green=${GREEN_PORT}
   Database:  ${DB_NAME} (role ${DB_USER}) on the existing PG 17 cluster
+
+  Scraper ingest token (POST /api/leads/ingest):
+    ${INGEST_TOKEN}
+    Also in ${INGEST_TOKEN_FILE}. Give it to the scraper as LEAD_PORTAL_TOKEN.
 
   Untouched: every other vhost, database, and the firewall.
 

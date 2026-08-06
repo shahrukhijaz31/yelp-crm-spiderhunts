@@ -1,4 +1,4 @@
-import { replaceAllLeads } from "@/lib/leadDb";
+import { listLeads, mergeLeads } from "@/lib/leadDb";
 import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
 
 /**
@@ -16,8 +16,21 @@ import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
  * has no authentication anywhere, and a secret on one route would imply a
  * protection the rest of the app does not have. It goes in when auth does.
  *
- * Semantics match what the Import view has always done: an upload **replaces**
- * the worklist rather than merging into it (see `replaceAllLeads`).
+ * An upload **adds to** the worklist. It used to replace it — `deleteMany` then
+ * insert — which was the right behaviour when the worklist lived in React state
+ * and a reload lost it anyway. Against a real database it meant importing a
+ * second CSV silently destroyed every status, note and callback date the agents
+ * had recorded, with nothing but a line in the import banner to say so.
+ *
+ * So this now takes the same path the scraper does (`mergeLeads`): a business
+ * already in the table is left completely untouched, and only genuinely new
+ * ones are inserted. "Already in the table" uses `identityKeys` — normalised
+ * phone, or name + address — the same rule `cleanLeads` applies within a file,
+ * so it means the same thing at both ends.
+ *
+ * There is deliberately no "replace everything" option in the UI. Wiping the
+ * table is a database operation with real consequences, not a checkbox next to
+ * a file picker; see deploy/README.md for how to do it on purpose.
  */
 
 /** Roughly 40k rows of scraper output — well past any real export. */
@@ -83,8 +96,9 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (parsed.leads.length === 0) {
-    // Nothing usable — leave the existing worklist alone rather than wiping it
-    // for an empty or mis-shaped file.
+    // Nothing usable. Harmless now that an import only adds, but still worth
+    // reporting as an error: a file that yields no rows is a mis-shaped export,
+    // and silently answering "imported 0" would hide that.
     return Response.json(
       {
         error: "no_rows",
@@ -98,14 +112,20 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    // The stored rows come back rather than the parsed ones, so the client gets
-    // the database's cuids — the ids every later PATCH is addressed to.
-    const leads = await replaceAllLeads(parsed.leads, sourceBatch);
+    const merged = await mergeLeads(parsed.leads, sourceBatch);
+
+    // The whole table is re-read rather than returned from the merge, so the
+    // client gets the database's cuids for the new rows *and* keeps the
+    // existing rows with the statuses, notes and callbacks already on them.
+    // Those ids are what every later PATCH is addressed to.
+    const leads = await listLeads();
 
     return Response.json(
       {
         leads,
-        imported: leads.length,
+        imported: merged.inserted,
+        skippedExisting: merged.skippedExisting,
+        total: leads.length,
         sourceBatch,
         parsedRows: parsed.parsedRows,
         skippedRows: parsed.skippedRows,

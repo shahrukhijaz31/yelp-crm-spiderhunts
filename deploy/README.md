@@ -194,7 +194,10 @@ Recorded because each would have recurred:
    other products' data. Worth a cron job:
    `sudo -u postgres pg_dump lead_portal | gzip > /root/backups/lead_portal-$(date +%F).sql.gz`
 3. **A failed save reverts silently** in the UI apart from a console error.
-4. **`POST /api/leads/upload` replaces the entire table** by design. Behind
-   Basic Auth that is a feature; exposed, it is a delete button.
+4. **Emptying the table is a database operation, on purpose.** Both write paths
+   merge, and nothing in the UI can wipe the worklist. To start genuinely fresh:
+   `sudo -u postgres psql -d lead_portal -c 'TRUNCATE leads;'` — take a
+   `pg_dump` first. `POST /api/leads/upload` used to replace the entire table,
+   which made an ordinary second import a silent data-loss event; it merges now.
 5. **The root password was shared in plaintext** during setup and should be
    rotated. Key auth is installed, so nothing depends on it.

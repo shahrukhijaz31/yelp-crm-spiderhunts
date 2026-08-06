@@ -73,7 +73,8 @@ app/
   settings/page.tsx           placeholder for backend config
   api/leads/route.ts          GET — every lead, from Postgres
   api/leads/[id]/route.ts     PATCH — persists one inline edit
-  api/leads/upload/route.ts   POST — parses a CSV and replaces the table
+  api/leads/upload/route.ts   POST — parses a CSV and merges it in, never wipes
+  api/leads/ingest/route.ts   POST — the scraper's push: merges, token-guarded
 components/
   LeadsProvider.tsx           the store: leads, workspace (tab/filters/selection), stats
   NavBar.tsx / ViewTabs.tsx   app shell nav and the worklist's tabbed views
@@ -84,6 +85,7 @@ lib/
   prisma.ts                   Prisma Client singleton (survives dev hot reload)
   leadMapping.ts              database row <-> Lead; pure, no client
   leadDb.ts                   every query, plus PATCH body validation
+  ingestAuth.ts               bearer-token check for the scraper endpoint
   mockLeads.ts                dev fixture for `npm run db:seed -- --demo`
   parseLeadsCsv.ts            CSV -> Lead[], runtime-agnostic
   cleanLeads.ts               ingestion gate: phone validity + de-duplication
@@ -152,6 +154,8 @@ generated client lands in `lib/generated/prisma` and is gitignored.
 - **Upload** — `POST /api/leads/upload` parses with `parseLeadsCsv(csvText)` —
   the same function the browser used to call, unchanged — and replaces the
   table inside a transaction.
+- **Scraper ingest** — `POST /api/leads/ingest`, same parser, but it *merges*.
+  See below.
 - **Stats and filters** — still computed client-side over the full lead array
   (`computeStats`, `matchesFilters`). See the note below.
 
@@ -171,6 +175,59 @@ point to revisit is pagination, not row count on its own: once
 data to count, and stats, filtering and sorting all have to move to the server
 together. A `/api/leads/stats` route added before then would be a second source
 of truth for numbers the client can already compute.
+
+## Scraper ingest — `POST /api/leads/ingest`
+
+The Yelp scraper is a **separate project in a separate directory**, so it has no
+access to `lib/` or to Postgres. When a run finishes it POSTs the CSVs from its
+output folder to this endpoint.
+
+**It merges, it does not replace.** A business already in the portal is skipped
+and left completely untouched — statuses, notes and booked callbacks survive
+every re-scrape, and so do scraped fields an agent has corrected by hand. That
+is the whole reason this is a second route rather than a flag on
+`/api/leads/upload`: the destructive "replace the worklist" behaviour stays on
+the screen where a human chose it, instead of sitting one typo away in a cron
+line. "Already have it" is decided by `identityKeys` in `lib/cleanLeads.ts` —
+the same phone, or the same business name at the same address — which is the
+identical rule applied within a single file, so the two cannot disagree.
+
+**Auth.** `Authorization: Bearer $INGEST_TOKEN`. This is the only route exempt
+from the nginx Basic Auth in front of everything else (it is called by a
+machine, not a browser), so it carries its own credential. With `INGEST_TOKEN`
+unset the route refuses every request with a 503 rather than falling open.
+
+**Sending.** Repeat the `file` field to push a whole folder in one request;
+32MB per push.
+
+```bash
+curl -sS https://leadportal.169-58-34-205.sslip.io/api/leads/ingest \
+  -H "Authorization: Bearer $INGEST_TOKEN" \
+  -H "X-Batch: yelp-dentists-chicago" \
+  -F file=@output/page1.csv -F file=@output/page2.csv
+```
+
+A raw body works too, for a one-liner:
+`--data-binary @out.csv -H 'Content-Type: text/csv' -H 'X-Filename: out.csv'`.
+
+`scripts/push_leads.py` is the client for the scraper side — **copy it into the
+scraper project**; it lives here only so the endpoint and its caller cannot
+drift. Standard library only, no dependencies:
+
+```bash
+export LEAD_PORTAL_URL=https://leadportal.169-58-34-205.sslip.io
+export LEAD_PORTAL_TOKEN=...          # /etc/leadportal/ingest-token on the server
+python push_leads.py ./output --batch yelp-dentists-chicago
+```
+
+**Response.** `200` with `{ inserted, skippedExisting, sourceBatch, files: [...] }`,
+where `sourceBatch` stamps every row of the push so a run can be traced or
+filtered later. Per-file parse warnings come back in `files[]`, and
+`rejectedFiles` names any CSV that yielded nothing. A push where *no* file
+yielded a usable row is a `400`, not a quiet `200` — on a scheduled job, "0
+rows" that looks like success is how a broken scraper goes unnoticed for a week.
+
+Re-pushing the same folder is safe: the second run inserts nothing.
 
 ## Expected CSV columns
 

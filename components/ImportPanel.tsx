@@ -34,7 +34,12 @@ type Notice = { tone: "ok" | "error"; message: string; lines?: string[] };
 /** What `POST /api/leads/upload` returns on success. */
 interface UploadResult {
   leads: Lead[];
+  /** Rows actually written — new businesses only. */
   imported: number;
+  /** Rows already in the worklist, left exactly as they were. */
+  skippedExisting: number;
+  /** Size of the worklist after the import. */
+  total: number;
   removedNoPhone: number;
   removedDuplicates: number;
   warnings: string[];
@@ -70,19 +75,29 @@ export default function ImportPanel() {
       const result = payload as UploadResult;
       replaceLeads(result.leads);
 
-      // "Imported 120 leads. 15 duplicates and 8 missing numbers were
-      // automatically filtered out." — the second sentence only appears when
-      // something actually was.
+      // "Added 120 new leads. 38 were already in the worklist and were left
+      // unchanged. 15 duplicates and 8 missing numbers were filtered out.
+      // 158 leads in total." Each sentence appears only when it has something
+      // to say — the "already there" one is what tells an agent their existing
+      // call history survived, so it is worth its own clause rather than a
+      // number they have to work out by subtraction.
       const cleaned = describeCleaning({
         leads: result.leads,
         removedNoPhone: result.removedNoPhone,
         removedDuplicates: result.removedDuplicates,
       });
+      const sentences = [
+        `Added ${result.imported} new lead${result.imported === 1 ? "" : "s"}.`,
+        result.skippedExisting > 0
+          ? `${result.skippedExisting} ${result.skippedExisting === 1 ? "was" : "were"} already in the worklist and ${result.skippedExisting === 1 ? "was" : "were"} left unchanged.`
+          : null,
+        cleaned,
+        `${result.total} lead${result.total === 1 ? "" : "s"} in total.`,
+      ].filter(Boolean);
+
       setNotice({
         tone: "ok",
-        message: `Imported ${result.imported} lead${result.imported === 1 ? "" : "s"}.${
-          cleaned ? ` ${cleaned}` : ""
-        }`,
+        message: sentences.join(" "),
         lines: result.warnings,
       });
     } catch {
@@ -101,9 +116,11 @@ export default function ImportPanel() {
       <header>
         <h1 className="display-num text-[26px] leading-none text-fg">Import leads</h1>
         <p className="mt-2.5 text-[13px] leading-relaxed text-fg-3">
-          Load a CSV from the scraper. The file is saved to the database and
-          replaces the current worklist. Rows without a dialable phone number,
-          and repeats of a row already in the file, are removed automatically.
+          Load a CSV from the scraper. New businesses are added to the worklist
+          and saved to the database; any already on it are left untouched, so
+          statuses, notes and callbacks are never overwritten by an import. Rows
+          without a dialable phone number, and repeats within the file, are
+          removed automatically.
         </p>
       </header>
 

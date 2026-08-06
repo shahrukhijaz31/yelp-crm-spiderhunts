@@ -1,3 +1,4 @@
+import { identityKeys } from "./cleanLeads";
 import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
 import { prisma } from "./prisma";
 import { CALL_STATUSES, type CallStatus, type Lead, type LeadEditableFields } from "./types";
@@ -53,24 +54,88 @@ export async function updateLeadFields(
   return toLead(await prisma.lead.update({ where: { id }, data }));
 }
 
-/**
- * Swap the whole table for a freshly imported file.
+/*
+ * `replaceAllLeads` used to live here — deleteMany + createMany in one
+ * transaction, called by the CSV upload. It was correct while the worklist was
+ * React state that a reload discarded anyway, and actively dangerous once the
+ * table held real call history: a second import destroyed every status, note
+ * and callback the agents had entered.
  *
- * This mirrors what the Import view already did in memory — a CSV *replaces*
- * the worklist rather than merging into it. Wrapped in a transaction so a
- * failure part-way through cannot leave the table empty: either the new file
- * is in, or the old data is still there.
+ * Both write paths now merge. It is deleted rather than left unused because an
+ * exported `deleteMany({})` on the leads table is the kind of function that
+ * gets wired back up by someone who only reads its name. Emptying the table on
+ * purpose is a database operation — see deploy/README.md.
  */
-export async function replaceAllLeads(
-  leads: Lead[],
-  sourceBatch: string | null,
-): Promise<Lead[]> {
-  await prisma.$transaction([
-    prisma.lead.deleteMany({}),
-    prisma.lead.createMany({ data: leads.map((lead) => toCreateData(lead, sourceBatch)) }),
-  ]);
 
-  return listLeads();
+export interface MergeLeadsResult {
+  /** Rows written to the table. */
+  inserted: number;
+  /** Rows already present (same phone, or same name at the same address). */
+  skippedExisting: number;
+}
+
+/**
+ * Postgres caps a statement at 65535 bound parameters and `createMany` sends
+ * one INSERT; at ~16 columns a row that is ~4000 rows. 1000 keeps a wide margin
+ * and still means a 40k-row scrape is 40 statements, not 40k.
+ */
+const INSERT_CHUNK = 1000;
+
+/**
+ * Add scraped leads to the worklist without disturbing what is already there.
+ *
+ * Used by both write paths: the scraper's `POST /api/leads/ingest`, which runs
+ * on a schedule and would otherwise wipe an agent's work on every run, and the
+ * CSV upload, which had the same problem the second time anyone used it.
+ *
+ * A business already in the table is left completely untouched — including its
+ * scraped fields, so neither a re-scrape nor a re-upload can overwrite an
+ * address an agent has since corrected by hand.
+ *
+ * Duplicate matching uses `identityKeys`, the same rule `cleanLeads` applies
+ * within a single file, so "already have it" means the same thing at both ends.
+ *
+ * Not transactional across the read and the write: two ingests running at the
+ * same instant could both decide a lead is new and insert it twice. The scraper
+ * pushes serially and there is no unique constraint on phone by design (see
+ * schema.prisma), so this is left as-is rather than paid for with a serializable
+ * transaction on every import.
+ */
+export async function mergeLeads(
+  incoming: Lead[],
+  sourceBatch: string | null,
+): Promise<MergeLeadsResult> {
+  // Only the three identity columns are read: pulling whole rows would mean
+  // dragging every note and meeting field over the wire to answer a set
+  // membership question.
+  const existing = await prisma.lead.findMany({
+    select: { name: true, address: true, phone: true },
+  });
+
+  const seen = new Set(existing.flatMap(identityKeys));
+
+  const fresh: Lead[] = [];
+  let skippedExisting = 0;
+
+  for (const lead of incoming) {
+    const keys = identityKeys(lead);
+    if (keys.some((key) => seen.has(key))) {
+      skippedExisting += 1;
+      continue;
+    }
+    // Added as we go, so a batch containing the same business twice inserts it
+    // once even when neither copy was in the table to begin with.
+    for (const key of keys) seen.add(key);
+    fresh.push(lead);
+  }
+
+  for (let i = 0; i < fresh.length; i += INSERT_CHUNK) {
+    await prisma.lead.createMany({
+      data: fresh.slice(i, i + INSERT_CHUNK).map((lead) => toCreateData(lead, sourceBatch)),
+    });
+  }
+
+  return { inserted: fresh.length, skippedExisting };
 }
 
 /** Runtime guard for the `status` field arriving over the wire. */
