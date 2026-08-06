@@ -36,7 +36,11 @@ User=leadportal
 Group=leadportal
 
 # Next's standalone server.js resolves everything relative to its own directory.
-WorkingDirectory=/var/www/vhosts/leadportal/%i/.next/standalone
+# deploy.sh copies the *contents* of .next/standalone into the slot root, so
+# server.js lives at <slot>/server.js and .next/static beside it — not at
+# <slot>/.next/standalone. Pointing one level deeper fails with
+# status=200/CHDIR, which reads like a crash but is systemd refusing to start.
+WorkingDirectory=/var/www/vhosts/leadportal/%i
 
 # Shared config first, then the per-slot PORT. Later files win, which is what
 # lets both slots share one DATABASE_URL on different ports.

@@ -30,8 +30,10 @@ module.exports = {
 
       // The standalone build's own entrypoint. Resolves its assets relative to
       // its directory, so cwd must be the standalone root, not the repo root.
+      // deploy.sh copies the contents of .next/standalone into the slot root,
+      // so server.js sits directly in the slot directory.
       script: "server.js",
-      cwd: "/var/www/lead-portal/blue/.next/standalone",
+      cwd: "/var/www/vhosts/leadportal/blue",
 
       // Cluster mode is what makes `pm2 reload` zero-downtime: PM2 restarts
       // workers one by one behind a shared listening socket.
@@ -46,7 +48,7 @@ module.exports = {
 
       env: {
         NODE_ENV: "production",
-        PORT: 3001,
+        PORT: 3031,
         // Loopback only — nginx is the only way in, so the Basic Auth in front
         // of it cannot be bypassed by hitting the port directly.
         HOSTNAME: "127.0.0.1",
