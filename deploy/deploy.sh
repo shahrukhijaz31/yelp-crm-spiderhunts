@@ -71,6 +71,10 @@ log "Building ${SHA} ($(git -C "$REPO_DIR" log -1 --pretty=%s))"
 # roll back to it mid-deploy.
 cd "$REPO_DIR"
 
+# Loaded before npm ci, not after: the `postinstall` hook runs `prisma
+# generate`, so the environment has to be in place from the very first command.
+set -a; . "$ENV_FILE"; set +a
+
 log "Installing dependencies (npm ci)"
 # `npm ci` needs devDependencies: TypeScript, Tailwind and the Prisma CLI all
 # run at build time. The result never ships — `output: standalone` traces only
@@ -84,7 +88,6 @@ log "Applying database migrations"
 # `migrate deploy`, never `migrate dev`: deploy applies committed migrations and
 # nothing else. `dev` can generate new migrations and, on drift, offers to reset
 # the database — behaviour that has no place near production data.
-set -a; . "$ENV_FILE"; set +a
 npx prisma migrate deploy
 
 log "Building Next.js"

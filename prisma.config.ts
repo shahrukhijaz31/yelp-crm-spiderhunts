@@ -1,5 +1,5 @@
 import { config as loadEnv } from "dotenv";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 /**
  * Prisma CLI configuration.
@@ -22,6 +22,19 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    // `process.env` directly, NOT prisma/config's `env()` helper. `env()`
+    // throws the moment this file is loaded if the variable is missing, and
+    // this file is loaded by *every* Prisma command — including `generate`,
+    // which is pure codegen and needs no database at all.
+    //
+    // That eager throw broke `npm ci` on the server: the `postinstall` hook
+    // runs `prisma generate` before any deploy step has exported the
+    // environment, so the install failed with a config error that had nothing
+    // to do with the install. It would break a fresh `npm install` on a new
+    // developer machine for the same reason, before there is any .env.local.
+    //
+    // Commands that genuinely need the URL (`migrate`, `db seed`, `studio`)
+    // still fail clearly when it is unset — they just fail at the point of use.
+    url: process.env.DATABASE_URL,
   },
 });
