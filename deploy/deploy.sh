@@ -121,6 +121,13 @@ log "Applying database migrations"
 npx prisma migrate deploy
 
 log "Building Next.js"
+# Clean first. Turbopack caches resolution results under .next/build/chunks, and
+# a build that failed for an environmental reason (a missing dependency, say)
+# leaves that failure cached — so every later build reproduces the original
+# error even after the cause is fixed, and the fix looks like it did nothing.
+# A deploy must depend on the commit it is building, not on what the last one
+# left behind.
+rm -rf .next
 NODE_ENV=production npx next build
 
 [[ -d .next/standalone ]] || die "No .next/standalone — is output:'standalone' still set in next.config.ts?"
