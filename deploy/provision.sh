@@ -89,8 +89,19 @@ fi
 
 log "Creating ${APP_ROOT}"
 mkdir -p "${APP_ROOT}"/{repo,blue,green}
-chown -R "${DB_USER}:${DB_USER}" "$APP_ROOT"
+chown "${DB_USER}:${DB_USER}" "$APP_ROOT"
 chmod 750 "$APP_ROOT"
+
+# The release slots are what the service reads, so they belong to the app user.
+chown -R "${DB_USER}:${DB_USER}" "${APP_ROOT}/blue" "${APP_ROOT}/green"
+
+# The repo is NOT the app user's. It is root's build workspace: deploy.sh runs
+# as root and does git fetch/checkout in it, and the running service never opens
+# it. Chowning it to the app user (which `chown -R` on APP_ROOT used to do) made
+# git refuse to operate as root -- "detected dubious ownership" -- so every
+# deploy died at the fetch, immediately after announcing which slot it would
+# build into.
+chown -R root:root "${APP_ROOT}/repo"
 
 # --- Database on the EXISTING cluster --------------------------------------
 log "Configuring database on the existing PostgreSQL 17 cluster"

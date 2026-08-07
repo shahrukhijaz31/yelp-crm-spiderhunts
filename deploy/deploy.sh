@@ -65,10 +65,23 @@ die()  { printf '\n\033[1;31m[fail]\033[0m %s\n' "$*" >&2; exit 1; }
 [[ -d "$REPO_DIR/.git" ]] || die "${REPO_DIR} is not a git checkout. See deploy/README.md."
 
 # --- 1. Which slot is live? ------------------------------------------------
-if [[ -f "$UPSTREAM_FILE" ]] && grep -q '3032' "$UPSTREAM_FILE"; then
+# Read the port off the `server` directive, not from anywhere in the file. A
+# bare `grep 3032` also matched the seed file's comment explaining which ports
+# were chosen — so with blue live, this reported green, then "deployed" into
+# blue: the slot that was actually serving. The safety of blue/green depends
+# entirely on this answer being right.
+LIVE_PORT="$(sed -n 's/^[[:space:]]*server[[:space:]]\+127\.0\.0\.1:\([0-9]\+\).*/\1/p' \
+             "$UPSTREAM_FILE" 2>/dev/null | head -1)"
+
+if [[ "$LIVE_PORT" == "${SLOT_PORT[green]}" ]]; then
+  LIVE=green; IDLE=blue
+elif [[ "$LIVE_PORT" == "${SLOT_PORT[blue]}" ]]; then
+  LIVE=blue;  IDLE=green
+elif [[ -z "$LIVE_PORT" ]]; then
+  # No upstream yet — first deploy. Blue is the seed's slot.
   LIVE=green; IDLE=blue
 else
-  LIVE=blue;  IDLE=green
+  die "Upstream names port ${LIVE_PORT}, which is neither slot (${SLOT_PORT[blue]}/${SLOT_PORT[green]}). Refusing to guess which slot is serving."
 fi
 IDLE_PORT="${SLOT_PORT[$IDLE]}"
 IDLE_DIR="${APP_ROOT}/${IDLE}"
@@ -77,6 +90,12 @@ log "Live slot: ${LIVE}    Deploying into: ${IDLE} (port ${IDLE_PORT})"
 
 # --- 2. Fetch the requested revision ---------------------------------------
 log "Fetching ${GIT_REF}"
+# Belt and braces against "detected dubious ownership": provision.sh keeps this
+# repo owned by root, but a box provisioned before that fix still has it owned
+# by the app user, and git refuses to touch a repo it does not own. Declaring it
+# safe is idempotent and costs nothing.
+git config --global --get-all safe.directory | grep -qxF "$REPO_DIR" \
+  || git config --global --add safe.directory "$REPO_DIR"
 git -C "$REPO_DIR" fetch --prune origin
 # -f, and a hard reset afterwards: this checkout is a build artefact, not
 # somewhere anyone should be editing. Without it, one stray local change — an
