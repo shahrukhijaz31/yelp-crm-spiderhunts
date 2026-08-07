@@ -42,25 +42,25 @@ model Lead {
   id String @id @default(cuid())
 
   // --- Scraped fields (match the scraper CSV columns) ---
-  name String
+  name       String
   /// Never null in the UI — an absent address is the empty string.
-  address String @default("")
+  address    String   @default("")
   /// The CSV `categories` column is a list, and the UI renders it as one, so
   /// it is stored as a Postgres text[] instead of being flattened to a string.
   categories String[] @default([])
   /// Nullable to match the type, though `cleanLeads` means stored rows have one.
-  phone   String?
-  website String?
-  rating  Float?
-  owner   String?
+  phone      String?
+  website    String?
+  rating     Float?
+  owner      String?
   /// Yelp listing URL — present in the scraper CSV and in the export.
-  url String?
+  url        String?
 
   // --- Agent-owned fields ---
-  status CallStatus @default(not_called)
-  notes  String     @default("")
+  status       CallStatus @default(not_called)
+  notes        String     @default("")
   /// Date only: the UI works in `YYYY-MM-DD` strings and never has a time here.
-  callbackDate DateTime? @map("callback_date") @db.Date
+  callbackDate DateTime?  @map("callback_date") @db.Date
 
   // --- Meeting detail, layered on top of callbackDate (see lib/meetings.ts) ---
   /// 24-hour `HH:MM`. A string, not a `time` column: it is a label on the
@@ -75,7 +75,7 @@ model Lead {
   /// Written by server-side duplicate detection. Nothing sets it to true yet —
   /// today `cleanLeads` drops repeats at ingest — but the column exists so that
   /// change has somewhere to write without another migration.
-  isDuplicate Boolean @default(false) @map("is_duplicate")
+  isDuplicate Boolean  @default(false) @map("is_duplicate")
   /// Which CSV upload a row came from, so an import can be traced or filtered.
   sourceBatch String?  @map("source_batch")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -91,4 +91,92 @@ model Lead {
   @@index([sourceBatch])
   @@index([isDuplicate])
   @@map("leads")
+}
+
+/// Exactly two roles, and every user has one. ADMIN is the full portal; AGENT
+/// is the day job — the worklist and meetings — with export, import, reports,
+/// settings and user management withheld.
+///
+/// An enum rather than a string column: Postgres rejects a value outside this
+/// set, so a bad write fails at the database rather than becoming a role the
+/// authorization code has never heard of and does not know how to refuse.
+enum UserRole {
+  ADMIN
+  AGENT
+
+  @@map("user_role")
+}
+
+/// A person who can sign in.
+///
+/// The database is the only source of truth for `role` and `isActive`. Nothing
+/// the browser sends is ever consulted when deciding what someone may do — the
+/// session cookie carries an opaque token and nothing else, so a tampered
+/// cookie cannot describe a role.
+model User {
+  id String @id @default(cuid())
+
+  /// Sign-in identifiers. Both are accepted at the login form and both are
+  /// stored lower-cased, so `Admin` and `admin` cannot become two accounts.
+  username String @unique
+  email    String @unique
+  name     String
+
+  /// scrypt, salted per user, in the format written by `lib/password.ts`.
+  /// Never selected into anything that leaves the server.
+  passwordHash String @map("password_hash")
+
+  role UserRole @default(AGENT)
+
+  /// Disabling is preferred over deleting: it keeps the audit trail of who did
+  /// what to a lead intact while ending access immediately. Checked on every
+  /// request, not just at login, so disabling takes effect at once.
+  isActive Boolean @default(true) @map("is_active")
+
+  lastLoginAt DateTime? @map("last_login_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  sessions Session[]
+
+  @@map("users")
+}
+
+/// A signed-in browser.
+///
+/// Server-side sessions rather than a self-contained signed token, because
+/// logout has to be real: deleting the row ends the session everywhere at
+/// once, and a stolen cookie replayed after logout finds nothing. A JWT would
+/// stay valid in an attacker's hands until it expired, whatever the app did.
+///
+/// Only the SHA-256 of the token is stored. The plaintext exists solely in the
+/// user's cookie, so a leaked database dump does not hand over live sessions.
+model Session {
+  id String @id @default(cuid())
+
+  /// SHA-256 hex of the cookie value. Unique, so a token maps to one session.
+  tokenHash String @unique @map("token_hash")
+
+  userId String @map("user_id")
+  /// Cascade: deleting a user ends their sessions in the same statement, so an
+  /// account cannot be removed while a live cookie for it still works.
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Idle expiry, pushed forward as the session is used (see `lib/session.ts`).
+  expiresAt         DateTime @map("expires_at")
+  /// Hard ceiling set at sign-in. Rolling expiry can never move past this, so
+  /// a permanently-open tab still has to re-authenticate eventually.
+  absoluteExpiresAt DateTime @map("absolute_expires_at")
+
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  /// User agent and IP as they were at sign-in — enough to recognise a session
+  /// in a list, deliberately not enough to be a tracking log.
+  userAgent String? @map("user_agent")
+  ipAddress String? @map("ip_address")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
 }

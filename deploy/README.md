@@ -121,6 +121,38 @@ Load a CSV without using the UI:
 ssh leadportal 'cd /var/www/vhosts/leadportal/repo && set -a && . /etc/leadportal/env && set +a && npx prisma db seed'
 ```
 
+### Authentication
+
+The first deploy that carries application authentication needs one manual step,
+once, on the server — nothing is seeded and no credentials live in the code or
+in `/etc/leadportal/env`:
+
+```bash
+ssh leadportal 'cd /var/www/vhosts/leadportal/repo \
+  && set -a && . /etc/leadportal/env && set +a \
+  && npx tsx scripts/create-user.ts --name "Jane Doe" --username jane \
+       --email jane@example.com --role ADMIN'
+```
+
+The generated password is printed once. That administrator adds everyone else
+from the Users screen, so this command should never need running twice; it
+refuses to touch an existing username or email if it is.
+
+No new environment variables. Sessions are rows keyed by a random token, so
+there is no signing secret to distribute or rotate, and the cookie is `Secure`
++ `__Host-`-prefixed automatically because systemd sets `NODE_ENV=production`.
+That prefix requires HTTPS, which the vhost already enforces — a deploy that
+served this app over plain http would fail to log anyone in, loudly, rather
+than quietly downgrading the cookie.
+
+> **The nginx Basic Auth is now a second, redundant password.** It was a
+> stopgap for exactly this gap (see the comment in `nginx/leadportal.conf`) and
+> agents will meet two prompts until it is removed. Removing it is a
+> deliberate, separate change: delete the `auth_basic` pair from the `server`
+> block and the `auth_basic off;` lines from the exempted locations, then
+> `nginx -t && systemctl reload nginx`. Leaving it in place is also fine — the
+> application no longer depends on it either way.
+
 ### Migration safety
 
 Migrations run *before* the traffic flip, so old code briefly runs against the
@@ -187,9 +219,15 @@ Recorded because each would have recurred:
 
 ## Known gaps
 
-1. **No application authentication.** Basic Auth is one shared password at the
-   proxy. No per-agent identity, so nothing attributes a status change to a
-   person, and revoking one agent means rotating everyone's.
+1. ~~**No application authentication.**~~ **Fixed.** The portal now has
+   per-person accounts with ADMIN/AGENT roles in Postgres, sessions in the
+   `sessions` table, and server-side authorization on every page and API route.
+   See "Authentication" below and the README section of the same name.
+
+   Two follow-ups it does *not* do: nothing yet attributes a status change to
+   the person who made it (the `users` table now makes that possible), and
+   there is no password self-service — an administrator resets one from the
+   Users screen.
 2. **No database backups.** Nothing here sets any up, and the cluster holds four
    other products' data. Worth a cron job:
    `sudo -u postgres pg_dump lead_portal | gzip > /root/backups/lead_portal-$(date +%F).sql.gz`

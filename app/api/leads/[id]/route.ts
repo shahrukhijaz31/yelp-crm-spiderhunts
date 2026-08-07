@@ -1,3 +1,4 @@
+import { apiUser } from "@/lib/authz";
 import { LeadEditError, parseLeadEdits, updateLeadFields } from "@/lib/leadDb";
 
 /**
@@ -12,11 +13,19 @@ import { LeadEditError, parseLeadEdits, updateLeadFields } from "@/lib/leadDb";
  * The client updates optimistically and does not wait on this response, so the
  * body is returned mainly for debugging and for the rollback path: on a
  * non-2xx the provider puts the previous value back.
+ *
+ * Open to both roles. Status, notes and callbacks are the agent's day job, and
+ * `parseLeadEdits` is a whitelist — there is no field reachable through this
+ * body that an agent should not be setting, and nothing here can touch a user
+ * or a role.
  */
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const auth = await apiUser();
+  if (auth instanceof Response) return auth;
+
   const { id } = await params;
 
   let body: unknown;

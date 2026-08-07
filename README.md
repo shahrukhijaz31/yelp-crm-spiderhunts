@@ -60,21 +60,79 @@ npm run dev   # http://localhost:3000
   place: every token is a `--c-*` variable defined twice in `app/globals.css`
   and pointed at by `@theme`, so components never name a theme.
 
+## Authentication and roles
+
+Nothing in the portal is reachable without signing in, and the two roles are
+enforced on the server.
+
+**Sessions.** Opaque 256-bit tokens in an HttpOnly, SameSite=Lax cookie
+(`__Host-lp_session` in production, `lp_session` in development, where
+`__Host-` would be unsettable over plain http). Only the SHA-256 of the token
+is stored, in the `sessions` table. The cookie carries no user id and no role,
+so the browser cannot describe itself — every request resolves the session row
+in Postgres and reads the role from `users`. Idle expiry is 12 hours, pushed
+forward at most once an hour; an absolute ceiling of 7 days is never extended.
+
+**Logout** deletes the row, so the old cookie is dead server-side rather than
+merely dropped by the browser.
+
+**Route protection** is layered, and only the middle layer is load-bearing:
+
+| Layer | Does | Trusts |
+| --- | --- | --- |
+| `proxy.ts` | redirects requests with no session cookie; sets `Cache-Control: no-store` | nothing — a cookie's *presence* only |
+| `lib/authz.ts` | the real check, inside every protected page and route handler | the `sessions` + `users` rows |
+| `NavBar` | hides tabs a role cannot use | nothing; it is tidiness |
+
+**Who can do what** — the list lives in `lib/access.ts` and is read by all
+three layers:
+
+| | ADMIN | AGENT |
+| --- | --- | --- |
+| Worklist, search, filters, status/notes/callbacks, Meetings | yes | yes |
+| Export Data (`/export`), Upload CSV (`/import`) | yes | no |
+| Reports, Settings, Users | yes | no |
+| `GET /api/leads`, `PATCH /api/leads/:id` | yes | yes |
+| `POST /api/leads/upload`, `/api/users*` | yes | **403** |
+
+An agent who types an admin URL gets an Access Denied screen — not the login
+form, which they have already satisfied. There is deliberately no endpoint at
+any privilege level that lets a user change their own role.
+
+**Creating the first administrator.** No account is seeded and no credentials
+exist in the code or the environment:
+
+```bash
+npm run user:create -- --name "Jane Doe" --username jane \
+                       --email jane@example.com --role ADMIN
+```
+
+With no `--password` one is generated and printed once. After that,
+administrators add people from the Users screen.
+
 ## Structure
 
 ```
 app/
-  layout.tsx                  app shell: fonts, NavBar, LeadsProvider (seeds data)
-  page.tsx                    Worklist — the call list
-  meetings/page.tsx           booked calls, grouped by day
-  import/page.tsx             CSV import
-  export/page.tsx             CSV / XLSX / PDF export
-  reports/page.tsx            summary + full status breakdown
-  settings/page.tsx           placeholder for backend config
+  layout.tsx                  document shell only: fonts, theme (wraps /login too)
+  login/page.tsx              sign-in; redirects away if already authenticated
+  (portal)/layout.tsx         the authenticated app: requireUser, NavBar, LeadsProvider
+  (portal)/page.tsx           Worklist — the call list
+  (portal)/meetings/page.tsx  booked calls, grouped by day
+  (portal)/import/page.tsx    CSV import          — ADMIN
+  (portal)/export/page.tsx    CSV / XLSX / PDF    — ADMIN
+  (portal)/reports/page.tsx   summary + full status breakdown — ADMIN
+  (portal)/settings/page.tsx  placeholder for backend config  — ADMIN
+  (portal)/users/page.tsx     accounts and roles              — ADMIN
+  api/auth/login/route.ts     POST — verify a password, mint a session
+  api/auth/logout/route.ts    POST — delete the session row, clear the cookie
   api/leads/route.ts          GET — every lead, from Postgres
   api/leads/[id]/route.ts     PATCH — persists one inline edit
   api/leads/upload/route.ts   POST — parses a CSV and merges it in, never wipes
   api/leads/ingest/route.ts   POST — the scraper's push: merges, token-guarded
+  api/users/route.ts          GET/POST — accounts            — ADMIN
+  api/users/[id]/route.ts     PATCH — role, disable, rename  — ADMIN
+proxy.ts                      first gate: no session cookie -> /login (Next 16 middleware)
 components/
   LeadsProvider.tsx           the store: leads, workspace (tab/filters/selection), stats
   NavBar.tsx / ViewTabs.tsx   app shell nav and the worklist's tabbed views
@@ -82,6 +140,12 @@ components/
   LeadTable / LeadRow / ...   the list itself
 lib/
   types.ts                    Lead + CallStatus + status colours — single source of truth
+  access.ts                   the access policy: cookie name, public/admin paths, callbackUrl
+  session.ts                  create/verify/destroy sessions against Postgres
+  authz.ts                    requireUser / requireRole / apiUser / apiAdmin
+  password.ts                 scrypt hashing, on node:crypto alone
+  userDb.ts                   every users query; passwordHash never leaves login
+  loginThrottle.ts            per-account and per-IP brake on password guessing
   prisma.ts                   Prisma Client singleton (survives dev hot reload)
   leadMapping.ts              database row <-> Lead; pure, no client
   leadDb.ts                   every query, plus PATCH body validation
@@ -126,6 +190,13 @@ statuses, notes, callback dates and meeting detail are all written through.
    npm run db:seed -- --demo     # or: statuses, callbacks and meetings
    ```
 
+4. Create an account to sign in with — the seed creates leads, never users:
+
+   ```bash
+   npm run user:create -- --name "Jane Doe" --username jane \
+                          --email jane@example.com --role ADMIN
+   ```
+
 Use `--demo` when working on the Callbacks, Meetings or Reports screens — a
 scraper CSV has no agent-owned fields, so seeding from it leaves every lead on
 "Not called" and those views empty.
@@ -138,6 +209,7 @@ scraper CSV has no agent-owned fields, so seeding from it leaves every lead on
 | `npm run db:reset` | drop, re-apply every migration (does **not** re-seed) |
 | `npm run db:seed` | load sample data into an empty table |
 | `npm run db:studio` | browse the table in Prisma Studio |
+| `npm run user:create` | create a user (`-- --name … --username … --email … --role ADMIN`) |
 
 `prisma generate` runs on `postinstall` and again at the start of `npm run
 build`, so a fresh clone or a schema change never needs it typed by hand. The

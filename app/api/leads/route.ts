@@ -1,8 +1,14 @@
+import { apiUser } from "@/lib/authz";
 import { listLeads } from "@/lib/leadDb";
 import type { Lead } from "@/lib/types";
 
 /**
  * GET /api/leads
+ *
+ * Any signed-in user, either role: the worklist is the job, and an agent
+ * cannot do it without the leads. Unauthenticated callers get a 401 whether or
+ * not they knew the URL — this is the endpoint that would otherwise hand the
+ * whole lead database to anyone who found it.
  *
  * The read path, now backed by Postgres. The promise the mock version made —
  * "only `getMockLeads()` gets replaced, the response shape stays the same" —
@@ -15,6 +21,9 @@ import type { Lead } from "@/lib/types";
  *   - pagination / filter query params, once the table outgrows a single fetch
  */
 export async function GET(): Promise<Response> {
+  const auth = await apiUser();
+  if (auth instanceof Response) return auth;
+
   try {
     const leads: Lead[] = await listLeads();
 

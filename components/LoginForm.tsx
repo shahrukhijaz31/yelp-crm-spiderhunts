@@ -51,7 +51,7 @@ function validate(username: string, password: string): FieldErrors {
   return errors;
 }
 
-export default function LoginForm() {
+export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
   const router = useRouter();
   const usernameId = useId();
   const passwordId = useId();
@@ -88,12 +88,13 @@ export default function LoginForm() {
 
     setSubmitting(true);
     try {
-      const result = await signIn({ username: username.trim(), password });
+      const result = await signIn({ username: username.trim(), password, callbackUrl });
       if (result.ok) {
-        // `refresh` as well as `push`: the root layout reads leads on the
-        // server, so the worklist has to be re-fetched as the signed-in user
-        // rather than served from the cache built before signing in.
-        router.push("/");
+        // `replace`, not `push`: the login page should not be a Back
+        // destination once you are through it. `refresh` as well, because the
+        // portal layout is server-rendered per user — without it the router
+        // could paint a shell built before the session existed.
+        router.replace(result.redirectTo);
         router.refresh();
         return;
       }

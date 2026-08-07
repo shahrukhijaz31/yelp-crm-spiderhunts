@@ -1,9 +1,16 @@
+import AccessDenied from "@/components/AccessDenied";
+import { requireRole } from "@/lib/authz";
+
 /**
- * Placeholder. Settings has a nav slot because the next build phase needs
- * somewhere to put the API key and the upload endpoint configuration — see the
- * stub at `app/api/leads/upload/route.ts`.
+ * Settings — ADMIN only. Still a placeholder for the configuration that lands
+ * next, but it is the page that will hold the API key and the data-source
+ * switch, so it is administrator territory from the start rather than being
+ * opened up and locked down later.
  */
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const { allowed } = await requireRole("ADMIN", "/settings");
+  if (!allowed) return <AccessDenied />;
+
   const PLANNED = [
     {
       title: "API key",

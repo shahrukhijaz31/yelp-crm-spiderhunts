@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
 import { Fraunces, IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
-import { connection } from "next/server";
 
 import "./globals.css";
-import NavBar from "@/components/NavBar";
 import ThemeProvider from "@/components/ThemeProvider";
-import { LeadsProvider } from "@/components/LeadsProvider";
-import { listLeads } from "@/lib/leadDb";
-import { todayIso } from "@/lib/leadUtils";
 
 /**
  * Three faces, three jobs:
@@ -41,13 +36,17 @@ export const metadata: Metadata = {
   icons: { icon: "/logo.ico", shortcut: "/logo.ico" },
 };
 
-export default async function RootLayout({ children }: LayoutProps<"/">) {
-  // Lead data is read per request, not baked at build time: the worklist is
-  // live data, and callback highlighting is relative to "now".
-  await connection();
-  const today = todayIso();
-  const leads = await listLeads();
-
+/**
+ * The document shell, and nothing else.
+ *
+ * The nav bar, the lead store and the per-request database read used to live
+ * here. They moved into `app/(portal)/layout.tsx` when authentication landed,
+ * because a root layout wraps the login page too — and that meant every lead
+ * in the database was being fetched and serialised into the HTML of a page
+ * served to people who had not signed in. Nothing above the route group is
+ * allowed to touch lead data for that reason.
+ */
+export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     // suppressHydrationWarning: next-themes stamps data-theme on <html> before
     // React hydrates, so the server and client markup differ here by design.
@@ -57,13 +56,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       className={`${fraunces.variable} ${instrumentSans.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col bg-base text-fg">
-        <ThemeProvider>
-          {/* One store for every route: /import loads a CSV that / then shows. */}
-          <LeadsProvider initialLeads={leads} serverToday={today}>
-            <NavBar today={today} />
-            {children}
-          </LeadsProvider>
-        </ThemeProvider>
+        <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
   );

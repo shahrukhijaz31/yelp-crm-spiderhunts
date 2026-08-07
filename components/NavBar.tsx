@@ -5,7 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import ThemeToggle from "./ThemeToggle";
+import UserMenu from "./UserMenu";
 import { useLeads } from "./LeadsProvider";
+import { canAccess, type SessionUser } from "@/lib/access";
 
 /**
  * Top bar rather than a sidebar, deliberately: the worklist is an eight-column
@@ -38,21 +40,23 @@ const NAV = [
  */
 const SECONDARY = [
   { href: "/reports", label: "Reports" },
+  { href: "/users", label: "Users" },
   { href: "/settings", label: "Settings" },
 ] as const;
 
-export default function NavBar({ today }: { today: string }) {
+export default function NavBar({ today, user }: { today: string; user: SessionUser }) {
   const pathname = usePathname();
   const { stats } = useLeads();
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
-  // Sign-in is the one route outside the workspace: there is nothing to
-  // navigate to and no counts to read until you are through it, and a bar full
-  // of live lead totals above a login form would be advertising the data it is
-  // meant to be gating. The page brings its own brand mark and theme toggle.
-  if (pathname === "/login") return null;
+  // Tabs an agent cannot use are not drawn. This is tidiness, not security:
+  // the same policy (`canAccess`) is enforced again by every page and every
+  // API route against the session in Postgres, so typing the URL by hand gets
+  // an agent an Access Denied screen rather than the page.
+  const primary = NAV.filter((item) => canAccess(user.role, item.href));
+  const secondary = SECONDARY.filter((item) => canAccess(user.role, item.href));
 
   return (
     <nav className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
@@ -95,7 +99,7 @@ export default function NavBar({ today }: { today: string }) {
 
         {/* --- primary tabs -------------------------------------------- */}
         <ul role="tablist" aria-label="Workspaces" className="flex items-stretch gap-0.5">
-          {NAV.map((item) => {
+          {primary.map((item) => {
             const active = isActive(item.href);
 
             return (
@@ -128,7 +132,7 @@ export default function NavBar({ today }: { today: string }) {
         {/* --- utility group ------------------------------------------- */}
         <div className="ml-auto flex items-center gap-3 self-center">
           <ul className="hidden items-center gap-0.5 xl:flex">
-            {SECONDARY.map((item) => (
+            {secondary.map((item) => (
               <li key={item.href}>
                 <Link
                   href={item.href}
@@ -151,6 +155,8 @@ export default function NavBar({ today }: { today: string }) {
           <p className="hidden text-[12px] text-fg-3 2xl:block">{longDate(today)}</p>
 
           <ThemeToggle />
+
+          <UserMenu user={user} />
         </div>
       </div>
     </nav>

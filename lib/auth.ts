@@ -1,54 +1,87 @@
+import { HOME_PATH, safeCallbackUrl } from "./access";
+
 /**
- * The single seam between the login form and whatever ends up authenticating.
+ * The login form's view of authentication.
  *
- * The portal has no user store: every browser route sits behind the nginx
- * Basic Auth described in `deploy/nginx/leadportal.conf`, and the one route
- * that authenticates itself does so with a bearer token (`lib/ingestAuth.ts`).
- * So there is nothing here to check a password against yet, and inventing one
- * would mean shipping a credential check that looks real and protects nothing.
+ * One function, called from the browser, wrapping `POST /api/auth/login`. The
+ * route does the real work — password verification, throttling, minting the
+ * session — and sets an HttpOnly cookie the client cannot read. Nothing about
+ * the session is returned here on purpose: this module knows only whether the
+ * attempt succeeded and where to go next, so there is no user object floating
+ * around the client that could be mistaken for authority.
  *
- * What this module is instead: the shape the real call will have. The form
- * knows only `signIn` and the codes below, so wiring a backend later is a
- * change to this file and nowhere else —
- *
- *   const response = await fetch("/api/auth/login", {
- *     method: "POST",
- *     headers: { "content-type": "application/json" },
- *     body: JSON.stringify({ username, password }),
- *   });
- *   if (response.ok) return { ok: true };
- *   return { ok: false, code: response.status === 401 ? "invalid_credentials" : "server" };
- *
- * Until then, no credential is a valid one, so every attempt is genuinely
- * `invalid_credentials` rather than a pretend success.
+ * The error codes are the form's vocabulary. Each maps to one sentence in
+ * `AUTH_ERROR_MESSAGES`, and every failure path ends at one of them, so the
+ * form never has to invent a message from an HTTP status.
  */
 
-export type AuthErrorCode = "invalid_credentials" | "network" | "server";
+export type AuthErrorCode =
+  | "invalid_credentials"
+  | "account_disabled"
+  | "too_many_attempts"
+  | "network"
+  | "server";
 
-export type SignInResult = { ok: true } | { ok: false; code: AuthErrorCode };
+export type SignInResult = { ok: true; redirectTo: string } | { ok: false; code: AuthErrorCode };
 
 export interface Credentials {
   username: string;
   password: string;
+  /** Where the user was headed before being sent here. Sanitised server-side too. */
+  callbackUrl?: string;
 }
 
-/**
- * One message per failure, written for the person at the keyboard.
- *
- * `invalid_credentials` deliberately names neither field: telling someone the
- * username exists but the password is wrong tells that to anyone guessing.
- */
 export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
+  // Names neither field: telling someone the username exists but the password
+  // is wrong tells that to anyone guessing, too.
   invalid_credentials: "Incorrect username or password. Check both and try again.",
+  account_disabled: "This account has been disabled. Contact your administrator.",
+  too_many_attempts: "Too many sign-in attempts. Try again in a few minutes.",
   network: "Could not reach the server. Check your connection and try again.",
   server: "Something went wrong on our end. Try again in a moment.",
 };
 
+/** HTTP status / error code -> the form's vocabulary. */
+function codeFor(status: number, error: unknown): AuthErrorCode {
+  if (error === "account_disabled") return "account_disabled";
+  if (status === 429) return "too_many_attempts";
+  if (status === 401 || status === 400) return "invalid_credentials";
+  return "server";
+}
+
 export async function signIn(credentials: Credentials): Promise<SignInResult> {
-  // Nothing reads these yet — the fetch above is where they start mattering.
-  void credentials;
-  // Stands in for the round trip, so the submitting state is real rather than
-  // a frame long. Remove it with the fetch above.
-  await new Promise((resolve) => setTimeout(resolve, 600));
-  return { ok: false, code: "invalid_credentials" };
+  let response: Response;
+  try {
+    response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // `same-origin` is the default, stated because it matters: the session
+      // cookie comes back on this response and must be stored.
+      credentials: "same-origin",
+      body: JSON.stringify({
+        username: credentials.username,
+        password: credentials.password,
+        callbackUrl: credentials.callbackUrl ?? HOME_PATH,
+      }),
+    });
+  } catch {
+    return { ok: false, code: "network" };
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    error?: unknown;
+    redirectTo?: unknown;
+  };
+
+  if (!response.ok) return { ok: false, code: codeFor(response.status, payload.error) };
+
+  // Sanitised again on arrival. The server already did, and this costs nothing
+  // — a redirect target that has been through the network is worth re-checking
+  // before it is handed to the router.
+  return {
+    ok: true,
+    redirectTo: safeCallbackUrl(
+      typeof payload.redirectTo === "string" ? payload.redirectTo : HOME_PATH,
+    ),
+  };
 }

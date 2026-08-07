@@ -1,3 +1,4 @@
+import { apiAdmin } from "@/lib/authz";
 import { listLeads, mergeLeads } from "@/lib/leadDb";
 import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
 
@@ -12,9 +13,14 @@ import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
  * a plain string and touches no DOM or File API, so the browser path and this
  * one cannot drift on column aliases, phone validation or de-duplication.
  *
- * Deliberately *not* here: the API-key check the stub sketched out. This build
- * has no authentication anywhere, and a secret on one route would imply a
- * protection the rest of the app does not have. It goes in when auth does.
+ * ADMIN only. An import rewrites the shared worklist for everyone in the
+ * building, so it is not a thing an agent does — and hiding the Upload CSV tab
+ * from them would be worthless on its own, since posting a multipart body to a
+ * known URL takes one line of curl. The check below is what actually stops it.
+ *
+ * The scraper does not come through here. It posts to `/api/leads/ingest`,
+ * which authenticates with its own bearer token (`lib/ingestAuth.ts`) because
+ * it is a machine on another box with no session to carry.
  *
  * An upload **adds to** the worklist. It used to replace it — `deleteMany` then
  * insert — which was the right behaviour when the worklist lived in React state
@@ -80,6 +86,11 @@ async function readCsv(
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // Before the body is read, so an agent's 8MB upload is refused rather than
+  // parsed and then thrown away.
+  const auth = await apiAdmin();
+  if (auth instanceof Response) return auth;
+
   const read = await readCsv(request);
   if (read instanceof Response) return read;
 
