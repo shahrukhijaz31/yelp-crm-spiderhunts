@@ -56,10 +56,23 @@ NODE_MAJOR="$(node -v | sed 's/v\([0-9]*\).*/\1/')"
 [[ "$NODE_MAJOR" -ge 20 ]] || die "Node $(node -v) is too old; Next.js 16 needs >= 20.9."
 echo "  node $(node -v), nginx $(nginx -v 2>&1 | sed 's/.*\///'), $(psql --version)"
 
-for p in "$BLUE_PORT" "$GREEN_PORT"; do
-  ss -tln | grep -q ":${p} " && die "Port ${p} is already in use. Pick another pair and update deploy.sh."
+# The point of this check is "is another tenant on this port", not "is anything
+# listening". On a re-run — which is how a new setting like INGEST_TOKEN gets
+# added to an already-deployed box — our own slot is listening and that is
+# correct. Refusing then made the script a one-shot, which it is documented not
+# to be.
+for slot_port in "blue:${BLUE_PORT}" "green:${GREEN_PORT}"; do
+  slot="${slot_port%%:*}"; p="${slot_port##*:}"
+  if ss -tln | grep -q ":${p} "; then
+    if systemctl is-active --quiet "leadportal@${slot}"; then
+      echo "  port ${p} in use by leadportal@${slot} — ours, fine"
+    else
+      die "Port ${p} is in use by something that is not leadportal@${slot}. Pick another pair and update deploy.sh and the slot env files."
+    fi
+  else
+    echo "  port ${p} free"
+  fi
 done
-echo "  ports ${BLUE_PORT}/${GREEN_PORT} free"
 
 getent hosts "$DOMAIN" >/dev/null || die "${DOMAIN} does not resolve. sslip.io may be down."
 echo "  ${DOMAIN} resolves"

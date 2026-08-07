@@ -48,6 +48,12 @@ export default function NavBar({ today }: { today: string }) {
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
+  // Sign-in is the one route outside the workspace: there is nothing to
+  // navigate to and no counts to read until you are through it, and a bar full
+  // of live lead totals above a login form would be advertising the data it is
+  // meant to be gating. The page brings its own brand mark and theme toggle.
+  if (pathname === "/login") return null;
+
   return (
     <nav className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
       <div className="mx-auto flex h-[52px] w-full max-w-[1760px] items-stretch gap-6 px-6">
