@@ -213,12 +213,14 @@ export default function LeadRow({
         />
       </td>
 
-      {/* Callback stays immediate — picking a date is already deliberate. */}
+      {/* Booking stays immediate — it happens behind an explicit Book button in
+          a dialog, which is already the deliberate confirmation that the staged
+          Save/Cancel bar provides for the dropdown and the notes box. */}
       <td className="bg-recessed px-2 py-2 align-middle group-hover:bg-hover group-focus-within:bg-hover">
         <CallbackCell
           lead={lead}
           today={today}
-          onChange={(callbackDate) => onUpdate(lead.id, { callbackDate })}
+          onChange={(changes) => onUpdate(lead.id, changes)}
         />
       </td>
 

@@ -31,8 +31,11 @@ const COLUMNS: Array<{ label: string; width: string; working?: boolean }> = [
   // average: "Not interested" and an overdue date with its clear button are
   // what these columns have to hold without clipping.
   { label: "Status", width: "12%", working: true },
-  { label: "Callback", width: "10%", working: true },
-  { label: "Notes", width: "15.5%", working: true },
+  // "Callback" alone undersold it: this column is also how a meeting gets
+  // booked, and how the Meetings agenda is populated. A wider column pays for
+  // the time now shown beside the date.
+  { label: "Callback / meeting", width: "12%", working: true },
+  { label: "Notes", width: "13.5%", working: true },
 ];
 
 /** The whole list, always rendered in full — no pagination, no detail pages. */
