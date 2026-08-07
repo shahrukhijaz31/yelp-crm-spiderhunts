@@ -241,7 +241,19 @@ fi
 log "Installing the TLS vhost"
 cp "/etc/nginx/sites-available/${SITE}" "/tmp/${SITE}.http-only.bak"
 install -m 644 "$(dirname "$0")/nginx/leadportal.conf" "/etc/nginx/sites-available/${SITE}"
-install -m 644 "$(dirname "$0")/nginx/leadportal-upstream.conf" "/etc/nginx/conf.d/${SITE}-upstream.conf"
+
+# The upstream file is DEPLOY-MANAGED — deploy.sh rewrites it on every deploy to
+# name the live colour slot. The copy in the repo is only a first-run seed.
+# Installing it unconditionally silently repointed nginx back to whichever slot
+# the seed names, which on a re-run is a slot that may be running older code, or
+# be stopped, or (as happened here) be missing an environment variable that had
+# just been added. Traffic moved with no deploy and no log line saying so.
+if [[ ! -f "/etc/nginx/conf.d/${SITE}-upstream.conf" ]]; then
+  install -m 644 "$(dirname "$0")/nginx/leadportal-upstream.conf" "/etc/nginx/conf.d/${SITE}-upstream.conf"
+  log "Seeded the upstream file (first run)"
+else
+  log "Upstream file left alone — deploy.sh owns it ($(grep -o '127.0.0.1:[0-9]*' "/etc/nginx/conf.d/${SITE}-upstream.conf"))"
+fi
 
 # Same reasoning as above: revert to the known-good HTTP-only vhost rather than
 # leaving a config that will fail somebody else's reload later.
