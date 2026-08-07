@@ -13,7 +13,8 @@
     "db:seed": "prisma db seed",
     "db:seed:demo": "prisma db seed -- --demo",
     "db:studio": "prisma studio",
-    "user:create": "tsx scripts/create-user.ts"
+    "user:create": "tsx scripts/create-user.ts",
+    "test:recordings": "tsx scripts/test-recordings.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

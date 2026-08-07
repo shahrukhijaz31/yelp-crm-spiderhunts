@@ -81,6 +81,10 @@ model Lead {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  /// The call recording attached to this lead's meeting, if one has been
+  /// uploaded. At most one — see `MeetingRecording`.
+  recording MeetingRecording?
+
   /// Indexes follow the queries the UI actually runs: the stat bar and filters
   /// group by status, the Callbacks/Meetings views range-scan on callbackDate,
   /// and the import view scopes by batch. There is deliberately no unique
@@ -91,6 +95,71 @@ model Lead {
   @@index([sourceBatch])
   @@index([isDuplicate])
   @@map("leads")
+}
+
+/// A phone-call recording attached to a meeting.
+///
+/// "Meeting" is not a table in this app: membership of the Meetings view is
+/// derived from the lead itself (`lib/meetings.ts` — interested, or a date in
+/// the diary), so the meeting a recording belongs to *is* a lead, and the
+/// foreign key says so. Inventing a `meetings` table to hold this one column
+/// would mean two sources of truth for what is on the agenda, and the derived
+/// one would win every time.
+///
+/// **The audio is not here.** Only the metadata is: the bytes live under the
+/// storage root (`lib/recordingStorage.ts`) addressed by `storageKey`. A 25MB
+/// bytea per meeting would be carried by every backup, every `pg_dump` and —
+/// on a careless `SELECT *` — into application memory, to buy nothing that a
+/// file on disk does not already give.
+///
+/// One recording per meeting (`leadId` is unique). Replacing is genuinely
+/// replacing: the row is overwritten and the old object deleted, so there is
+/// no quiet accumulation of superseded audio that nobody can see but everybody
+/// is still storing.
+model MeetingRecording {
+  id String @id @default(cuid())
+
+  /// The meeting. Cascade because a recording of a lead that no longer exists
+  /// is unreachable by design — nothing can authorize access to it.
+  leadId String @unique @map("lead_id")
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Who uploaded it. This is the authorization subject, not a display field:
+  /// an agent may reach a recording only through this column matching their
+  /// own id (`lib/recordings.ts`). Restrict, not cascade — accounts here are
+  /// disabled rather than deleted, and a delete that silently took evidence
+  /// of client calls with it would be the wrong default.
+  uploadedById String @map("uploaded_by_user_id")
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  /// The agent's original filename, kept only to show them what they sent. It
+  /// never reaches the filesystem: `storageKey` is server-generated, so a
+  /// name like `../../etc/passwd` is a label and nothing more.
+  fileName String @map("file_name")
+  /// Server-decided content type, from the sniffed magic bytes rather than the
+  /// browser's claim. Sent back as `Content-Type` when streaming.
+  fileType String @map("file_type")
+  /// Bytes actually written, measured server-side.
+  fileSize Int    @map("file_size")
+
+  /// Path of the object beneath the storage root, e.g. `2026/08/<random>.mp3`.
+  /// Unique so two rows can never point at one file and have a delete of the
+  /// first orphan the second.
+  storageKey String @unique @map("storage_key")
+
+  /// Whole seconds, as read from the audio in the browser. Metadata only — it
+  /// is displayed, never used to decide anything — and clamped on the way in,
+  /// because it is the one field here the client is the source of.
+  durationSeconds Int? @map("duration_seconds")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// The admin view lists "meetings with a recording" newest first, and the
+  /// agent view filters to their own uploads.
+  @@index([uploadedById])
+  @@index([createdAt])
+  @@map("meeting_recordings")
 }
 
 /// Exactly two roles, and every user has one. ADMIN is the full portal; AGENT
@@ -138,6 +207,11 @@ model User {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   sessions Session[]
+  /// Call recordings this person uploaded. The back-reference exists so that
+  /// "who uploaded this" is a join rather than a second lookup, and so the
+  /// Restrict on the far side is visible from here: a user holding recordings
+  /// cannot be deleted out from under them.
+  recordings MeetingRecording[]
 
   @@map("users")
 }

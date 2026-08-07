@@ -55,6 +55,18 @@ npm run dev   # http://localhost:3000
   The worklist has no checkboxes and no export action. Everything is generated
   in the browser, and the writers are dynamically imported so they cost nothing
   until used.
+- **Call recordings** — one row on each meeting card, in the Meetings view.
+  An agent picks an audio file (MP3, WAV, M4A, WebM, OGG, up to 25MB),
+  confirms they are authorized to record and share the call, and watches a real
+  progress bar; the card then shows a compact player with play/pause, a
+  scrubber and the running time, plus the filename, size, who uploaded it and
+  when. Admins see and can play every recording — which is the point, since the
+  admin is the one taking the meeting — and can delete any of them. An agent
+  sees only their own uploads and may replace or delete only those.
+  Enforcement is entirely server-side (`lib/recordings.ts`): the audio has no
+  public URL, and playback is an authenticated range-streamed route, so no file
+  is downloaded just to be listened to. The bytes live on disk under
+  `RECORDINGS_DIR`; Postgres holds only the metadata.
 - **Themes** — dark (graphite + signal red) and light (cool slate), toggled from
   the nav bar and persisted to localStorage via next-themes. Colour lives in one
   place: every token is a `--c-*` variable defined twice in `app/globals.css`
@@ -94,6 +106,8 @@ three layers:
 | Reports, Settings, Users | yes | no |
 | `GET /api/leads`, `PATCH /api/leads/:id` | yes | yes |
 | `POST /api/leads/upload`, `/api/users*` | yes | **403** |
+| Upload a call recording against a meeting | yes | yes |
+| Play / read / replace / delete a call recording | any | only their own uploads — **404** for anyone else's |
 
 An agent who types an admin URL gets an Access Denied screen — not the login
 form, which they have already satisfied. There is deliberately no endpoint at
@@ -130,6 +144,10 @@ app/
   api/leads/[id]/route.ts     PATCH — persists one inline edit
   api/leads/upload/route.ts   POST — parses a CSV and merges it in, never wipes
   api/leads/ingest/route.ts   POST — the scraper's push: merges, token-guarded
+  api/meetings/[leadId]/recording/route.ts
+                              GET/POST/DELETE — a meeting's call recording
+  api/meetings/[leadId]/recording/stream/route.ts
+                              GET — the audio, authenticated, Range-aware
   api/users/route.ts          GET/POST — accounts            — ADMIN
   api/users/[id]/route.ts     PATCH — role, disable, rename  — ADMIN
 proxy.ts                      first gate: no session cookie -> /login (Next 16 middleware)
@@ -157,6 +175,9 @@ lib/
   leadUtils.ts                duplicates, callback state, stats
   views.ts                    the tab scopes (all / callback / overdue / issues)
   meetings.ts                 derived agenda: membership, buckets, day grouping
+  recordingRules.ts           call-recording limits, formats, magic-byte sniff (pure)
+  recordings.ts               call-recording queries and the permission policy
+  recordingStorage.ts         the object store: a directory, addressed by key
   filters.ts                  filter model, matching predicate, active-chip list
 ```
 
@@ -210,6 +231,7 @@ scraper CSV has no agent-owned fields, so seeding from it leaves every lead on
 | `npm run db:seed` | load sample data into an empty table |
 | `npm run db:studio` | browse the table in Prisma Studio |
 | `npm run user:create` | create a user (`-- --name … --username … --email … --role ADMIN`) |
+| `npm run test:recordings` | end-to-end check of the call-recording feature against a running server |
 
 `prisma generate` runs on `postinstall` and again at the start of `npm run
 build`, so a fresh clone or a schema change never needs it typed by hand. The
@@ -300,6 +322,64 @@ yielded a usable row is a `400`, not a quiet `200` — on a scheduled job, "0
 rows" that looks like success is how a broken scraper goes unnoticed for a week.
 
 Re-pushing the same folder is safe: the second run inserts nothing.
+
+## Call recordings
+
+Audio of a phone call, attached to a meeting so an admin can listen before
+taking it. It lives in the Meetings view as one row on the meeting card — there
+is no separate screen.
+
+**A meeting is a lead.** Membership of the Meetings view is derived
+(`lib/meetings.ts`: interested, or a date in the diary), so there is no
+`meetings` table to point a foreign key at, and inventing one would create a
+second answer to "what is on the agenda". `meeting_recordings.lead_id` is the
+meeting, unique — one current recording per meeting, and replacing means
+replacing.
+
+**Postgres holds metadata only.** `meeting_recordings` has the filename, the
+sniffed content type, the size, the duration, who uploaded it, when, and a
+`storage_key`. The audio is a file under `RECORDINGS_DIR`
+(`lib/recordingStorage.ts`), sharded `YYYY/MM/<32 random hex>.<ext>`, with the
+key generated server-side so no part of a path is attacker-influenced. A 25MB
+`bytea` per meeting would ride along in every backup and every careless
+`SELECT *` to buy nothing a file does not already give.
+
+Why a directory and not S3: this deploys to one VPS behind nginx, and an object
+store would mean another provider, another set of credentials in
+`/etc/leadportal/env`, and another way to be misconfigured. Everything outside
+`lib/recordingStorage.ts` addresses audio by an opaque key, so if that changes,
+swapping the body of four functions is the whole migration.
+
+**Permissions**, enforced in `lib/recordings.ts` and nowhere else:
+
+| | ADMIN | AGENT |
+| --- | --- | --- |
+| Upload against a meeting | yes | yes — the worklist is shared, so every meeting is theirs to manage |
+| Listen / read metadata | every recording | only recordings they uploaded |
+| Replace | any | only their own |
+| Delete | any | only their own |
+
+An agent asking about someone else's recording gets the same `404` as one
+asking about a meeting that does not exist, so probing ids reveals nothing.
+The UI hides buttons a role cannot use; that is tidiness — the checks above are
+what stop `curl`.
+
+**Security.** There is no public URL. The storage root is not under `public/`,
+nginx has no location for it, and the only way audio leaves the server is
+`GET /api/meetings/:leadId/recording/stream`, which resolves the caller from
+their session row before it opens the file. That route answers `Range` requests
+with `206`, which is what lets the player show a duration and scrub without
+downloading the call first. Uploads are validated by magic bytes, not by the
+`Content-Type` the browser claims, and the stored type is the sniffed one — so
+a file cannot be stored as audio and served back as something a browser would
+render.
+
+**Testing.** `npm run test:recordings` signs in over HTTP as a throwaway admin
+and two throwaway agents, and checks the lot: valid upload, invalid type,
+disguised type, oversized, streaming, range and suffix-range, replace, delete,
+cross-agent refusal, signed-out refusal, and that the Meetings page still
+renders. It creates and removes its own users and recordings, and needs the app
+running (`npm run dev`, or `TEST_BASE_URL=… ` against any instance).
 
 ## Expected CSV columns
 

@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 
+import RecordingCell from "./RecordingCell";
 import { formatMeetingTime, type Meeting } from "@/lib/meetings";
+import type { RecordingSummary } from "@/lib/recordingRules";
 import {
   CALL_STATUS_DOTS,
   CALL_STATUS_SHORT_LABELS,
@@ -14,15 +16,27 @@ import {
  * One booked call. Reschedule and complete are single deliberate clicks; the
  * detail fields (time, attendees, notes) open an editor with explicit Save and
  * Cancel, matching how the worklist stages status and notes edits.
+ *
+ * The call recording is a field on this card, not a feature beside it: one row
+ * under the meeting detail that is either a player or an upload button. It sits
+ * below the fold of the card's main row so the agenda still scans on time,
+ * name and status the way it always did.
  */
 export default function MeetingCard({
   meeting,
   today,
   onUpdate,
+  recording,
+  onRecordingSaved,
+  onRecordingDeleted,
 }: {
   meeting: Meeting;
   today: string;
   onUpdate: (id: string, changes: Partial<LeadEditableFields>) => void;
+  /** null when there is none, or when it belongs to another agent. */
+  recording: RecordingSummary | null;
+  onRecordingSaved: (recording: RecordingSummary) => void;
+  onRecordingDeleted: (leadId: string) => void;
 }) {
   const { lead, completed } = meeting;
   const [editing, setEditing] = useState(false);
@@ -67,14 +81,14 @@ export default function MeetingCard({
         <div className="w-20 shrink-0">
           {meeting.time ? (
             <span
-              className={`tnum block font-mono text-[14px] font-medium ${
-                completed ? "text-fg-4" : "text-fg"
+              className={`tnum block font-mono text-num font-semibold ${
+                completed ? "text-fg-3" : "text-fg"
               }`}
             >
               {formatMeetingTime(meeting.time)}
             </span>
           ) : (
-            <span className="block font-mono text-[13px] text-fg-4">— —</span>
+            <span className="block text-caption text-fg-3">No time</span>
           )}
           {overdue && (
             <span className="text-[10.5px] font-semibold uppercase tracking-wide text-accent-2">
@@ -86,12 +100,12 @@ export default function MeetingCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3
-              className={`text-[14px] font-semibold ${completed ? "text-fg-3" : "text-fg"}`}
+              className={`text-cell font-semibold ${completed ? "text-fg-3" : "text-fg"}`}
             >
               {lead.name}
             </h3>
             <span
-              className={`inline-flex items-center gap-1.5 rounded-[5px] px-2 py-0.5 text-[11.5px] font-medium ring-1 ring-inset ${CALL_STATUS_STYLES[lead.status]}`}
+              className={`inline-flex items-center gap-1.5 rounded-[5px] px-2 py-0.5 text-caption font-medium ring-1 ring-inset ${CALL_STATUS_STYLES[lead.status]}`}
             >
               <span
                 aria-hidden="true"
@@ -102,28 +116,28 @@ export default function MeetingCard({
               {CALL_STATUS_SHORT_LABELS[lead.status]}
             </span>
             {completed && (
-              <span className="inline-flex items-center gap-1 rounded-[5px] bg-st-green-bg px-2 py-0.5 text-[11.5px] font-medium text-st-green ring-1 ring-inset ring-st-green-line">
+              <span className="inline-flex items-center gap-1 rounded-[5px] bg-st-green-bg px-2 py-0.5 text-caption font-medium text-st-green ring-1 ring-inset ring-st-green-line">
                 <CheckIcon />
                 Done
               </span>
             )}
           </div>
 
-          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-3">
-            <span className="tnum font-mono text-fg-2">{lead.phone}</span>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-ui text-fg-3">
+            <span className="tnum font-mono text-num font-medium text-fg">{lead.phone}</span>
             {lead.address && <span className="truncate">{lead.address}</span>}
           </p>
 
           {!editing && (
             <>
               {lead.meetingAttendees && (
-                <p className="mt-1.5 text-[12.5px] text-fg-2">
-                  <span className="text-fg-4">With </span>
+                <p className="mt-1.5 text-ui text-fg-2">
+                  <span className="text-fg-3">With </span>
                   {lead.meetingAttendees}
                 </p>
               )}
               {lead.meetingNotes && (
-                <p className="mt-1 whitespace-pre-line text-[12.5px] leading-relaxed text-fg-2">
+                <p className="mt-1 whitespace-pre-line text-ui leading-relaxed text-fg-2">
                   {lead.meetingNotes}
                 </p>
               )}
@@ -144,14 +158,17 @@ export default function MeetingCard({
                 onChange={(event) =>
                   onUpdate(lead.id, { callbackDate: event.target.value || null })
                 }
-                className="h-8 rounded-lg border border-transparent bg-transparent px-2 text-[12.5px] text-fg-3 outline-none transition-colors hover:border-line-2 hover:bg-recessed hover:text-fg focus:border-accent focus:bg-recessed focus:text-fg focus:ring-2 focus:ring-accent/25"
+                className="h-9 rounded-lg border border-transparent bg-transparent px-2 text-ui text-fg-2 outline-none transition-colors hover:border-line-2 hover:bg-recessed hover:text-fg focus:border-accent focus:bg-recessed focus:text-fg focus:ring-2 focus:ring-accent/25"
               />
             </label>
 
             <button
               type="button"
               onClick={openEditor}
-              className="h-8 rounded-lg border border-line-2 bg-surface px-2.5 text-[12.5px] text-fg-2 transition-colors hover:border-fg-4 hover:text-fg"
+              // No `bg-surface` here: a background utility sits in Tailwind's
+              // utilities layer and would outrank `.ui-btn-secondary:hover`,
+              // killing the hover. The card is already on surface anyway.
+              className="ui-btn ui-btn-secondary h-9"
             >
               Details
             </button>
@@ -160,7 +177,7 @@ export default function MeetingCard({
               <button
                 type="button"
                 onClick={() => onUpdate(lead.id, { meetingCompletedAt: null })}
-                className="h-8 rounded-lg px-2.5 text-[12.5px] text-fg-3 underline decoration-line-2 underline-offset-4 transition-colors hover:text-fg"
+                className="ui-btn h-9 font-normal text-fg-3 underline decoration-line-2 underline-offset-4 hover:text-fg"
               >
                 Reopen
               </button>
@@ -168,7 +185,7 @@ export default function MeetingCard({
               <button
                 type="button"
                 onClick={() => onUpdate(lead.id, { meetingCompletedAt: today })}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-accent/50 px-3 text-[12.5px] font-medium text-accent transition-colors hover:bg-accent hover:text-on-accent"
+                className="ui-btn h-9 border border-accent/50 text-accent hover:bg-accent hover:text-on-accent"
               >
                 <CheckIcon />
                 Complete
@@ -177,6 +194,14 @@ export default function MeetingCard({
           </div>
         )}
       </div>
+
+      <RecordingCell
+        leadId={lead.id}
+        leadName={lead.name}
+        recording={recording}
+        onSaved={onRecordingSaved}
+        onDeleted={onRecordingDeleted}
+      />
 
       {editing && (
         <div className="mt-3 border-t border-line pt-3">
@@ -189,7 +214,7 @@ export default function MeetingCard({
                 onChange={(event) =>
                   setDraft({ ...draft, meetingTime: event.target.value })
                 }
-                className="h-8 rounded-lg border border-line-2 bg-recessed px-2 text-[12.5px] text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent/25"
+                className="ui-field h-9"
               />
             </label>
 
@@ -202,7 +227,7 @@ export default function MeetingCard({
                   setDraft({ ...draft, meetingAttendees: event.target.value })
                 }
                 placeholder="Who is joining, and in what capacity"
-                className="h-8 rounded-lg border border-line-2 bg-recessed px-2 text-[12.5px] text-fg outline-none placeholder:text-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
+                className="ui-field h-9"
               />
             </label>
           </div>
@@ -216,9 +241,9 @@ export default function MeetingCard({
               }
               rows={3}
               placeholder="Agenda, what to bring, what was agreed…"
-              className="w-full resize-y rounded-lg border border-line-2 bg-recessed p-2 text-[12.5px] leading-relaxed text-fg outline-none placeholder:text-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
+              className="ui-field h-auto w-full resize-y p-2.5 leading-relaxed"
             />
-            <span className="text-[11px] text-fg-4">
+            <span className="text-meta text-fg-3">
               Separate from the call notes on the worklist.
             </span>
           </label>
@@ -227,14 +252,14 @@ export default function MeetingCard({
             <button
               type="button"
               onClick={save}
-              className="h-8 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2"
+              className="ui-btn ui-btn-primary h-9"
             >
               Save details
             </button>
             <button
               type="button"
               onClick={() => setEditing(false)}
-              className="h-8 rounded-lg px-2.5 text-[12.5px] text-fg-3 transition-colors hover:text-fg"
+              className="ui-btn h-9 text-fg-3 hover:bg-hover hover:text-fg"
             >
               Cancel
             </button>

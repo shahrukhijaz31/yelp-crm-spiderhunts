@@ -49,10 +49,12 @@ binary** — the same build runs on Windows and Ubuntu.
   blue/      release slot, port 3031
   green/     release slot, port 3032
 /etc/leadportal/
-  env             root:root 0600 — DATABASE_URL, NODE_ENV, HOSTNAME
+  env             root:root 0600 — DATABASE_URL, NODE_ENV, HOSTNAME, RECORDINGS_DIR
   slot-blue.env   PORT=3031
   slot-green.env  PORT=3032
   db-password     root:root 0600
+/var/lib/leadportal/
+  recordings/     uploaded call audio, leadportal:leadportal 0750
 /etc/nginx/sites-available/leadportal
 /etc/nginx/conf.d/leadportal-upstream.conf   ← rewritten by deploy.sh
 /etc/nginx/leadportal.htpasswd
@@ -152,6 +154,36 @@ than quietly downgrading the cookie.
 > block and the `auth_basic off;` lines from the exempted locations, then
 > `nginx -t && systemctl reload nginx`. Leaving it in place is also fine — the
 > application no longer depends on it either way.
+
+### Call recordings
+
+Uploaded audio is written to `/var/lib/leadportal/recordings`, set as
+`RECORDINGS_DIR` in `/etc/leadportal/env` and granted to the unit with
+`ReadWritePaths=` (the service runs under `ProtectSystem=strict`, so everything
+else is read-only). It is outside the release tree on purpose: a deploy
+replaces the slot directory wholesale, so recordings kept inside it would be
+destroyed by the next release and a rollback could not bring them back. Both
+slots point at the same directory, which is what makes a blue/green switch
+invisible to playback.
+
+The first deploy carrying this feature needs `provision.sh` re-run — it is
+idempotent, and it creates the directory and appends `RECORDINGS_DIR` to the
+existing env file without touching any other key:
+
+```bash
+ssh leadportal 'bash /var/www/vhosts/leadportal/repo/deploy/provision.sh'
+ssh leadportal 'systemctl daemon-reload && systemctl restart leadportal@blue leadportal@green'
+```
+
+Without that, uploads fail with a permission error on a read-only filesystem
+and nothing else in the app is affected.
+
+Back it up with the database, not instead of it: a row in `meeting_recordings`
+whose file is missing streams a `410`, and a file with no row is unreachable.
+
+```bash
+ssh leadportal 'du -sh /var/lib/leadportal/recordings'   # how much audio is stored
+```
 
 ### Migration safety
 

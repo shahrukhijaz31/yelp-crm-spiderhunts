@@ -29,6 +29,11 @@ set -euo pipefail
 SITE="leadportal"
 APP_ROOT="/var/www/vhosts/${SITE}"
 ENV_DIR="/etc/${SITE}"
+# Uploaded call recordings. Deliberately not under APP_ROOT: a deploy replaces
+# the whole release directory, so anything stored there is gone at the next
+# release and a rollback cannot bring it back. /var/lib is where state that
+# outlives the code belongs.
+RECORDINGS_DIR_PATH="/var/lib/${SITE}/recordings"
 DB_NAME="lead_portal"
 DB_USER="leadportal"
 DOMAIN="leadportal.169-58-34-205.sslip.io"
@@ -103,6 +108,14 @@ chown -R "${DB_USER}:${DB_USER}" "${APP_ROOT}/blue" "${APP_ROOT}/green"
 # build into.
 chown -R root:root "${APP_ROOT}/repo"
 
+# Call recordings: written by the app user, readable by nobody else. 0750 on
+# the parent as well, because the filenames alone say how many client calls
+# have been recorded and when.
+log "Creating ${RECORDINGS_DIR_PATH}"
+mkdir -p "$RECORDINGS_DIR_PATH"
+chown -R "${DB_USER}:${DB_USER}" "/var/lib/${SITE}"
+chmod 750 "/var/lib/${SITE}" "$RECORDINGS_DIR_PATH"
+
 # --- Database on the EXISTING cluster --------------------------------------
 log "Configuring database on the existing PostgreSQL 17 cluster"
 mkdir -p "$ENV_DIR"; chmod 700 "$ENV_DIR"
@@ -174,6 +187,11 @@ DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@localhost:5432/${DB_NAME}?schem
 # route rejects every request rather than accepting anonymous writes, so an
 # empty value here disables scraper ingest — it does not open it up.
 INGEST_TOKEN="${INGEST_TOKEN}"
+# Where uploaded call recordings are written. Outside the release tree, because
+# a deploy replaces the slot directory wholesale — audio kept inside it would
+# be destroyed by the next release and unrecoverable by a rollback. The unit
+# file grants write access to exactly this path.
+RECORDINGS_DIR="${RECORDINGS_DIR_PATH}"
 EOF
   chmod 600 "${ENV_DIR}/env"
 else
@@ -184,6 +202,10 @@ else
   if ! grep -q '^INGEST_TOKEN=' "${ENV_DIR}/env"; then
     printf 'INGEST_TOKEN="%s"\n' "$INGEST_TOKEN" >> "${ENV_DIR}/env"
     log "Added INGEST_TOKEN to the existing ${ENV_DIR}/env"
+  fi
+  if ! grep -q '^RECORDINGS_DIR=' "${ENV_DIR}/env"; then
+    printf 'RECORDINGS_DIR="%s"\n' "$RECORDINGS_DIR_PATH" >> "${ENV_DIR}/env"
+    log "Added RECORDINGS_DIR to the existing ${ENV_DIR}/env"
   fi
 fi
 

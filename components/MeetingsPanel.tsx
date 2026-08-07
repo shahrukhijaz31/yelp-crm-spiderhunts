@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 
 import MeetingCard from "./MeetingCard";
 import { useLeads } from "./LeadsProvider";
+import type { Role } from "@/lib/access";
+import type { RecordingSummary } from "@/lib/recordingRules";
 import {
   collectMeetings,
   countByBucket,
@@ -27,10 +29,37 @@ import {
  * Nothing here owns a list of meetings. Membership is computed from the leads
  * on every render, so a status change made on the worklist shows up here
  * immediately and disappears again if it is undone.
+ *
+ * Call recordings are the exception, and only because they are not derivable
+ * from a lead: they arrive as a map keyed by meeting, read once on the server
+ * with the caller's permissions already applied (`listRecordingsFor`), so a
+ * card never has to ask whether it may show a player — if a recording is in
+ * the map, this user may hear it.
  */
-export default function MeetingsPanel() {
+export default function MeetingsPanel({
+  role,
+  initialRecordings,
+}: {
+  role: Role;
+  /** Keyed by lead id. Admins get every recording; agents get their own. */
+  initialRecordings: Record<string, RecordingSummary>;
+}) {
   const { leads, today, updateLead } = useLeads();
   const [bucket, setBucket] = useState<MeetingBucket>("today");
+  const [recordings, setRecordings] =
+    useState<Record<string, RecordingSummary>>(initialRecordings);
+
+  const onRecordingSaved = useCallback((recording: RecordingSummary) => {
+    setRecordings((current) => ({ ...current, [recording.leadId]: recording }));
+  }, []);
+
+  const onRecordingDeleted = useCallback((leadId: string) => {
+    setRecordings((current) => {
+      const next = { ...current };
+      delete next[leadId];
+      return next;
+    });
+  }, []);
 
   const meetings = useMemo(() => collectMeetings(leads, today), [leads, today]);
   const counts = useMemo(() => countByBucket(meetings), [meetings]);
@@ -42,11 +71,15 @@ export default function MeetingsPanel() {
   ).length;
   const doneToday = counts.today - openToday;
 
+  const withRecordings = meetings.filter(
+    (meeting) => recordings[meeting.lead.id] !== undefined,
+  ).length;
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <header>
-        <h1 className="display-num text-[26px] leading-none text-fg">Meetings</h1>
-        <p className="mt-2.5 text-[13px] leading-relaxed text-fg-3">
+        <h1 className="page-title">Meetings</h1>
+        <p className="mt-3 page-intro">
           Every interested lead and everything with a date in the diary. Leads
           arrive here on their own — mark one{" "}
           <span className="text-fg-2">Called - Interested</span> on the{" "}
@@ -61,7 +94,7 @@ export default function MeetingsPanel() {
       </header>
 
       {counts.today > 0 && (
-        <p className="rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5 text-[13px] text-fg">
+        <p className="rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5 text-ui text-fg">
           <span className="tnum font-mono font-medium text-accent">{openToday}</span>{" "}
           still to run today
           {doneToday > 0 && (
@@ -70,6 +103,19 @@ export default function MeetingsPanel() {
               · <span className="tnum font-mono">{doneToday}</span> already done
             </span>
           )}
+        </p>
+      )}
+
+      {/* How many of the meetings on the agenda have audio to listen to. For an
+          admin that is the whole point of the screen — it is where you find the
+          calls to hear before walking into the meeting — so it is stated once
+          here rather than left to be discovered by scrolling. */}
+      {withRecordings > 0 && (
+        <p className="text-caption text-fg-3">
+          <span className="tnum font-mono font-medium text-fg-2">{withRecordings}</span>{" "}
+          {withRecordings === 1 ? "meeting has" : "meetings have"} a call recording
+          attached
+          {role === "ADMIN" ? "" : " that you uploaded"}.
         </p>
       )}
 
@@ -88,13 +134,18 @@ export default function MeetingsPanel() {
                 type="button"
                 aria-selected={active}
                 onClick={() => setBucket(candidate)}
-                className={`group relative flex items-center gap-2 px-3.5 pb-2.5 pt-2 text-[13px] font-medium transition-colors ${
-                  active ? "text-fg" : "text-fg-3 hover:text-fg-2"
+                className={`group relative flex items-center gap-2 rounded-t-lg px-3.5 pb-2.5 pt-2 text-ui transition-colors ${
+                  // Matches the worklist tabs exactly: weight and ink shift
+                  // together with the accent rule, so the active tab is
+                  // obvious from three signals rather than one.
+                  active
+                    ? "font-semibold text-fg"
+                    : "font-medium text-fg-3 hover:bg-hover hover:text-fg-2"
                 }`}
               >
                 {MEETING_BUCKET_LABELS[candidate]}
                 <span
-                  className={`tnum rounded px-1.5 py-0.5 font-mono text-[11px] font-medium transition-colors ${
+                  className={`tnum rounded px-1.5 py-0.5 font-mono text-meta font-medium transition-colors ${
                     active
                       ? "bg-accent text-on-accent"
                       : "bg-rail text-fg-3 group-hover:text-fg-2"
@@ -104,7 +155,7 @@ export default function MeetingsPanel() {
                 </span>
                 <span
                   aria-hidden="true"
-                  className={`absolute inset-x-0 -bottom-px h-[2px] ${
+                  className={`absolute inset-x-0 -bottom-px h-[2px] transition-colors ${
                     active ? "bg-accent" : "bg-transparent"
                   }`}
                 />
@@ -112,13 +163,13 @@ export default function MeetingsPanel() {
             );
           })}
         </div>
-        <p className="mt-3 text-[12px] text-fg-4">
+        <p className="mt-3 text-caption text-fg-3">
           {MEETING_BUCKET_HINTS[bucket]}
         </p>
       </div>
 
       {shown.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line-2 bg-surface px-4 py-10 text-center text-[13px] text-fg-4">
+        <p className="rounded-xl border border-dashed border-line-2 bg-surface px-4 py-10 text-center text-ui text-fg-3">
           {bucket === "unscheduled"
             ? "Every interested lead has a date booked."
             : `Nothing ${MEETING_BUCKET_LABELS[bucket].toLowerCase()}.`}
@@ -137,6 +188,9 @@ export default function MeetingsPanel() {
                     meeting={meeting}
                     today={today}
                     onUpdate={updateLead}
+                    recording={recordings[meeting.lead.id] ?? null}
+                    onRecordingSaved={onRecordingSaved}
+                    onRecordingDeleted={onRecordingDeleted}
                   />
                 ))}
               </div>

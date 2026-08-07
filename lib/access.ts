@@ -61,6 +61,14 @@ const PUBLIC_PATHS = new Set<string>([
  * the URLs predate the nav labels. Both are listed because both are the whole
  * lead database leaving or entering the system in one action.
  */
+/*
+ * Deliberately not here: `/api/meetings/:id/recording*`. Call recordings are
+ * not gated by path — both roles may upload one, and whether a given recording
+ * may be played or deleted depends on who uploaded it, which is a row in the
+ * database rather than a prefix. That decision lives in `lib/recordings.ts`;
+ * listing the path here would either lock agents out of their own job or say
+ * nothing useful.
+ */
 const ADMIN_PREFIXES = [
   "/export",
   "/import",

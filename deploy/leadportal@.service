@@ -84,6 +84,12 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 # runtime cache, so that one directory is punched back out.
 ReadWritePaths=/var/www/vhosts/leadportal/%i/.next
 
+# Uploaded call recordings (RECORDINGS_DIR). Outside the release tree on
+# purpose: a deploy replaces the slot directory wholesale, so audio stored
+# inside it would be destroyed by the next release. Both slots point at this
+# one directory, which is also what lets a rollback keep the recordings.
+ReadWritePaths=/var/lib/leadportal/recordings
+
 # The box has 47GB, but a runaway render should kill this process rather than
 # pressure the nine other tenants.
 MemoryMax=1G

@@ -36,6 +36,11 @@ yarn-error.log*
 # learns that DATABASE_URL is required.
 !.env.example
 
+# Uploaded call recordings, when RECORDINGS_DIR is left at its development
+# default (lib/recordingStorage.ts). Client audio, never committed. Production
+# puts these under /var/lib/leadportal, outside the release tree entirely.
+/.data/
+
 # vercel
 .vercel
 
