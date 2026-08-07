@@ -22,16 +22,18 @@ export default function Breakdown({
   return (
     <div
       className={`grid gap-x-10 gap-y-6 ${
-        full ? "grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px]" : "grid-cols-[minmax(0,1fr)_260px]"
+        full
+          ? "grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px]"
+          : "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px]"
       }`}
     >
       <section>
         <div className="flex items-baseline justify-between">
           <h2 className="eyebrow">Status mix</h2>
-          <p className="text-[12px] text-fg-3">
+          <p className="text-ui text-fg-3">
             <span className="tnum font-mono text-fg-2">{stats.called}</span> of{" "}
             <span className="tnum font-mono text-fg-2">{stats.total}</span> worked
-            <span className="ml-2 text-fg-4">
+            <span className="ml-2 text-fg-3">
               {stats.total === 0
                 ? "0%"
                 : `${Math.round((stats.called / stats.total) * 100)}%`}
@@ -58,7 +60,9 @@ export default function Breakdown({
         </div>
 
         <div
-          className={`mt-4 grid gap-x-8 gap-y-2 ${full ? "max-w-[640px] grid-cols-3" : "max-w-[820px] grid-cols-4"}`}
+          className={`mt-4 grid gap-x-8 gap-y-2 ${full
+          ? "max-w-[640px] grid-cols-2 sm:grid-cols-3"
+          : "max-w-[820px] grid-cols-2 sm:grid-cols-4"}`}
         >
           {CALL_STATUSES.map((status) => (
             <div key={status} className="flex items-baseline gap-2">
@@ -67,12 +71,12 @@ export default function Breakdown({
                 className={`h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full ${CALL_STATUS_DOTS[status]}`}
               />
               <span
-                className={`tnum font-mono font-semibold text-fg ${full ? "text-[14px]" : "text-[12px]"}`}
+                className={`tnum font-mono font-semibold text-fg ${full ? "text-num" : "text-caption"}`}
               >
                 {stats.byStatus[status]}
               </span>
               <span
-                className={`truncate text-fg-3 ${full ? "text-[13px]" : "text-[12px]"}`}
+                className={`truncate text-fg-3 ${full ? "text-ui" : "text-caption"}`}
               >
                 {CALL_STATUS_SHORT_LABELS[status]}
               </span>
@@ -116,13 +120,13 @@ function QualityRow({
         aria-hidden="true"
         className={`h-1.5 w-1.5 rounded-full ${value > 0 ? dot : "bg-line-2"}`}
       />
-      <dt className={`text-fg-3 ${full ? "text-[13px]" : "text-[12px]"}`}>
+      <dt className={`text-fg-3 ${full ? "text-ui" : "text-caption"}`}>
         {label}
       </dt>
       <dd
         className={`tnum ml-auto font-mono font-medium ${
-          value > 0 ? "text-fg" : "text-fg-4"
-        } ${full ? "text-[15px]" : "text-[13px]"}`}
+          value > 0 ? "text-fg" : "text-fg-3"
+        } ${full ? "text-cell" : "text-ui"}`}
       >
         {value}
       </dd>

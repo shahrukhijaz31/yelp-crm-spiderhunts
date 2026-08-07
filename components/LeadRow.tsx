@@ -14,9 +14,17 @@ const SAVED_FEEDBACK_MS = 1800;
 
 /**
  * Typographic hierarchy, in order of what an agent needs before dialling:
- *   PRIMARY    business name (14px semibold ink) and phone (14px mono ink)
- *   SECONDARY  address, category, website (12.5px, muted)
- *   TERTIARY   rating and owner (11px, quietest)
+ *   PRIMARY    business name (`text-cell`, semibold, full-contrast ink) and
+ *              phone (`text-num`, mono, full-contrast ink)
+ *   SECONDARY  address, website (`text-ui`, fg-2) then category (fg-3)
+ *   TERTIARY   rating and owner (`text-meta`, quietest step that is still read)
+ *
+ * Four sizes across the row, not one: the gap between the name and everything
+ * beside it is what lets an agent find a business by shape rather than by
+ * reading each cell, and it is worth more than any absolute font size. The
+ * sizes themselves are named steps from `globals.css`, so the whole table's
+ * density is retuned there rather than cell by cell.
+ *
  * The working columns — status, callback, notes — are set apart by living on a
  * faintly tinted panel to the right of a hairline.
  *
@@ -86,15 +94,11 @@ export default function LeadRow({
   }
 
   // Callback urgency is the only row-level marker now that unreachable leads
-  // are filtered out at ingest. The marker is a left border on the first cell —
-  // a positioned pseudo-element on a <tr> gets laid out as an anonymous cell
-  // and shunts the whole row across.
-  const accent =
-    state === "overdue"
-      ? "border-l-accent/40"
-      : state === "today"
-        ? "border-l-accent"
-        : "border-l-transparent";
+  // are filtered out at ingest. It is drawn as an inset stripe down the first
+  // cell — see `.lead-table-frozen td[data-urgency]` — rather than as a border
+  // on the <tr>, since a positioned pseudo-element on a row gets laid out as
+  // an anonymous cell and shunts the whole row across.
+  const urgency = state === "overdue" || state === "today" ? state : undefined;
 
   // The scraper stores whatever Yelp displayed, usually a bare domain, which is
   // a relative path to a browser. Null means it is not a linkable address.
@@ -104,7 +108,10 @@ export default function LeadRow({
 
   return (
     <tr
-      className={`group border-b border-line/70 align-middle transition-colors hover:bg-hover ${
+      // `focus-within` as well as `hover`: tabbing through the working columns
+      // should light the row up the same way the cursor does, or a keyboard
+      // user has no idea which lead they are about to change.
+      className={`group border-b border-line align-middle transition-colors hover:bg-hover focus-within:bg-hover ${
         justSaved ? "row-saved" : ""
       }`}
       // Escape anywhere in the row abandons the pending edit.
@@ -115,25 +122,36 @@ export default function LeadRow({
         }
       }}
     >
-      <td className={`border-l-[3px] py-2 pl-4 pr-3 ${accent}`}>
+      {/* pl-[19px] matches the header: 3px of stripe plus 16px of gutter. */}
+      <td data-urgency={urgency} className="py-2.5 pl-[19px] pr-3">
         <span
-          className="block truncate text-[14px] font-semibold leading-tight tracking-[-0.005em] text-fg"
+          className="block truncate text-cell font-semibold tracking-[-0.006em] text-fg"
           title={lead.name}
         >
           {lead.name}
         </span>
-        <div className="mt-px flex items-center gap-2 text-[10.5px] leading-tight text-fg-4">
-          {lead.rating !== null && (
-            <span className="tnum font-mono">{lead.rating.toFixed(1)}★</span>
-          )}
-          {lead.owner && <span className="truncate">{lead.owner}</span>}
-        </div>
+        {/* Only drawn when there is something to say — an always-present empty
+            line under every name would cost 16px a row across the whole list. */}
+        {(lead.rating !== null || lead.owner) && (
+          <div className="mt-0.5 flex items-center gap-2 text-meta text-fg-3">
+            {lead.rating !== null && (
+              <span className="tnum shrink-0 font-mono">
+                {lead.rating.toFixed(1)}★
+              </span>
+            )}
+            {lead.owner && (
+              <span className="truncate" title={lead.owner}>
+                {lead.owner}
+              </span>
+            )}
+          </div>
+        )}
       </td>
 
       {/* Always present: `cleanLeads` drops rows without a dialable number. */}
-      <td className="whitespace-nowrap px-3 py-2">
-        <span className="flex items-center gap-1.5">
-          <span className="tnum font-mono text-[13.5px] font-medium text-fg">
+      <td className="whitespace-nowrap px-2.5 py-2.5">
+        <span className="flex items-center gap-2">
+          <span className="tnum font-mono text-num font-medium tracking-[-0.01em] text-fg">
             {lead.phone}
           </span>
           <WhatsAppLink phone={lead.phone} leadName={lead.name} />
@@ -141,26 +159,26 @@ export default function LeadRow({
       </td>
 
       <td
-        className="truncate px-3 py-2 text-[12.5px] text-fg-2"
+        className="truncate px-3 py-2.5 text-ui text-fg-2"
         title={lead.address}
       >
         {lead.address || <Flag>No address</Flag>}
       </td>
 
-      <td className="truncate px-3 py-2 text-[12.5px] text-fg-3">
+      <td className="truncate px-3 py-2.5 text-ui text-fg-3">
         {lead.categories.length > 0 ? (
           <span title={lead.categories.join(", ")}>
             {lead.categories.slice(0, 2).join(", ")}
             {lead.categories.length > 2 && (
-              <span className="text-fg-4"> +{lead.categories.length - 2}</span>
+              <span className="text-fg-3"> +{lead.categories.length - 2}</span>
             )}
           </span>
         ) : (
-          <span className="text-fg-4">—</span>
+          <span className="text-fg-3">—</span>
         )}
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-3 py-2.5">
         {!lead.website ? (
           <Flag>No website</Flag>
         ) : websiteUrl ? (
@@ -169,24 +187,25 @@ export default function LeadRow({
             target="_blank"
             rel="noopener noreferrer"
             title={websiteUrl}
-            className="block truncate text-[12.5px] text-fg-2 underline decoration-fg-4/40 underline-offset-2 transition-colors hover:text-fg hover:decoration-fg-2"
+            className="block truncate rounded-sm text-ui text-fg-2 underline decoration-fg-4/40 underline-offset-[3px] transition-colors hover:text-fg hover:decoration-accent"
           >
             {displayWebsite(lead.website)}
           </a>
         ) : (
           // Scraped text that is not a usable address. Still shown — an agent
           // may recognise it — but not as a link that would go nowhere.
-          <span
-            title={lead.website}
-            className="block truncate text-[12.5px] text-fg-4"
-          >
+          <span title={lead.website} className="block truncate text-ui text-fg-3">
             {displayWebsite(lead.website)}
           </span>
         )}
       </td>
 
-      {/* --- working columns: tinted panel behind the interactive cells --- */}
-      <td className="border-l border-line bg-recessed px-3 py-2 align-top group-hover:bg-hover">
+      {/* --- working columns: tinted panel behind the interactive cells ---
+          All three are middle-aligned so the status chip, the callback date
+          and the first line of a note sit on one optical line across the row,
+          and the notes cell simply grows about its centre when a pending bar
+          appears under it. */}
+      <td className="border-l border-line bg-recessed px-2 py-2 align-middle group-hover:bg-hover group-focus-within:bg-hover">
         <StatusSelect
           value={shownStatus}
           pending={draft?.status !== undefined}
@@ -195,7 +214,7 @@ export default function LeadRow({
       </td>
 
       {/* Callback stays immediate — picking a date is already deliberate. */}
-      <td className="bg-recessed px-2 py-2 align-top group-hover:bg-hover">
+      <td className="bg-recessed px-2 py-2 align-middle group-hover:bg-hover group-focus-within:bg-hover">
         <CallbackCell
           lead={lead}
           today={today}
@@ -203,7 +222,7 @@ export default function LeadRow({
         />
       </td>
 
-      <td className="bg-recessed py-1.5 pl-2 pr-4 align-top group-hover:bg-hover">
+      <td className="bg-recessed py-2 pl-2 pr-4 align-middle group-hover:bg-hover group-focus-within:bg-hover">
         <NotesCell
           value={shownNotes}
           leadName={lead.name}
@@ -226,7 +245,7 @@ export default function LeadRow({
         {justSaved && (
           <p
             role="status"
-            className="mt-1.5 flex items-center gap-1.5 px-2 text-[11px] font-medium text-st-green"
+            className="mt-1.5 flex items-center gap-1.5 px-2 text-meta font-medium text-st-green"
           >
             <CheckIcon />
             Saved
@@ -259,7 +278,7 @@ function PendingBar({
           live in the tooltip rather than wrapping the bar onto two lines. */}
       <span
         title={`Unsaved changes: ${fields.join(", ").toLowerCase()}`}
-        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-st-gold"
+        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-meta font-medium text-st-gold"
       >
         <span
           aria-hidden="true"
@@ -277,7 +296,7 @@ function PendingBar({
           type="button"
           onClick={onCancel}
           aria-label={`Discard changes to ${leadName}`}
-          className="rounded px-1.5 py-1 text-[11.5px] text-fg-3 transition-colors hover:bg-line hover:text-fg"
+          className="rounded px-2 py-1 text-caption font-medium text-fg-3 transition-colors hover:bg-line hover:text-fg"
         >
           Cancel
         </button>
@@ -285,7 +304,7 @@ function PendingBar({
           type="button"
           onClick={onSave}
           aria-label={`Save changes to ${leadName}`}
-          className="inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-[11.5px] font-medium text-on-accent transition-colors hover:bg-accent-2"
+          className="inline-flex items-center gap-1 rounded bg-accent px-2.5 py-1 text-caption font-medium text-on-accent transition-colors hover:bg-accent-2"
         >
           <CheckIcon />
           Save
@@ -317,7 +336,7 @@ function CheckIcon() {
  */
 function Flag({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1 text-[12px] font-medium text-warn">
+    <span className="inline-flex items-center gap-1.5 text-ui font-medium text-warn">
       <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0" aria-hidden="true">
         <path
           d="M6 1.6 11.2 10.6H0.8z"

@@ -50,7 +50,7 @@ export default function Worklist() {
   );
 
   return (
-    <main className="mx-auto flex w-full max-w-[1760px] flex-1 flex-col px-7 pb-7">
+    <main className="mx-auto flex w-full max-w-[1760px] flex-1 flex-col px-4 pb-7 sm:px-7">
       <HeadlineStrip stats={stats} />
 
       <ViewTabs
@@ -67,7 +67,7 @@ export default function Worklist() {
         </div>
       )}
 
-      <p className="mt-3.5 text-[12px] text-fg-4">{WORKLIST_VIEW_HINTS[view]}</p>
+      <p className="mt-3 text-caption text-fg-3">{WORKLIST_VIEW_HINTS[view]}</p>
 
       <div className="mt-2.5">
         <FilterToolbar

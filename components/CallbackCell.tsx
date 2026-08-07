@@ -33,7 +33,7 @@ const STATE = {
   },
   none: {
     stripe: "bg-transparent",
-    text: "text-fg-4",
+    text: "text-fg-3",
     icon: "text-fg-4",
     fill: "bg-transparent",
   },
@@ -53,18 +53,17 @@ export default function CallbackCell({
 
   return (
     <div className="group/cb flex items-center">
+      {/* The focus ring lives on the label for the same reason as the status
+          chip's: the date input on top is transparent. */}
       <label
-        className={`relative inline-flex cursor-pointer items-stretch overflow-hidden rounded-r ${tone.fill}`}
+        className={`relative inline-flex cursor-pointer items-stretch overflow-hidden rounded-r transition-shadow focus-within:ring-2 focus-within:ring-accent ${tone.fill}`}
       >
-        <span
-          aria-hidden="true"
-          className={`w-[2px] shrink-0 ${tone.stripe}`}
-        />
+        <span aria-hidden="true" className={`w-[2px] shrink-0 ${tone.stripe}`} />
         {lead.callbackDate ? (
-          <span className="pointer-events-none inline-flex items-center gap-1.5 py-1 pl-2 pr-1.5">
+          <span className="pointer-events-none inline-flex items-center gap-1.5 py-1.5 pl-2 pr-1.5">
             <CalendarIcon className={tone.icon} />
             <span
-              className={`tnum whitespace-nowrap font-mono text-[12px] font-medium ${tone.text}`}
+              className={`tnum whitespace-nowrap font-mono text-caption font-semibold ${tone.text}`}
             >
               {formatCallbackDate(lead.callbackDate, today)}
             </span>
@@ -75,9 +74,13 @@ export default function CallbackCell({
             )}
           </span>
         ) : (
-          <span className="pointer-events-none inline-flex items-center gap-1.5 py-1 pl-2 pr-1 text-fg-4 transition-colors group-hover/cb:text-fg-2">
+          // "No callback" rather than a pair of dashes. Two dashes read as a
+          // rendering fault or a field that failed to load; the words say the
+          // state is known and empty, and they say it at a size an agent can
+          // take in from the same glance that reads the row.
+          <span className="pointer-events-none inline-flex items-center gap-1.5 py-1.5 pl-2 pr-2 text-fg-3 transition-colors group-hover/cb:text-fg">
             <CalendarIcon className="" />
-            <span className="font-mono text-[12px]">— —</span>
+            <span className="whitespace-nowrap text-caption">No callback</span>
           </span>
         )}
         <input
@@ -95,12 +98,28 @@ export default function CallbackCell({
           onClick={() => onChange(null)}
           aria-label="Clear callback date"
           title="Clear callback date"
-          className="ml-0.5 rounded px-1 text-[13px] leading-none text-fg-4 opacity-0 transition-opacity hover:text-fg group-hover/cb:opacity-100"
+          // Revealed by keyboard focus as well as by the cursor. Hidden on
+          // `opacity` alone it was reachable by Tab but invisible once there,
+          // which is the worst of both.
+          className="ml-0.5 rounded p-1 leading-none text-fg-3 opacity-0 transition-opacity hover:text-fg focus-visible:opacity-100 group-hover/cb:opacity-100 group-focus-within/cb:opacity-100"
         >
-          ×
+          <CrossIcon />
         </button>
       )}
     </div>
+  );
+}
+
+function CrossIcon() {
+  return (
+    <svg viewBox="0 0 10 10" aria-hidden="true" className="h-2.5 w-2.5">
+      <path
+        d="m2.5 2.5 5 5m0-5-5 5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 

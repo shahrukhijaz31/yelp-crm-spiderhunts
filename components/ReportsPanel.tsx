@@ -20,8 +20,8 @@ export default function ReportsPanel() {
   return (
     <div className="flex flex-col gap-7">
       <header>
-        <h1 className="display-num text-[26px] leading-none text-fg">Summary</h1>
-        <p className="mt-2.5 text-[13px] text-fg-3">
+        <h1 className="page-title">Summary</h1>
+        <p className="mt-3 page-intro">
           Snapshot of the current list, {longDate(today)}.
         </p>
       </header>
@@ -75,7 +75,7 @@ export default function ReportsPanel() {
                 return (
                   <tr key={status} className="border-b border-line/60 last:border-0">
                     <td className="py-2.5">
-                      <span className="flex items-center gap-2.5 text-[13px] text-fg-2">
+                      <span className="flex items-center gap-2.5 text-ui text-fg-2">
                         <span
                           aria-hidden="true"
                           className={`h-1.5 w-1.5 rounded-full ${CALL_STATUS_DOTS[status]}`}
@@ -83,13 +83,13 @@ export default function ReportsPanel() {
                         {CALL_STATUS_SHORT_LABELS[status]}
                       </span>
                     </td>
-                    <td className="tnum py-2.5 text-right font-mono text-[13px] text-fg">
+                    <td className="tnum py-3 text-right font-mono text-num font-semibold text-fg">
                       {count}
                     </td>
-                    <td className="tnum py-2.5 text-right font-mono text-[13px] text-fg-3">
+                    <td className="tnum py-3 text-right font-mono text-num text-fg-3">
                       {ofList.toFixed(0)}%
                     </td>
-                    <td className="tnum py-2.5 text-right font-mono text-[13px] text-fg-3">
+                    <td className="tnum py-3 text-right font-mono text-num text-fg-3">
                       {ofWorked === null ? "—" : `${ofWorked.toFixed(0)}%`}
                     </td>
                   </tr>
@@ -126,11 +126,11 @@ function Card({
 }) {
   return (
     <div className="rounded-xl border border-line bg-surface px-5 py-4">
-      <p className={`display-num text-[32px] leading-none ${live ? "text-accent" : "text-fg"}`}>
+      <p className={`display-num text-[34px] leading-none ${live ? "text-accent" : "text-fg"}`}>
         {value}
       </p>
       <p className="eyebrow mt-3">{label}</p>
-      <p className="mt-1.5 text-[12px] text-fg-4">{hint}</p>
+      <p className="mt-2 text-caption text-fg-3">{hint}</p>
     </div>
   );
 }

@@ -77,8 +77,8 @@ export default function UsersPanel({
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <header>
-        <h1 className="display-num text-[26px] leading-none text-fg">Users</h1>
-        <p className="mt-2.5 text-[13px] leading-relaxed text-fg-3">
+        <h1 className="page-title">Users</h1>
+        <p className="mt-3 page-intro">
           Everyone who can sign in to this workspace. Agents get the worklist
           and meetings; administrators get everything, including this page.
           Disabling an account ends its sessions immediately.
@@ -88,7 +88,7 @@ export default function UsersPanel({
       {notice && (
         <p
           role={notice.tone === "error" ? "alert" : "status"}
-          className={`rounded-xl border px-4 py-3 text-[12.5px] ${
+          className={`rounded-xl border px-4 py-3 text-ui ${
             notice.tone === "ok"
               ? "border-st-green-line bg-st-green-bg text-st-green"
               : "border-accent-3 bg-accent-soft text-accent-2"
@@ -110,20 +110,20 @@ export default function UsersPanel({
             >
               <div className="min-w-[190px] flex-1">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-[13.5px] font-medium text-fg">{user.name}</h2>
+                  <h2 className="text-cell font-semibold text-fg">{user.name}</h2>
                   {isSelf && (
-                    <span className="rounded border border-line-2 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-fg-4">
+                    <span className="rounded border border-line-2 px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider text-fg-3">
                       You
                     </span>
                   )}
                   {!user.isActive && (
-                    <span className="rounded border border-line-2 bg-st-steel-bg px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-st-steel">
+                    <span className="rounded border border-line-2 bg-st-steel-bg px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider text-st-steel">
                       Disabled
                     </span>
                   )}
                 </div>
-                <p className="mt-1 truncate text-[12px] text-fg-3">{user.email}</p>
-                <p className="mt-0.5 font-mono text-[11px] text-fg-4">
+                <p className="mt-1 truncate text-ui text-fg-2">{user.email}</p>
+                <p className="mt-1 font-mono text-meta text-fg-3">
                   {user.username} · {describeLastLogin(user.lastLoginAt)}
                 </p>
               </div>
@@ -142,7 +142,7 @@ export default function UsersPanel({
                       `${user.name} is now ${event.target.value === "ADMIN" ? "an administrator" : "an agent"}. They have been signed out.`,
                     )
                   }
-                  className="h-9 rounded-lg border border-line-2 bg-recessed px-2 text-[12.5px] text-fg outline-none transition-colors hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50"
+                  className="ui-field cursor-pointer"
                 >
                   <option value="ADMIN">Admin</option>
                   <option value="AGENT">Agent</option>
@@ -161,7 +161,7 @@ export default function UsersPanel({
                       : `${user.name} can sign in again.`,
                   )
                 }
-                className="h-9 rounded-lg border border-line-2 px-3 text-[12.5px] font-medium text-fg-2 transition-colors hover:border-fg-4 hover:text-fg disabled:opacity-50"
+                className="ui-btn ui-btn-secondary"
               >
                 {user.isActive ? "Disable" : "Enable"}
               </button>
@@ -173,7 +173,7 @@ export default function UsersPanel({
                 disabled={busy}
                 onClick={() => setResettingId(resettingId === user.id ? null : user.id)}
                 aria-expanded={resettingId === user.id}
-                className="h-9 rounded-lg border border-line-2 px-3 text-[12.5px] font-medium text-fg-2 transition-colors hover:border-fg-4 hover:text-fg disabled:opacity-50"
+                className="ui-btn ui-btn-secondary"
               >
                 Password
               </button>
@@ -195,7 +195,7 @@ export default function UsersPanel({
                   }}
                 >
                   <label className="flex flex-1 flex-col gap-1.5">
-                    <span className="text-[12px] font-medium text-fg-2">
+                    <span className="field-label">
                       New password for {user.name} ({PASSWORD_MIN_LENGTH}+ characters)
                     </span>
                     <input
@@ -203,13 +203,13 @@ export default function UsersPanel({
                       type="password"
                       autoComplete="new-password"
                       required
-                      className="h-9 rounded-lg border border-line-2 bg-recessed px-2.5 text-[13px] text-fg outline-none transition-colors hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
+                      className="ui-field"
                     />
                   </label>
                   <button
                     type="submit"
                     disabled={busy}
-                    className="h-9 rounded-lg bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-60"
+                    className="ui-btn ui-btn-primary"
                   >
                     Set
                   </button>
@@ -223,8 +223,8 @@ export default function UsersPanel({
       <section className="rounded-xl border border-line bg-surface px-5 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-[13.5px] font-medium text-fg">Add a user</h2>
-            <p className="mt-1 text-[12.5px] text-fg-4">
+            <h2 className="text-cell font-semibold text-fg">Add a user</h2>
+            <p className="mt-1.5 text-ui text-fg-3">
               They sign in with the username or the email address, and the
               password you set here.
             </p>
@@ -233,7 +233,7 @@ export default function UsersPanel({
             type="button"
             onClick={() => setCreating((open) => !open)}
             aria-expanded={creating}
-            className="h-9 shrink-0 rounded-lg border border-line-2 px-3 text-[12.5px] font-medium text-fg-2 transition-colors hover:border-fg-4 hover:text-fg"
+            className="ui-btn ui-btn-secondary shrink-0"
           >
             {creating ? "Cancel" : "New user"}
           </button>
@@ -304,11 +304,11 @@ function NewUserForm({
         <Field label="Username" name="username" autoComplete="off" required />
         <Field label="Email" name="email" type="email" autoComplete="off" required />
         <label className="flex flex-col gap-1.5">
-          <span className="text-[12.5px] font-medium text-fg-2">Role</span>
+          <span className="field-label">Role</span>
           <select
             name="role"
             defaultValue="AGENT"
-            className="h-9 rounded-lg border border-line-2 bg-recessed px-2 text-[13px] text-fg outline-none transition-colors hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
+            className="ui-field cursor-pointer"
           >
             <option value="AGENT">Agent</option>
             <option value="ADMIN">Admin</option>
@@ -327,7 +327,7 @@ function NewUserForm({
       <button
         type="submit"
         disabled={submitting}
-        className="mt-1 inline-flex h-9 w-fit items-center rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-60"
+        className="ui-btn ui-btn-primary mt-1 w-fit"
       >
         {submitting ? "Creating…" : "Create user"}
       </button>
@@ -350,7 +350,7 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[12.5px] font-medium text-fg-2">{label}</span>
+      <span className="field-label">{label}</span>
       <input
         name={name}
         type={type}
@@ -358,7 +358,7 @@ function Field({
         autoCapitalize="none"
         spellCheck={false}
         required={required}
-        className="h-9 rounded-lg border border-line-2 bg-recessed px-2.5 text-[13px] text-fg outline-none transition-colors placeholder:text-fg-4 hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
+        className="ui-field"
       />
     </label>
   );

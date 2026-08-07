@@ -25,8 +25,8 @@ export default function ExportPanel() {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-7">
       <header>
-        <h1 className="display-num text-[26px] leading-none text-fg">Export leads</h1>
-        <p className="mt-2.5 text-[13px] leading-relaxed text-fg-3">
+        <h1 className="page-title">Export leads</h1>
+        <p className="mt-3 page-intro">
           Narrow the list, tick the rows you want, and download them as a
           spreadsheet or a printable call sheet. These filters belong to this
           screen alone — the worklist has no say in what is exported.
@@ -54,13 +54,13 @@ export default function ExportPanel() {
           {EXPORT_COLUMN_HEADERS.map((header) => (
             <li
               key={header}
-              className="rounded border border-line bg-recessed px-2 py-1 font-mono text-[11.5px] text-fg-2"
+              className="rounded border border-line bg-recessed px-2 py-1 font-mono text-caption text-fg-2"
             >
               {header}
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-[12.5px] leading-relaxed text-fg-4">
+        <p className="mt-3 text-ui leading-relaxed text-fg-3">
           CSV and Excel carry every column above. The PDF is a landscape call
           sheet — it drops the Yelp URL, rating and owner so the columns an
           agent reads while dialling stay legible on paper.

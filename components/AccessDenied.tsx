@@ -17,7 +17,7 @@ import Link from "next/link";
  */
 export default function AccessDenied() {
   return (
-    <main className="mx-auto w-full max-w-[1760px] flex-1 px-7 py-8">
+    <main className="mx-auto w-full max-w-[1760px] flex-1 px-4 py-8 sm:px-7">
       <div className="mx-auto flex max-w-md flex-col items-center gap-5 rounded-2xl border border-line bg-surface px-6 py-10 text-center">
         <span
           aria-hidden="true"
@@ -27,8 +27,8 @@ export default function AccessDenied() {
         </span>
 
         <div>
-          <h1 className="display-num text-[22px] leading-none text-fg">Access denied</h1>
-          <p className="mt-3 text-[13px] leading-relaxed text-fg-3">
+          <h1 className="page-title">Access denied</h1>
+          <p className="mt-3 page-intro">
             You don&apos;t have permission to access this page. If you think you
             should, ask your workspace administrator.
           </p>
@@ -36,7 +36,7 @@ export default function AccessDenied() {
 
         <Link
           href="/"
-          className="inline-flex h-9 items-center rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          className="ui-btn ui-btn-primary"
         >
           Back to the worklist
         </Link>

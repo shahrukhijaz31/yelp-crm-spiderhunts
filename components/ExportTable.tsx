@@ -47,7 +47,7 @@ export default function ExportTable({
 
   if (leads.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-line-2 bg-surface px-4 py-8 text-center text-[12.5px] text-fg-4">
+      <p className="rounded-xl border border-dashed border-line-2 bg-surface px-4 py-8 text-center text-ui text-fg-3">
         {emptyMessage}
       </p>
     );
@@ -85,7 +85,7 @@ export default function ExportTable({
               <th
                 key={label}
                 scope="col"
-                className="eyebrow border-b border-line-2 bg-surface px-3 py-2.5 text-left"
+                className="col-head border-b border-line-2 bg-surface px-3 py-3 text-left"
               >
                 {label}
               </th>
@@ -113,27 +113,27 @@ export default function ExportTable({
                   />
                 </td>
                 <td
-                  className="truncate px-3 py-1.5 text-[12.5px] font-medium text-fg"
+                  className="truncate px-3 py-2 text-ui font-semibold text-fg"
                   title={lead.name}
                 >
                   {lead.name}
                 </td>
                 <td className="whitespace-nowrap px-3 py-1.5">
                   <span className="flex items-center gap-1.5">
-                    <span className="tnum font-mono text-[12.5px] text-fg-2">
+                    <span className="tnum font-mono text-ui text-fg">
                       {lead.phone}
                     </span>
                     <WhatsAppLink phone={lead.phone} leadName={lead.name} />
                   </span>
                 </td>
                 <td
-                  className="truncate px-3 py-1.5 text-[12px] text-fg-3"
+                  className="truncate px-3 py-2 text-ui text-fg-3"
                   title={lead.categories.join(", ")}
                 >
                   {lead.categories.slice(0, 2).join(", ") || "—"}
                 </td>
                 <td className="px-3 py-1.5">
-                  <span className="flex items-center gap-2 text-[12px] text-fg-2">
+                  <span className="flex items-center gap-2 text-ui text-fg-2">
                     <span
                       aria-hidden="true"
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${CALL_STATUS_DOTS[lead.status]}`}
@@ -146,7 +146,7 @@ export default function ExportTable({
                 <td className="px-3 py-1.5">
                   {lead.callbackDate ? (
                     <span
-                      className={`tnum font-mono text-[12px] ${
+                      className={`tnum font-mono text-caption ${
                         state === "overdue" || state === "today"
                           ? "text-accent"
                           : "text-fg-3"
@@ -155,7 +155,7 @@ export default function ExportTable({
                       {formatCallbackDate(lead.callbackDate, today)}
                     </span>
                   ) : (
-                    <span className="font-mono text-[12px] text-fg-4">— —</span>
+                    <span className="text-caption text-fg-3">— —</span>
                   )}
                 </td>
               </tr>
@@ -165,7 +165,7 @@ export default function ExportTable({
       </table>
 
       {overflow > 0 && (
-        <p className="border-t border-line px-4 py-2 text-[12px] text-fg-4">
+        <p className="border-t border-line px-4 py-2.5 text-caption text-fg-3">
           …and <span className="tnum font-mono">{overflow}</span> more, also
           included in the file.
         </p>

@@ -39,13 +39,21 @@ export default function ViewTabs({
             type="button"
             aria-selected={active}
             onClick={() => onChange(candidate)}
-            className={`group relative flex items-center gap-2 px-3.5 pb-2.5 pt-2 text-[13px] font-medium transition-colors ${
-              active ? "text-fg" : "text-fg-3 hover:text-fg-2"
+            // Three signals separate the active tab, not one: full-contrast
+            // ink against fg-3, semibold against medium, and the accent rule
+            // below it. Any single one of them is easy to miss at a glance.
+            className={`group relative flex items-center gap-2 rounded-t-lg px-3.5 pb-2.5 pt-2 text-ui transition-colors ${
+              active
+                ? "font-semibold text-fg"
+                : "font-medium text-fg-3 hover:bg-hover hover:text-fg-2"
             }`}
           >
             {WORKLIST_VIEW_LABELS[candidate]}
+            {/* Sized and coloured to sit *inside* the tab rather than beside
+                it: no border, and on inactive tabs it tracks the label's own
+                colour so the pair reads as one thing. */}
             <span
-              className={`tnum rounded px-1.5 py-0.5 font-mono text-[11px] font-medium transition-colors ${
+              className={`tnum rounded px-1.5 py-0.5 font-mono text-meta font-medium transition-colors ${
                 active
                   ? "bg-accent text-on-accent"
                   : "bg-rail text-fg-3 group-hover:text-fg-2"
@@ -55,7 +63,7 @@ export default function ViewTabs({
             </span>
             <span
               aria-hidden="true"
-              className={`absolute inset-x-0 -bottom-px h-[2px] ${
+              className={`absolute inset-x-0 -bottom-px h-[2px] transition-colors ${
                 active ? "bg-accent" : "bg-transparent"
               }`}
             />
@@ -67,7 +75,7 @@ export default function ViewTabs({
         type="button"
         onClick={onToggleBreakdown}
         aria-expanded={breakdownOpen}
-        className="ml-auto mb-1.5 flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-[12px] text-fg-3 transition-colors hover:border-line-2 hover:text-fg-2"
+        className="ml-auto mb-1.5 flex h-8 items-center gap-1.5 rounded-lg border border-line px-2.5 text-caption font-medium text-fg-3 transition-colors hover:border-line-2 hover:bg-hover hover:text-fg-2"
       >
         Breakdown
         <svg

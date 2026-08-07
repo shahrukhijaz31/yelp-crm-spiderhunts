@@ -27,7 +27,9 @@ export default function ThemeToggle() {
       type="button"
       onClick={toggle}
       title="Switch between the dark and light theme"
-      className="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-fg-3 transition-colors hover:border-line-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+      // h-9 to match the profile control beside it in the nav bar — a 32px
+      // button next to a 36px one reads as a mistake rather than a hierarchy.
+      className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-fg-3 transition-colors hover:border-line-2 hover:bg-hover hover:text-fg"
     >
       {/* Dark theme is on: offer the sun. */}
       <span className="theme-when-dark">

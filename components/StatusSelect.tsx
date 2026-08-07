@@ -31,27 +31,34 @@ export default function StatusSelect({
   onChange: (status: CallStatus) => void;
 }) {
   return (
-    <div className="group relative inline-flex">
+    // Full width of the cell, not shrink-to-fit: a column of chips that all
+    // start and end in the same place can be read straight down, where ragged
+    // ones have to be read one at a time.
+    <div className="group relative flex w-full">
+      {/* `group-focus-within` on the chip: the real <select> is transparent and
+          stacked on top, so a focus ring drawn on it would be invisible. */}
       <span
-        className={`pointer-events-none inline-flex w-full items-center gap-1.5 rounded-[5px] py-1.5 pl-2 pr-1.5 text-[12px] font-medium ring-1 ring-inset transition-shadow group-hover:ring-2 ${CALL_STATUS_STYLES[value]} ${
-          pending ? "outline outline-1 outline-offset-2 outline-st-gold" : ""
-        }`}
+        className={`pointer-events-none inline-flex w-full items-center gap-2 rounded-md py-1.5 pl-2.5 pr-2 text-ui font-medium ring-1 ring-inset transition-shadow group-hover:ring-2 group-focus-within:ring-2 group-focus-within:ring-accent ${
+          CALL_STATUS_STYLES[value]
+        } ${pending ? "outline outline-1 outline-offset-2 outline-st-gold" : ""}`}
       >
         <span
           aria-hidden="true"
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+          className={`h-2 w-2 shrink-0 rounded-full ${
             value === "do_not_call" ? "bg-surface" : CALL_STATUS_DOTS[value]
           }`}
         />
-        <span className="whitespace-nowrap">
-          {CALL_STATUS_SHORT_LABELS[value]}
-        </span>
-        <svg viewBox="0 0 12 12" className="ml-auto h-3 w-3 shrink-0 opacity-45">
+        <span className="truncate">{CALL_STATUS_SHORT_LABELS[value]}</span>
+        <svg
+          viewBox="0 0 12 12"
+          aria-hidden="true"
+          className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100"
+        >
           <path
             d="M2.5 4.75 6 8.25 9.5 4.75"
             fill="none"
             stroke="currentColor"
-            strokeWidth="1.4"
+            strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -61,7 +68,7 @@ export default function StatusSelect({
         value={value}
         aria-label="Call status"
         onChange={(event) => onChange(event.target.value as CallStatus)}
-        className="absolute inset-0 cursor-pointer opacity-0"
+        className="absolute inset-0 w-full cursor-pointer opacity-0"
       >
         {CALL_STATUSES.map((status) => (
           <option key={status} value={status}>

@@ -60,7 +60,10 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
 
   return (
     <nav className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
-      <div className="mx-auto flex h-[52px] w-full max-w-[1760px] items-stretch gap-6 px-6">
+      {/* 56px rather than 52: the tabs and the profile control both grew a
+          little for legibility, and cramming them into the old height left
+          them touching the hairline top and bottom. */}
+      <div className="mx-auto flex h-[56px] w-full max-w-[1760px] items-stretch gap-6 px-4 sm:px-6">
         {/* --- brand --------------------------------------------------- */}
         <Link
           href="/"
@@ -89,7 +92,7 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
 
         {/* Version and workspace state: present for orientation, pitched low
             enough that it never competes with the wordmark beside it. */}
-        <span className="hidden shrink-0 items-center gap-1.5 self-center rounded-full border border-line px-2.5 py-[3px] text-[10.5px] font-medium tracking-[0.02em] text-fg-4 lg:inline-flex">
+        <span className="hidden shrink-0 items-center gap-1.5 self-center rounded-full border border-line px-2.5 py-[3px] text-[10.5px] font-medium tracking-[0.02em] text-fg-3 lg:inline-flex">
           v1.0
           <span aria-hidden="true" className="text-fg-4/50">
             •
@@ -109,8 +112,10 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
                   role="tab"
                   aria-selected={active}
                   aria-current={active ? "page" : undefined}
-                  className={`relative flex items-center whitespace-nowrap px-3 text-[13px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50 ${
-                    active ? "text-fg" : "text-fg-3 hover:text-fg-2"
+                  className={`relative flex items-center whitespace-nowrap px-3.5 text-ui outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50 ${
+                    active
+                      ? "font-semibold text-fg"
+                      : "font-medium text-fg-3 hover:bg-hover hover:text-fg"
                   }`}
                 >
                   {item.label}
@@ -137,8 +142,8 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
                 <Link
                   href={item.href}
                   aria-current={isActive(item.href) ? "page" : undefined}
-                  className={`rounded-md px-2 py-1 text-[12.5px] transition-colors hover:text-fg ${
-                    isActive(item.href) ? "text-fg" : "text-fg-4"
+                  className={`rounded-md px-2 py-1 text-caption transition-colors hover:bg-hover hover:text-fg ${
+                    isActive(item.href) ? "font-medium text-fg" : "text-fg-3"
                   }`}
                 >
                   {item.label}
@@ -152,7 +157,7 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
             due={stats.callbackDueToday + stats.callbackOverdue}
           />
 
-          <p className="hidden text-[12px] text-fg-3 2xl:block">{longDate(today)}</p>
+          <p className="hidden text-caption text-fg-3 2xl:block">{longDate(today)}</p>
 
           <ThemeToggle />
 
@@ -170,12 +175,12 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
  */
 function QuickStats({ total, due }: { total: number; due: number }) {
   return (
-    <div className="hidden items-center gap-2.5 rounded-lg border border-line bg-recessed px-2.5 py-1 md:flex">
+    <div className="hidden items-center gap-2.5 rounded-lg border border-line bg-recessed px-2.5 py-1.5 md:flex">
       <span className="flex items-baseline gap-1.5" title={`${total} leads in this workspace`}>
-        <span className="tnum font-mono text-[12.5px] font-semibold leading-none text-fg">
+        <span className="tnum font-mono text-caption font-semibold leading-none text-fg">
           {total}
         </span>
-        <span className="text-[10.5px] leading-none text-fg-4">leads</span>
+        <span className="text-meta leading-none text-fg-3">leads</span>
       </span>
 
       <span aria-hidden="true" className="h-3 w-px bg-line" />
@@ -187,13 +192,13 @@ function QuickStats({ total, due }: { total: number; due: number }) {
         title={`${due} callback${due === 1 ? "" : "s"} due today or overdue`}
       >
         <span
-          className={`tnum font-mono text-[12.5px] font-semibold leading-none ${
+          className={`tnum font-mono text-caption font-semibold leading-none ${
             due > 0 ? "text-accent" : "text-fg-2"
           }`}
         >
           {due}
         </span>
-        <span className="text-[10.5px] leading-none text-fg-4">due</span>
+        <span className="text-meta leading-none text-fg-3">due</span>
       </span>
     </div>
   );

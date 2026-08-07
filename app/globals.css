@@ -28,24 +28,37 @@
   --c-recessed: #0f1218;
   --c-surface: #15181f;
   --c-rail: #1a1e26;
-  --c-hover: #1c212a;
+  /* Hover has to read as a distinct fifth layer above `rail`, or rows on the
+     tinted working panel show no response at all when the cursor is on them. */
+  --c-hover: #20262f;
   --c-on-accent: #0d0f14;
 
   /* Hairlines */
   --c-line: #262b34;
   --c-line-2: #333945;
 
-  /* Text ramp — warm off-white down to dim */
+  /*
+   * Text ramp — warm off-white down to dim.
+   *
+   * `fg-3` is the floor for anything read: it clears 4.5:1 on every surface in
+   * the set, including `rail` and `hover`, so muted text is safe wherever it
+   * lands. `fg-4` does NOT — it only clears AA on `surface`, and pushing it
+   * far enough to clear `hover` too would leave it indistinguishable from
+   * fg-3 and flatten the ramp. So fg-4 is deliberately **not a text step**:
+   * icons, separators and disabled marks only, where 3:1 is the bar.
+   */
   --c-fg: #e9e7e4;
   --c-fg-2: #b3b8c2;
-  --c-fg-3: #7d8593;
-  --c-fg-4: #59616e;
+  --c-fg-3: #8b94a2;
+  --c-fg-4: #79818f;
 
   /* Accent — signal red */
   --c-accent: #e5484d;
   --c-accent-2: #ff6b6f;
   --c-accent-3: #a3282d;
-  --c-accent-soft: #2a1417;
+  /* Darkened from #2a1417: accent text on this tint measured 4.43:1, just
+     under AA, and it carries the Filters button and the ADMIN badge. */
+  --c-accent-soft: #231215;
 
   /* Status hues — deliberately clear of the accent's red */
   --c-st-neutral: #98a2b3;
@@ -85,18 +98,20 @@
   --c-recessed: #e7ebf2;
   --c-surface: #ffffff;
   --c-rail: #e3e8f1;
-  --c-hover: #eff4fc;
+  --c-hover: #e9effa;
   --c-on-accent: #ffffff;
 
   /* Sharper hairlines than the dark theme needs, for crisp column separation */
   --c-line: #d5dce6;
   --c-line-2: #b7c1d0;
 
-  /* Near-black cool ink, stepping down to a legible mid grey */
+  /* Near-black cool ink, stepping down to a legible mid grey. Same rule as
+     dark: fg-3 is the floor for text (4.6:1 on the deepest surface), fg-4 is
+     for icons and separators only. */
   --c-fg: #0f1724;
   --c-fg-2: #384358;
   --c-fg-3: #5c6878;
-  --c-fg-4: #8a94a4;
+  --c-fg-4: #6b7686;
 
   /* Same signal red, darkened so it holds contrast on white */
   --c-accent: #d1272d;
@@ -181,6 +196,32 @@
   --font-display: var(--font-fraunces);
   --font-sans: var(--font-instrument);
   --font-mono: var(--font-plex-mono);
+
+  /*
+   * Type scale — five steps, each with one job, so a cell's size is chosen by
+   * asking what the text *is* rather than by picking a number. Components
+   * reference these instead of `text-[12.5px]`, which is what lets the whole
+   * table's density be retuned from this block.
+   *
+   *   cell     the thing you are looking for      business name
+   *   num      data you read digit by digit       phone, callback date
+   *   ui       ordinary prose and controls        address, notes, buttons
+   *   caption  supporting text                    hints, chips, counters
+   *   meta     present but never competing        rating, owner, keycaps
+   *
+   * `num` sits below `cell` on purpose: IBM Plex Mono's x-height runs large,
+   * so 14.5px mono reads about as tall as 15.5px Instrument Sans.
+   */
+  --text-cell: 15.5px;
+  --text-cell--line-height: 1.25;
+  --text-num: 14.5px;
+  --text-num--line-height: 1.3;
+  --text-ui: 13.5px;
+  --text-ui--line-height: 1.45;
+  --text-caption: 12.5px;
+  --text-caption--line-height: 1.4;
+  --text-meta: 11.5px;
+  --text-meta--line-height: 1.35;
 }
 
 body {
@@ -214,7 +255,7 @@ select option {
 }
 
 .eyebrow {
-  font-size: 10px;
+  font-size: 10.5px;
   line-height: 1;
   font-weight: 600;
   letter-spacing: 0.13em;
@@ -222,11 +263,228 @@ select option {
   color: var(--c-fg-3);
 }
 
+/*
+ * Column headings. Related to `.eyebrow` but not the same job: a heading has to
+ * stay legible while the eye is really on the rows, so it trades some of the
+ * eyebrow's tracking for a little more size and weight.
+ */
+.col-head {
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+  color: var(--c-fg-3);
+}
+
+/*
+ * Anything interactive that does not draw its own ring gets one here. Written
+ * with `:where()` so it carries zero specificity — a component that wants a
+ * different focus treatment simply states it and wins.
+ */
+:where(a, button, [role="tab"], summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Control primitives
+ * ---------------------------------------------------------------------------
+ *
+ * These existed already, but as a long Tailwind string copied between eight
+ * panels — and copies drift. The same "secondary button" was variously
+ * `disabled:opacity-50`, `disabled:opacity-60` and no disabled treatment at
+ * all; some inputs had a focus ring and some had none. That is not a thing to
+ * fix eight times, so the chassis lives here and the panels name it.
+ *
+ * In `@layer components`, which Tailwind orders *below* `utilities` — so a
+ * one-off `h-8` or `w-full` in markup still wins, and these stay a starting
+ * point rather than something to fight.
+ */
+@layer components {
+  /* Text inputs, selects and date fields. */
+  .ui-field {
+    height: 2.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--c-line-2);
+    background: var(--c-recessed);
+    padding-inline: 0.625rem;
+    font-size: var(--text-ui);
+    color: var(--c-fg);
+    outline: none;
+    transition:
+      border-color 150ms,
+      box-shadow 150ms;
+  }
+
+  .ui-field::placeholder {
+    /* fg-4 was too faint against a recessed field to read as instructions. */
+    color: var(--c-fg-3);
+  }
+
+  .ui-field:hover:not(:disabled, :focus) {
+    border-color: var(--c-fg-4);
+  }
+
+  .ui-field:focus {
+    border-color: var(--c-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--c-accent) 28%, transparent);
+  }
+
+  /* Paired with `aria-invalid`, so the ring and the screen-reader state can
+     never disagree about whether a field is in error. */
+  .ui-field[aria-invalid="true"] {
+    border-color: var(--c-accent);
+  }
+
+  .ui-field:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* Shared button chassis. Focus comes from the global rule above. */
+  .ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.25rem;
+    padding-inline: 0.875rem;
+    border-radius: 0.5rem;
+    font-size: var(--text-ui);
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 150ms,
+      border-color 150ms,
+      color 150ms;
+  }
+
+  .ui-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  /* Set `aria-busy` while a button is working: it tells assistive tech the
+     same thing the "Signing in…" label tells the eye. */
+  .ui-btn[aria-busy="true"] {
+    cursor: progress;
+  }
+
+  .ui-btn-primary {
+    background: var(--c-accent);
+    color: var(--c-on-accent);
+  }
+
+  .ui-btn-primary:hover:not(:disabled) {
+    background: var(--c-accent-2);
+  }
+
+  .ui-btn-secondary {
+    border: 1px solid var(--c-line-2);
+    color: var(--c-fg-2);
+  }
+
+  .ui-btn-secondary:hover:not(:disabled) {
+    border-color: var(--c-fg-4);
+    background: var(--c-hover);
+    color: var(--c-fg);
+  }
+
+  /* ---- page furniture, shared by every non-worklist screen ---- */
+
+  .page-title {
+    font-family: var(--font-fraunces), Georgia, serif;
+    font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 40;
+    font-size: 27px;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    color: var(--c-fg);
+  }
+
+  /* The explanatory paragraph under a page title. Held at `ui` and fg-2
+     rather than fg-3: it is prose meant to be read once, properly, not
+     supporting text to be skimmed past. */
+  .page-intro {
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--c-fg-2);
+  }
+
+  .field-label {
+    font-size: var(--text-caption);
+    font-weight: 500;
+    color: var(--c-fg-2);
+  }
+}
+
 /* Sticky table header sits above row content while scrolling. */
 .lead-table thead th {
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+/*
+ * The worklist's business column is frozen. Eight columns need ~1460px, so on
+ * anything under a 1440px screen the table scrolls sideways — and scrolling
+ * the *name* of the lead off the left edge is what makes a wide CRM table
+ * unusable, because no other cell means anything without it.
+ *
+ * Opt-in via its own class rather than `.lead-table`, which the export table
+ * also wears: freezing a column of checkboxes would be pointless there, and
+ * that table has no minimum width to scroll past in the first place.
+ *
+ * The divider is a box-shadow, not a border: `border-collapse` drops borders
+ * on sticky cells in several browsers, and a shadow also survives the save
+ * confirmation, which animates `background-color` alone.
+ */
+.lead-table-frozen th:first-child,
+.lead-table-frozen td:first-child:not([colspan]) {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--c-surface);
+  box-shadow: 1px 0 0 0 var(--c-line);
+}
+
+.lead-table-frozen thead th:first-child {
+  z-index: 15;
+}
+
+/*
+ * Callback urgency, as an inset stripe down the frozen cell.
+ *
+ * This was a 3px left border, which is the obvious way to draw it — but a
+ * left border on a `border-collapse` cell that is also `position: sticky` is
+ * dropped by Chrome and Safari, and the marker for "call this one today" is
+ * not something that can quietly stop rendering. A shadow is immune to that,
+ * and stacks with the column divider above in one declaration.
+ *
+ * `td:first-child[data-urgency]` rather than plain `td[data-urgency]`: the
+ * rule above it is `td:first-child:not([colspan])`, which is one step more
+ * specific, so the shorter selector would lose and the stripe would silently
+ * never paint. Matching its shape lets source order decide instead.
+ */
+.lead-table-frozen td:first-child[data-urgency="today"] {
+  box-shadow:
+    inset 3px 0 0 0 var(--c-accent),
+    1px 0 0 0 var(--c-line);
+}
+
+.lead-table-frozen td:first-child[data-urgency="overdue"] {
+  box-shadow:
+    inset 3px 0 0 0 color-mix(in srgb, var(--c-accent) 45%, transparent),
+    1px 0 0 0 var(--c-line);
+}
+
+/* The frozen cell paints its own background, so row hover has to be restated
+   for it — otherwise the first column stays inert while the row lights up. */
+.lead-table-frozen tbody tr:hover > td:first-child,
+.lead-table-frozen tbody tr:focus-within > td:first-child {
+  background: var(--c-hover);
 }
 
 /*

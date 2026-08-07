@@ -122,29 +122,34 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
         <ThemeToggle />
       </div>
 
-      <div className="flex w-full max-w-[384px] flex-col gap-6">
+      <div className="flex w-full max-w-[400px] flex-col gap-7">
         {/* --- brand ---------------------------------------------------- */}
-        <div className="flex flex-col items-center gap-3 text-center">
+        <div className="flex flex-col items-center gap-3.5 text-center">
           <Image
             src="/logo.ico"
             alt=""
             aria-hidden="true"
-            width={40}
-            height={40}
+            width={44}
+            height={44}
             unoptimized
             priority
-            className="h-10 w-10 rounded-lg object-contain"
+            // Not desaturated, unlike the nav bar's: up there the mark competes
+            // with the active-tab red, and here there is nothing to compete
+            // with. This is the one screen that is allowed to be branding.
+            className="h-11 w-11 rounded-xl object-contain"
           />
-          <h1 className="display-num text-[19px] leading-none text-fg">
+          <h1 className="display-num text-[21px] leading-none text-fg">
             SpiderHunts <span className="text-fg-2">Leads Portal</span>
           </h1>
         </div>
 
         {/* --- card ----------------------------------------------------- */}
-        <div className="rounded-2xl border border-line bg-surface px-5 py-6 sm:px-6">
+        <div className="rounded-2xl border border-line bg-surface px-5 py-7 sm:px-7">
           <header>
-            <h2 className="text-[15px] font-medium leading-none text-fg">Sign in</h2>
-            <p className="mt-2 text-[12.5px] leading-relaxed text-fg-3">
+            {/* The card's own heading steps below the wordmark rather than
+                matching it — two headings at one size is two first things. */}
+            <h2 className="text-cell font-semibold leading-none text-fg">Sign in</h2>
+            <p className="mt-2.5 text-ui leading-relaxed text-fg-3">
               Use the workspace credentials issued to you.
             </p>
           </header>
@@ -154,16 +159,17 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
           {formError && (
             <p
               role="alert"
-              className="mt-4 rounded-lg border border-accent-3 bg-accent-soft px-3 py-2 text-[12.5px] leading-relaxed text-accent-2"
+              className="mt-5 flex items-start gap-2 rounded-lg border border-accent-3 bg-accent-soft px-3 py-2.5 text-ui leading-relaxed text-accent-2"
             >
-              {formError}
+              <WarningIcon />
+              <span>{formError}</span>
             </p>
           )}
 
-          <form noValidate onSubmit={handleSubmit} className="mt-5 flex flex-col gap-4">
+          <form noValidate onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
             {/* --- username --- */}
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={usernameId} className="text-[12.5px] font-medium text-fg-2">
+            <div className="flex flex-col gap-2">
+              <label htmlFor={usernameId} className="field-label">
                 Username
               </label>
               <input
@@ -184,11 +190,10 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                 aria-invalid={showErrors.username ? true : undefined}
                 aria-describedby={showErrors.username ? `${usernameId}-error` : undefined}
                 placeholder="you@spiderhunts.com"
-                className={`h-9 w-full rounded-lg border bg-recessed px-2.5 text-[13px] text-fg outline-none transition-colors placeholder:text-fg-4 disabled:opacity-60 ${
-                  showErrors.username
-                    ? "border-accent focus:ring-2 focus:ring-accent/25"
-                    : "border-line-2 hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
-                }`}
+                // The error border now rides on `aria-invalid` inside
+                // `.ui-field`, so the ring and what a screen reader is told
+                // can no longer disagree.
+                className="ui-field h-10 w-full"
               />
               {showErrors.username && (
                 <FieldError id={`${usernameId}-error`}>{showErrors.username}</FieldError>
@@ -196,8 +201,8 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             </div>
 
             {/* --- password --- */}
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor={passwordId} className="text-[12.5px] font-medium text-fg-2">
+            <div className="flex flex-col gap-2">
+              <label htmlFor={passwordId} className="field-label">
                 Password
               </label>
               <div className="relative">
@@ -221,11 +226,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                   placeholder="••••••••"
                   // Right padding clears the reveal button, so a long password
                   // scrolls under the label rather than behind the icon.
-                  className={`h-9 w-full rounded-lg border bg-recessed pl-2.5 pr-10 text-[13px] text-fg outline-none transition-colors placeholder:text-fg-4 disabled:opacity-60 ${
-                    showErrors.password
-                      ? "border-accent focus:ring-2 focus:ring-accent/25"
-                      : "border-line-2 hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
-                  }`}
+                  className="ui-field h-10 w-full pr-11"
                 />
                 <button
                   type="button"
@@ -234,7 +235,10 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                   aria-pressed={revealed}
                   aria-controls={passwordId}
                   title={revealed ? "Hide password" : "Show password"}
-                  className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-fg-4 transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:opacity-60"
+                  // 32px target inside a 40px field, and fg-3 rather than
+                  // fg-4: this is a control people hunt for when a password
+                  // will not take, not decoration beside the field.
+                  className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-55"
                 >
                   {revealed ? <EyeOffIcon /> : <EyeIcon />}
                   <span className="sr-only">
@@ -250,7 +254,10 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-1 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-not-allowed disabled:opacity-60"
+              // `aria-busy` says to a screen reader what the spinner and the
+              // changed label say to the eye.
+              aria-busy={submitting}
+              className="ui-btn ui-btn-primary mt-2 h-10 w-full"
             >
               {submitting && <Spinner />}
               {submitting ? "Signing in…" : "Sign in"}
@@ -258,7 +265,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
           </form>
         </div>
 
-        <p className="text-center text-[11.5px] leading-relaxed text-fg-4">
+        <p className="text-center text-caption leading-relaxed text-fg-3">
           Access is issued by your workspace administrator.
         </p>
       </div>
@@ -268,9 +275,29 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
 
 function FieldError({ id, children }: { id: string; children: React.ReactNode }) {
   return (
-    <p id={id} className="text-[11.5px] leading-snug text-accent-2">
-      {children}
+    <p id={id} className="flex items-start gap-1.5 text-caption leading-snug text-accent-2">
+      <WarningIcon />
+      <span>{children}</span>
     </p>
+  );
+}
+
+/**
+ * Shared by the field errors and the form banner, so a failure looks the same
+ * wherever it lands. `shrink-0` and the nudge down put it on the first line of
+ * a message that wraps, rather than centred against the whole paragraph.
+ */
+function WarningIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+      className="mt-px h-3.5 w-3.5 shrink-0"
+    >
+      <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 4.9v3.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <circle cx="8" cy="10.8" r="0.65" fill="currentColor" />
+    </svg>
   );
 }
 

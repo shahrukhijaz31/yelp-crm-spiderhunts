@@ -79,14 +79,14 @@ export default function UserMenu({ user }: { user: SessionUser }) {
         aria-haspopup="menu"
         aria-controls={open ? menuId : undefined}
         title={`${user.name} — ${ROLE_LABELS[user.role]}`}
-        className={`flex h-8 items-center gap-2 rounded-lg border pl-1 pr-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+        className={`flex h-9 items-center gap-2 rounded-lg border pl-1 pr-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
           open
             ? "border-line-2 bg-hover text-fg"
-            : "border-line text-fg-2 hover:border-line-2 hover:text-fg"
+            : "border-line text-fg-2 hover:border-line-2 hover:bg-hover hover:text-fg"
         }`}
       >
         <Initials name={user.name} />
-        <span className="hidden max-w-[130px] truncate text-[12.5px] font-medium lg:block">
+        <span className="hidden max-w-[130px] truncate text-ui font-medium lg:block">
           {user.name}
         </span>
         <ChevronIcon open={open} />
@@ -102,10 +102,10 @@ export default function UserMenu({ user }: { user: SessionUser }) {
           <div className="flex items-start gap-2.5 border-b border-line px-3 py-3">
             <Initials name={user.name} size="lg" />
             <div className="min-w-0">
-              <p className="truncate text-[13px] font-medium leading-tight text-fg">
+              <p className="truncate text-ui font-semibold leading-tight text-fg">
                 {user.name}
               </p>
-              <p className="mt-0.5 truncate text-[11.5px] leading-tight text-fg-3">
+              <p className="mt-0.5 truncate text-caption leading-tight text-fg-3">
                 {user.email}
               </p>
               <RoleBadge role={user.role} />
@@ -117,7 +117,7 @@ export default function UserMenu({ user }: { user: SessionUser }) {
             role="menuitem"
             disabled={signingOut}
             onClick={() => void signOut()}
-            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[12.5px] font-medium text-fg-2 transition-colors hover:bg-hover hover:text-fg focus-visible:outline-none focus-visible:bg-hover focus-visible:text-fg disabled:opacity-60"
+            className="flex w-full items-center gap-2 px-3 py-3 text-left text-ui font-medium text-fg-2 transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
           >
             <SignOutIcon />
             {signingOut ? "Signing out…" : "Logout"}
@@ -139,10 +139,12 @@ const ROLE_LABELS = { ADMIN: "Administrator", AGENT: "Agent" } as const;
 function RoleBadge({ role }: { role: SessionUser["role"] }) {
   return (
     <span
-      className={`mt-1.5 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+      // 10.5px and fg-3, matching the "You"/"Disabled"/"Planned" tag chips on
+      // the Users and Settings screens — one size for this kind of marker.
+      className={`mt-2 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider ${
         role === "ADMIN"
           ? "border-accent/50 bg-accent-soft text-accent"
-          : "border-line-2 text-fg-4"
+          : "border-line-2 text-fg-3"
       }`}
     >
       {role}
@@ -163,8 +165,8 @@ function Initials({ name, size = "sm" }: { name: string; size?: "sm" | "lg" }) {
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center rounded-md bg-rail font-medium text-fg-2 ${
-        size === "lg" ? "h-8 w-8 text-[12px]" : "h-6 w-6 text-[10.5px]"
+      className={`flex shrink-0 items-center justify-center rounded-md bg-rail font-semibold text-fg-2 ${
+        size === "lg" ? "h-9 w-9 text-ui" : "h-7 w-7 text-meta"
       }`}
     >
       {initials}

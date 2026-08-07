@@ -82,7 +82,7 @@ export default function ExportControls() {
       <section>
         <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h2 className="eyebrow">Rows</h2>
-          <p className="text-[12px] text-fg-3">
+          <p className="text-ui text-fg-3">
             Tick rows to export just those. With nothing ticked, everything
             listed is exported.
           </p>
@@ -105,7 +105,7 @@ export default function ExportControls() {
         />
 
         {hiddenTicked > 0 && (
-          <p className="mt-2 text-[12px] text-st-gold">
+          <p className="mt-2 text-ui text-st-gold">
             <span className="tnum font-mono">{hiddenTicked}</span> ticked row
             {hiddenTicked === 1 ? " is" : "s are"} hidden by the filters above —
             still included in the file.
@@ -133,11 +133,11 @@ export default function ExportControls() {
                 }`}
               >
                 <span
-                  className={`text-[13px] font-medium ${active ? "text-accent" : "text-fg"}`}
+                  className={`text-ui font-semibold ${active ? "text-accent" : "text-fg"}`}
                 >
                   {EXPORT_FORMAT_LABELS[candidate]}
                 </span>
-                <p className="mt-1 text-[11.5px] leading-snug text-fg-4">
+                <p className="mt-1 text-caption leading-snug text-fg-3">
                   {EXPORT_FORMAT_HINTS[candidate]}
                 </p>
               </button>
@@ -149,7 +149,7 @@ export default function ExportControls() {
       {/* One unambiguous statement of what pressing the button will produce. */}
       <section className="rounded-xl border border-line bg-surface px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="text-[13px] text-fg">
+          <p className="text-ui text-fg">
             {ticked.length > 0 ? (
               <>
                 Exporting the{" "}
@@ -175,21 +175,21 @@ export default function ExportControls() {
             <button
               type="button"
               onClick={clearSelection}
-              className="text-[12px] text-fg-3 underline decoration-line-2 underline-offset-4 transition-colors hover:text-fg"
+              className="rounded text-caption text-fg-3 underline decoration-line-2 underline-offset-4 transition-colors hover:text-fg"
             >
               Clear ticks
             </button>
           )}
 
           <div className="ml-auto flex flex-wrap items-center gap-3">
-            <p className="font-mono text-[12px] text-fg-3">
+            <p className="font-mono text-caption text-fg-3">
               {exportFilename(scope, format, today)}
             </p>
             <button
               type="button"
               onClick={run}
               disabled={rows.length === 0 || status.state === "working"}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-50"
+              className="ui-btn ui-btn-primary"
             >
               <DownloadIcon />
               {status.state === "working"
@@ -202,7 +202,7 @@ export default function ExportControls() {
         {status.state === "done" && (
           <p
             role="status"
-            className="mt-3 rounded-lg border border-st-green-line bg-st-green-bg px-3 py-2 text-[12.5px] text-st-green"
+            className="mt-3 rounded-lg border border-st-green-line bg-st-green-bg px-3 py-2 text-ui text-st-green"
           >
             Downloaded <span className="font-mono">{status.filename}</span>.
           </p>
@@ -210,7 +210,7 @@ export default function ExportControls() {
         {status.state === "error" && (
           <p
             role="alert"
-            className="mt-3 rounded-lg border border-accent-3 bg-accent-soft px-3 py-2 text-[12.5px] text-accent-2"
+            className="mt-3 rounded-lg border border-accent-3 bg-accent-soft px-3 py-2 text-ui text-accent-2"
           >
             {status.message}
           </p>

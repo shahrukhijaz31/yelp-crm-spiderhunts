@@ -15,7 +15,7 @@ export default async function ExportPage() {
   if (!allowed) return <AccessDenied />;
 
   return (
-    <main className="mx-auto w-full max-w-[1760px] flex-1 px-7 py-8">
+    <main className="mx-auto w-full max-w-[1760px] flex-1 px-4 py-8 sm:px-7">
       <ExportPanel />
     </main>
   );

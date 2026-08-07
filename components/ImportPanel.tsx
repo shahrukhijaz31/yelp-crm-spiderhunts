@@ -114,8 +114,8 @@ export default function ImportPanel() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <header>
-        <h1 className="display-num text-[26px] leading-none text-fg">Import leads</h1>
-        <p className="mt-2.5 text-[13px] leading-relaxed text-fg-3">
+        <h1 className="page-title">Import leads</h1>
+        <p className="mt-3 page-intro">
           Load a CSV from the scraper. New businesses are added to the worklist
           and saved to the database; any already on it are left untouched, so
           statuses, notes and callbacks are never overwritten by an import. Rows
@@ -153,10 +153,10 @@ export default function ImportPanel() {
       >
         <UploadIcon />
         <div>
-          <p className="text-[14px] font-medium text-fg">
+          <p className="text-cell font-semibold text-fg">
             Drop a CSV here, or choose a file
           </p>
-          <p className="mt-1 text-[12.5px] text-fg-4">
+          <p className="mt-1.5 text-ui text-fg-3">
             Currently holding {leads.length} lead{leads.length === 1 ? "" : "s"}
           </p>
         </div>
@@ -164,7 +164,7 @@ export default function ImportPanel() {
           type="button"
           disabled={busy}
           onClick={() => inputRef.current?.click()}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-60"
+          className="ui-btn ui-btn-primary"
         >
           {busy ? "Uploading…" : "Choose CSV file"}
         </button>
@@ -180,7 +180,7 @@ export default function ImportPanel() {
         >
           <div className="flex items-start justify-between gap-4">
             <p
-              className={`text-[13px] ${
+              className={`text-ui ${
                 notice.tone === "ok" ? "text-st-green" : "text-accent-2"
               }`}
             >
@@ -190,7 +190,7 @@ export default function ImportPanel() {
               <button
                 type="button"
                 onClick={() => router.push("/")}
-                className="shrink-0 text-[12px] font-medium text-fg-2 underline underline-offset-4 hover:text-fg"
+                className="shrink-0 rounded text-caption font-medium text-fg-2 underline underline-offset-4 transition-colors hover:text-fg"
               >
                 Go to worklist
               </button>
@@ -199,7 +199,7 @@ export default function ImportPanel() {
           {notice.lines && notice.lines.length > 0 && (
             <ul className="mt-2 flex flex-col gap-1 border-t border-line pt-2">
               {notice.lines.map((line) => (
-                <li key={line} className="text-[12px] text-fg-3">
+                <li key={line} className="text-caption text-fg-3">
                   {line}
                 </li>
               ))}
@@ -214,13 +214,13 @@ export default function ImportPanel() {
           {EXPECTED_COLUMNS.map((column) => (
             <li
               key={column}
-              className="rounded border border-line bg-recessed px-2 py-1 font-mono text-[11.5px] text-fg-2"
+              className="rounded border border-line bg-recessed px-2 py-1 font-mono text-caption text-fg-2"
             >
               {column}
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-[12.5px] leading-relaxed text-fg-4">
+        <p className="mt-3 text-ui leading-relaxed text-fg-3">
           Common aliases (<span className="font-mono">phone</span>,{" "}
           <span className="font-mono">business_name</span>,{" "}
           <span className="font-mono">link</span>) are accepted; unrecognised

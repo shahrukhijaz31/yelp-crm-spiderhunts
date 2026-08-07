@@ -27,9 +27,8 @@ const CALLBACK_ORDER: CallbackRange[] = [
   "custom",
 ];
 
-const CONTROL =
-  "h-8 rounded-lg border border-line-2 bg-recessed px-2 text-[12.5px] text-fg " +
-  "outline-none transition-colors hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25";
+/** The shared control chassis from `globals.css`; see `.ui-field`. */
+const CONTROL = "ui-field";
 
 /** The four filter groups, side by side so nothing is hidden behind a step. */
 export default function FilterPanel({
@@ -64,7 +63,7 @@ export default function FilterPanel({
   );
 
   return (
-    <div className="grid grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)_180px_230px] gap-x-8 gap-y-4">
+    <div className="grid grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)_180px_230px] xl:gap-y-4">
       {/* --- Status: multi-select ------------------------------------- */}
       <Group
         title="Status"
@@ -86,7 +85,7 @@ export default function FilterPanel({
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${CALL_STATUS_DOTS[status]}`}
               />
               <span className="truncate">{CALL_STATUS_LABELS[status]}</span>
-              <span className="tnum ml-auto font-mono text-[11px] text-fg-4">
+              <span className="tnum ml-auto font-mono text-meta text-fg-3">
                 {stats.byStatus[status]}
               </span>
             </Check>
@@ -109,11 +108,11 @@ export default function FilterPanel({
           onChange={(event) => setCategoryQuery(event.target.value)}
           placeholder="Find a category…"
           aria-label="Find a category"
-          className={`${CONTROL} mb-2 w-full placeholder:text-fg-4`}
+          className={`${CONTROL} mb-2 w-full placeholder:text-fg-3`}
         />
-        <div className="max-h-[132px] overflow-y-auto pr-1">
+        <div className="max-h-[148px] overflow-y-auto pr-1">
           {visibleCategories.length === 0 ? (
-            <p className="py-2 text-[12px] text-fg-4">No matching category.</p>
+            <p className="py-2 text-ui text-fg-3">No matching category.</p>
           ) : (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {visibleCategories.map((category) => (
@@ -123,7 +122,7 @@ export default function FilterPanel({
                   onChange={() => toggleCategory(category.name)}
                 >
                   <span className="truncate">{category.name}</span>
-                  <span className="tnum ml-auto font-mono text-[11px] text-fg-4">
+                  <span className="tnum ml-auto font-mono text-meta text-fg-3">
                     {category.count}
                   </span>
                 </Check>
@@ -153,7 +152,7 @@ export default function FilterPanel({
             anyLabel="Any"
             onChange={(ratingMin) => onChange({ ...filters, ratingMin })}
           />
-          <span className="text-[12px] text-fg-4">to</span>
+          <span className="text-caption text-fg-3">to</span>
           <RatingSelect
             label="Maximum rating"
             value={filters.ratingMax}
@@ -161,7 +160,7 @@ export default function FilterPanel({
             onChange={(ratingMax) => onChange({ ...filters, ratingMax })}
           />
         </div>
-        <p className="mt-2 text-[11px] leading-snug text-fg-4">
+        <p className="mt-2 text-caption leading-snug text-fg-3">
           Leads with no rating are excluded while a bound is set.
         </p>
       </Group>
@@ -190,14 +189,14 @@ export default function FilterPanel({
           {CALLBACK_ORDER.map((range) => (
             <label
               key={range}
-              className="flex cursor-pointer items-center gap-2 py-0.5 text-[12.5px] text-fg-2 transition-colors hover:text-fg"
+              className="flex cursor-pointer items-center gap-2.5 py-1 text-ui text-fg-2 transition-colors hover:text-fg"
             >
               <input
                 type="radio"
                 name="callback-range"
                 checked={filters.callback === range}
                 onChange={() => onChange({ ...filters, callback: range })}
-                className="h-3 w-3 shrink-0 accent-accent"
+                className="h-3.5 w-3.5 shrink-0 accent-accent"
               />
               <span className="truncate">{CALLBACK_RANGE_LABELS[range]}</span>
             </label>
@@ -218,7 +217,7 @@ export default function FilterPanel({
               value={filters.callbackTo}
               onChange={(callbackTo) => onChange({ ...filters, callbackTo })}
             />
-            <p className="text-[11px] leading-snug text-fg-4">
+            <p className="text-caption leading-snug text-fg-3">
               Leave either side empty for an open-ended range.
             </p>
           </div>
@@ -259,7 +258,7 @@ function DateBound({
 }) {
   return (
     <label className="flex items-center gap-2">
-      <span className="w-8 shrink-0 text-[11px] text-fg-3">{label}</span>
+      <span className="w-8 shrink-0 text-caption text-fg-3">{label}</span>
       <input
         type="date"
         aria-label={`Callback ${label.toLowerCase()}`}
@@ -276,7 +275,7 @@ function Reset({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="text-[11px] text-fg-3 underline decoration-line-2 underline-offset-2 transition-colors hover:text-accent"
+      className="rounded text-caption font-medium text-fg-3 underline decoration-line-2 underline-offset-2 transition-colors hover:text-accent"
     >
       Reset
     </button>
@@ -293,12 +292,12 @@ function Check({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex min-w-0 cursor-pointer items-center gap-2 py-0.5 text-[12.5px] text-fg-2 transition-colors hover:text-fg">
+    <label className="flex min-w-0 cursor-pointer items-center gap-2.5 py-1 text-ui text-fg-2 transition-colors hover:text-fg">
       <input
         type="checkbox"
         checked={checked}
         onChange={onChange}
-        className="h-3 w-3 shrink-0 accent-accent"
+        className="h-3.5 w-3.5 shrink-0 accent-accent"
       />
       {children}
     </label>

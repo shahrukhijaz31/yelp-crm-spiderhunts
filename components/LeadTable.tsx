@@ -15,16 +15,24 @@ import type { Lead, LeadEditableFields } from "@/lib/types";
  * call list.
  */
 const COLUMNS: Array<{ label: string; width: string; working?: boolean }> = [
-  { label: "Business", width: "16%" },
+  // Widest of the scraped columns, and frozen against horizontal scroll: the
+  // business name is what an agent is scanning for, so it gets both the room
+  // for a longer name before truncation and a permanent seat on screen.
+  { label: "Business", width: "18%" },
   // Wider than the number needs: it also carries the WhatsApp glyph, and the
   // cell never wraps, so a tight column would clip one or the other.
-  { label: "Phone", width: "11%" },
-  { label: "Address", width: "15%" },
-  { label: "Category", width: "10.5%" },
-  { label: "Website", width: "11%" },
-  { label: "Status", width: "10.5%", working: true },
-  { label: "Callback", width: "8.5%", working: true },
-  { label: "Notes", width: "17.5%", working: true },
+  { label: "Phone", width: "12%" },
+  { label: "Address", width: "13.5%" },
+  // The two lowest-priority columns, trimmed to pay for the ones either side.
+  // Both truncate by design and carry the full value in a title tooltip.
+  { label: "Category", width: "8.5%" },
+  { label: "Website", width: "10.5%" },
+  // Sized against their *longest* content at the new type size, not their
+  // average: "Not interested" and an overdue date with its clear button are
+  // what these columns have to hold without clipping.
+  { label: "Status", width: "12%", working: true },
+  { label: "Callback", width: "10%", working: true },
+  { label: "Notes", width: "15.5%", working: true },
 ];
 
 /** The whole list, always rendered in full — no pagination, no detail pages. */
@@ -39,7 +47,7 @@ export default function LeadTable({
 }) {
   return (
     <div className="flex-1 overflow-auto rounded-xl border border-line bg-surface">
-      <table className="lead-table w-full min-w-[1380px] table-fixed border-collapse">
+      <table className="lead-table lead-table-frozen w-full min-w-[1460px] table-fixed border-collapse">
         <colgroup>
           {COLUMNS.map((column) => (
             <col key={column.label} style={{ width: column.width }} />
@@ -51,11 +59,14 @@ export default function LeadTable({
               <th
                 key={column.label}
                 scope="col"
-                className={`eyebrow border-b border-line-2 bg-surface py-3 text-left ${
+                className={`col-head border-b border-line-2 py-3.5 text-left ${
                   index === 0 ? "pl-[19px] pr-3" : "px-3"
-                } ${column.working ? "text-fg-2" : ""} ${
-                  column.label === "Status" ? "border-l border-line" : ""
-                }`}
+                } ${
+                  // The editable columns are announced as a group: their
+                  // headings sit on the same tinted panel as the controls
+                  // below them, one shade up from the scraped columns.
+                  column.working ? "bg-recessed text-fg-2" : "bg-surface"
+                } ${column.label === "Status" ? "border-l border-line" : ""}`}
               >
                 {column.label}
               </th>
@@ -74,8 +85,8 @@ export default function LeadTable({
           {leads.length === 0 && (
             <tr>
               <td colSpan={COLUMNS.length} className="px-5 py-16 text-center">
-                <p className="display-num text-[20px] text-fg-3">Nothing here</p>
-                <p className="mt-1.5 text-[13px] text-fg-4">
+                <p className="display-num text-[22px] text-fg-2">Nothing here</p>
+                <p className="mt-2 text-ui text-fg-3">
                   No leads match the current filters.
                 </p>
               </td>
