@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import ThemeToggle from "./ThemeToggle";
 import { AUTH_ERROR_MESSAGES, signIn } from "@/lib/auth";
@@ -68,6 +68,14 @@ export default function LoginForm() {
   const errors = validate(username, password);
   const showErrors = checked ? errors : {};
 
+  // Put the caret back in the emptied password box after a rejected attempt,
+  // so retrying is a straight retype. It has to be an effect rather than a
+  // call in the submit handler: the field is still `disabled` at that point,
+  // and focusing a disabled input does nothing.
+  useEffect(() => {
+    if (formError) passwordRef.current?.focus();
+  }, [formError]);
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setChecked(true);
@@ -97,7 +105,6 @@ export default function LoginForm() {
       setPassword("");
       setRevealed(false);
       setChecked(false);
-      passwordRef.current?.focus();
     } catch {
       setFormError(AUTH_ERROR_MESSAGES.network);
     } finally {
