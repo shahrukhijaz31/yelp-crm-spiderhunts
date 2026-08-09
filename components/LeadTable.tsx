@@ -38,7 +38,14 @@ const COLUMNS: Array<{ label: string; width: string; working?: boolean }> = [
   { label: "Notes", width: "13.5%", working: true },
 ];
 
-/** The whole list, always rendered in full — no pagination, no detail pages. */
+/**
+ * One page of the list, rendered in full — no virtualisation, no detail pages.
+ *
+ * Nothing here narrows or slices: `leads` is exactly what gets drawn. Which
+ * leads those are is decided by Postgres and handed down by `Worklist`, so the
+ * table cannot quietly disagree with the pager beneath it about how many rows
+ * there are.
+ */
 export default function LeadTable({
   leads,
   today,

@@ -4,12 +4,14 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 
+import { usePortalStats } from "./PortalStatsProvider";
+import { useLeadEditor } from "./useLeadEditor";
 import { cleanLeads } from "@/lib/cleanLeads";
 import {
   EMPTY_FILTERS,
@@ -22,18 +24,32 @@ import { isInView, type WorklistView } from "@/lib/views";
 import type { Lead, LeadEditableFields } from "@/lib/types";
 
 /**
- * The app's store, mounted once in the root layout so every route sees the
- * same workspace — `/import` can load a CSV that `/` shows, and `/export` can
- * offer "the view I'm looking at" without the worklist having to hand it over.
+ * The whole-table store, for the screens whose job actually is the whole table.
  *
- * The worklist and the export view keep **separate** filter state and never
- * read each other's. Sharing them meant the rows offered for export silently
- * depended on which tab happened to be open on another screen.
+ * It was mounted once in the portal layout, so every route — the worklist
+ * included — was handed every lead. Pagination ended that: the worklist reads
+ * a page at a time from `GET /api/leads` and never mounts this. What is left
+ * are the four screens that genuinely need the full set and each mount it for
+ * themselves:
  *
- * `updateLead` is the only mutation path in the app, which is what let the
- * `PATCH /api/leads/:id` call land in exactly one place. It writes to state
- * first and to Postgres after, so the table stays instant while the change is
- * saved for real; a failed save puts the old value back.
+ *   /export    writes every matching row to a file
+ *   /meetings  derives the agenda from the lead set (`lib/meetings.ts`)
+ *   /reports   aggregates across all of it
+ *   /import    swaps the set wholesale after an upload
+ *
+ * Per-route rather than shared has one visible consequence: the export view's
+ * filters no longer survive a trip to another screen and back. That is a fair
+ * price for `/settings` no longer downloading several thousand leads to render
+ * a page with no leads on it.
+ *
+ * The export view keeps **separate** filter state from everything else and
+ * always did. Sharing it meant the rows offered for export silently depended on
+ * which tab happened to be open on another screen.
+ *
+ * `updateLead` is the mutation path for these screens; the worklist uses the
+ * same `useLeadEditor` hook over its own page. It writes to state first and to
+ * Postgres after, so the table stays instant while the change is saved for
+ * real; a failed save puts the old value back.
  */
 interface LeadsContextValue {
   leads: Lead[];
@@ -97,69 +113,10 @@ export function LeadsProvider({
   // portal left open overnight rolls over on its own.
   const today = useSyncExternalStore(subscribeToDayChange, todayIso, () => serverToday);
 
-  // Kept in step with `leads` so `updateLead` can read the pre-edit values
-  // without putting that read inside a state updater, which React may call
-  // more than once per commit.
-  const leadsRef = useRef(leads);
-  leadsRef.current = leads;
-
-  const updateLead = useCallback(
-    (id: string, changes: Partial<LeadEditableFields>) => {
-      const keys = Object.keys(changes) as (keyof LeadEditableFields)[];
-      if (keys.length === 0) return;
-
-      const before = leadsRef.current.find((lead) => lead.id === id);
-      if (!before) return;
-
-      // Optimistic: the row repaints on this tick. The agent is on a call and
-      // cannot wait a round trip to see the status they just picked.
-      setLeads((current) =>
-        current.map((lead) => (lead.id === id ? { ...lead, ...changes } : lead)),
-      );
-
-      void (async () => {
-        let saved = false;
-        try {
-          const response = await fetch(`/api/leads/${id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(changes),
-          });
-          saved = response.ok;
-          if (!saved) {
-            console.error(
-              `Saving lead ${id} failed (${response.status}):`,
-              await response.text(),
-            );
-          }
-        } catch (error) {
-          console.error(`Saving lead ${id} failed:`, error);
-        }
-        if (saved) return;
-
-        // Roll back — but only the fields this call changed, and only if they
-        // still hold what this call wrote. If the agent has since typed
-        // something else into the same field, their newer value is the one that
-        // matters and a rollback would throw it away.
-        setLeads((current) =>
-          current.map((lead) => {
-            if (lead.id !== id) return lead;
-            const untouched = keys.every((key) => Object.is(lead[key], changes[key]));
-            if (!untouched) return lead;
-
-            const restored = { ...lead };
-            for (const key of keys) {
-              // `key` indexes the same field on both objects; the assignment is
-              // type-safe by construction but not provable to TS.
-              (restored[key] as unknown) = before[key];
-            }
-            return restored;
-          }),
-        );
-      })();
-    },
-    [],
-  );
+  // The optimistic write/rollback used to be spelled out here. It moved to
+  // `useLeadEditor` when the worklist stopped reading this store and needed the
+  // same behaviour over its own page — see the note in that file.
+  const updateLead = useLeadEditor(leads, setLeads);
 
   // Called with the rows the upload route stored, so this is a state swap only
   // — the write already happened server-side.
@@ -209,11 +166,23 @@ export function LeadsProvider({
     [leads, selectedIds],
   );
 
+  const stats = useMemo(() => computeStats(leads, today), [leads, today]);
+
+  // These screens still hold every lead, so they can still count them exactly
+  // and instantly — including an optimistic edit that has not reached Postgres
+  // yet. Pushing that up keeps the nav bar's counters as live here as they were
+  // before the layout stopped loading leads. The store ignores an unchanged
+  // set, so this settles after one write rather than looping.
+  const { setStats } = usePortalStats();
+  useEffect(() => {
+    setStats(stats);
+  }, [stats, setStats]);
+
   const value = useMemo<LeadsContextValue>(
     () => ({
       leads,
       today,
-      stats: computeStats(leads, today),
+      stats,
       view,
       setView,
       filters,
@@ -233,6 +202,7 @@ export function LeadsProvider({
     [
       leads,
       today,
+      stats,
       view,
       filters,
       visibleLeads,

@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
-import { useLeads } from "./LeadsProvider";
+import { usePortalStats } from "./PortalStatsProvider";
 import { canAccess, type SessionUser } from "@/lib/access";
 
 /**
@@ -46,7 +46,10 @@ const SECONDARY = [
 
 export default function NavBar({ today, user }: { today: string; user: SessionUser }) {
   const pathname = usePathname();
-  const { stats } = useLeads();
+  // The shell's counts, not the current screen's: seeded by the layout from a
+  // Postgres aggregate and refreshed by whichever route knows better. The
+  // worklist no longer holds every lead, so it cannot count them for the bar.
+  const { stats } = usePortalStats();
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);

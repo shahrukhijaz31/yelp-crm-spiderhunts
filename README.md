@@ -239,36 +239,65 @@ generated client lands in `lib/generated/prisma` and is gitignored.
 
 ### How the layers fit
 
-- **Reads** — `listLeads()` in `lib/leadDb.ts`, called by `app/layout.tsx` for
-  the initial render and by `GET /api/leads`.
-- **Writes** — `updateLead()` in `components/LeadsProvider.tsx` is still the
-  only mutation path in the UI. It updates state immediately, then
-  `PATCH /api/leads/[id]` in the background, and puts the old value back if the
-  save fails.
+- **Paged reads** — `listLeadsPage()` in `lib/leadDb.ts`, called by
+  `app/(portal)/page.tsx` for the worklist's first page and by
+  `GET /api/leads` for every page after it. See the note below.
+- **Whole-table reads** — `listLeads()`, called by the four routes whose job is
+  the whole table: `/export`, `/meetings`, `/reports` and `/import`. Each mounts
+  `LeadsProvider` itself; the portal layout no longer does.
+- **Aggregates** — `leadStats()` and `leadCategories()`, counted by Postgres.
+  The layout seeds the nav bar's counters from the first; the filter panel's
+  category list comes from the second.
+- **Writes** — `useLeadEditor()` in `components/useLeadEditor.ts` is still the
+  only mutation path in the UI, now shared by the worklist and by
+  `LeadsProvider`. It updates state immediately, then `PATCH /api/leads/[id]`
+  in the background, and puts the old value back if the save fails.
 - **Upload** — `POST /api/leads/upload` parses with `parseLeadsCsv(csvText)` —
-  the same function the browser used to call, unchanged — and replaces the
-  table inside a transaction.
-- **Scraper ingest** — `POST /api/leads/ingest`, same parser, but it *merges*.
+  the same function the browser used to call, unchanged — and merges into the
+  table.
+- **Scraper ingest** — `POST /api/leads/ingest`, same parser, also merges.
   See below.
-- **Stats and filters** — still computed client-side over the full lead array
-  (`computeStats`, `matchesFilters`). See the note below.
 
-### Stats: why not a `/api/leads/stats` route
+### Pagination: why the filtering moved to Postgres
 
-The stat bar reflects optimistic edits. Marking a lead "Interested" has to move
-the counter on the same tick the chip changes colour, and a server aggregate
-cannot do that without either a round trip (visible lag) or a duplicate
-client-side calculation to tide it over — at which point the route is not
-saving any work. Filters have the same problem: the tabs and the filter rail
-narrow the same in-memory array the stats are derived from, so the two must
-agree exactly.
+The worklist held every lead in React state and narrowed it with
+`matchesFilters` on each render. That was the right shape while the table fit
+in one fetch, and the wrong one by ~1,700 rows: opening the call list meant
+downloading the entire database in order to display twenty of it, and the cost
+grew with every scraper run — on every route, because the *layout* did the
+loading, including `/settings`, which has no leads on it.
 
-Computing over the array is right while the whole table fits in one fetch. The
-point to revisit is pagination, not row count on its own: once
-`GET /api/leads` stops returning everything, the client no longer *has* the
-data to count, and stats, filtering and sorting all have to move to the server
-together. A `/api/leads/stats` route added before then would be a second source
-of truth for numbers the client can already compute.
+The tab, the filter rail, the page and the page size now travel to
+`GET /api/leads` as query parameters (`lib/leadQuery.ts` defines the vocabulary
+and validates it) and Postgres does the narrowing. Responses are bounded by the
+page size, at most 100 rows.
+
+Three consequences worth knowing about:
+
+- **`WHERE` is raw SQL** (`leadFilterSql` in `lib/leadDb.ts`), which is the one
+  place in the app that is. `matchesFilters` compares phone numbers by *digits*,
+  so that `4155550182` finds `(415) 555-0182`, and that needs
+  `regexp_replace` on the column side of the predicate — which Prisma's `where`
+  has no room for. Only `count(*)` and `id` are selected raw; the page's rows
+  are read back through `prisma.lead.findMany` and mapped by the same `toLead`
+  as every other read. Every value is a bound parameter.
+- **The counts are a server aggregate now.** They used to reflect an optimistic
+  edit on the same tick the chip changed colour, because the browser held every
+  lead and could recount them. It no longer does, so after a save the worklist
+  re-reads the counts alone (`?rows=0`, debounced) — a few hundred milliseconds
+  behind the chip rather than instant. On `/export`, `/meetings`, `/reports`
+  and `/import`, `LeadsProvider` still counts locally and pushes its figures up,
+  so those screens are exactly as live as they were.
+- **A saved row does not vanish under you.** The old client-side filter dropped
+  a lead from the list the instant it stopped matching. Re-running the query
+  after every save would do the same and cost a round trip for the privilege, so
+  the rows stay put until the agent changes tab, filter or page.
+
+`page` and `pageSize` are mirrored into the URL (`?page=2&pageSize=20`) with
+`history.replaceState`, so a reload keeps its place without a navigation that
+would re-render the screen server-side. The tab and the filters are deliberately
+not in the URL: they change on nearly every interaction, and the back button
+would walk an agent backwards through their own typing.
 
 ## Scraper ingest — `POST /api/leads/ingest`
 
