@@ -2,7 +2,7 @@ import { identityKeys } from "./cleanLeads";
 import { weekBounds, type CategoryOption } from "./filters";
 import { Prisma } from "./generated/prisma/client";
 import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
-import type { LeadPageMeta, LeadPageQuery } from "./leadQuery";
+import type { LeadPageMeta, LeadPageQuery, LeadSort, LeadSortKey } from "./leadQuery";
 import { normalisePhone, type LeadStats } from "./leadUtils";
 import { prisma } from "./prisma";
 import { CALL_STATUSES, type CallStatus, type Lead, type LeadEditableFields } from "./types";
@@ -182,6 +182,63 @@ function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
     : Prisma.empty;
 }
 
+/**
+ * The sorted column as a SQL expression.
+ *
+ * Held here, keyed by {@link LeadSortKey}, rather than taking a column name
+ * from the caller: `ORDER BY` is the one clause in this query that cannot be a
+ * bound parameter, so the only defence against a column name arriving from a
+ * URL is that no column name ever does. `parseLeadSearchParams` narrows the
+ * query string to one of five keys and this map turns a key into SQL — the two
+ * strings interpolated below (`ASC`/`DESC`) come from the same closed set.
+ *
+ * Three details that decide whether the sort is actually usable:
+ *
+ *   - **Case-insensitive.** Raw Postgres ordering puts every capitalised name
+ *     ahead of every lowercase one, so `Zeta` sorts before `acme`. `lower()`
+ *     is what makes an A–Z column read as A–Z.
+ *   - **Blanks last, in both directions.** The address and category columns are
+ *     often empty and the phone one is nullable; `NULLIF(…, '')` folds "" into
+ *     NULL so a fixed `NULLS LAST` sinks all of them either way. Ascending by
+ *     address should open with the addresses, not with forty blank cells.
+ *   - **Phones compare as digits**, matching how they are *searched* — so
+ *     `(415) 555-0182` and `415-555-0182` land beside each other rather than
+ *     being separated by their punctuation.
+ */
+function sortExpression(key: Exclude<LeadSortKey, "default">): Prisma.Sql {
+  switch (key) {
+    case "name":
+      return Prisma.sql`lower(nullif(l.name, ''))`;
+    case "phone":
+      return Prisma.sql`nullif(regexp_replace(coalesce(l.phone, ''), '[^0-9]', '', 'g'), '')`;
+    case "address":
+      return Prisma.sql`lower(nullif(l.address, ''))`;
+    case "category":
+      // `categories[1]` — Postgres arrays are 1-indexed, and the row renders
+      // the list in stored order, so the first tag is the one on screen.
+      // An empty array indexes to NULL and sinks with the other blanks.
+      return Prisma.sql`lower(nullif(l.categories[1], ''))`;
+  }
+}
+
+/**
+ * The full `ORDER BY`, sorted column first and the stable order last.
+ *
+ * The `created_at, id` tail is not decoration: an `OFFSET` into an order with
+ * ties is free to break them differently per statement, which shows some leads
+ * twice and hides others as the pager walks. Every lead shares a category with
+ * dozens of others, so without a tiebreak that is the common case, not an edge
+ * one. Keeping the same tail as {@link listLeads} also means the unsorted table
+ * is byte-for-byte the query it was before sorting existed.
+ */
+function leadOrderSql(sort: LeadSort): Prisma.Sql {
+  const stable = Prisma.sql`l.created_at ASC, l.id ASC`;
+  if (sort.key === "default") return stable;
+
+  const direction = sort.direction === "desc" ? Prisma.sql`DESC` : Prisma.sql`ASC`;
+  return Prisma.sql`${sortExpression(sort.key)} ${direction} NULLS LAST, ${stable}`;
+}
+
 export interface LeadPageResult extends LeadPageMeta {
   leads: Lead[];
 }
@@ -200,11 +257,14 @@ export interface LeadPageResult extends LeadPageMeta {
  * an empty table with no way to tell why — so the effective page comes back in
  * the result and the client adopts it.
  *
- * Ordering matches {@link listLeads} exactly. It has to: an `OFFSET` into an
- * unstable order shows some leads twice and hides others entirely.
+ * Ordering is {@link leadOrderSql} — the header's chosen column, then the same
+ * `created_at, id` tail {@link listLeads} uses. It always ends there: an
+ * `OFFSET` into an unstable order shows some leads twice and hides others
+ * entirely.
  */
 export async function listLeadsPage(query: LeadPageQuery): Promise<LeadPageResult> {
   const where = leadFilterSql(query);
+  const orderBy = leadOrderSql(query.sort);
   const { pageSize } = query;
 
   const [{ count: total }] = await prisma.$queryRaw<{ count: number }[]>(
@@ -226,7 +286,7 @@ export async function listLeadsPage(query: LeadPageQuery): Promise<LeadPageResul
       : await prisma.$queryRaw<{ id: string }[]>(
           Prisma.sql`
             SELECT l.id FROM leads l ${where}
-            ORDER BY l.created_at ASC, l.id ASC
+            ORDER BY ${orderBy}
             LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
           `,
         );

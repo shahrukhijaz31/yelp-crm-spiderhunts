@@ -71,6 +71,12 @@
   --c-st-green: #46c48b;
   --c-st-green-bg: #0f2620;
   --c-st-green-line: #1d4234;
+  /* The seventh hue, and the tightest fit: it has green on one side and sky on
+     the other. Pulled well down in lightness from both, so a column of chips
+     still reads by brightness when the hue alone is doing too little work. */
+  --c-st-teal: #35a9c0;
+  --c-st-teal-bg: #0e2229;
+  --c-st-teal-line: #1c3d47;
   --c-st-orchid: #b87be0;
   --c-st-orchid-bg: #241a2e;
   --c-st-orchid-line: #3d2b4d;
@@ -182,6 +188,9 @@
   --c-st-green: #12633c;
   --c-st-green-bg: #e1f3e8;
   --c-st-green-line: #8fd0ac;
+  --c-st-teal: #0f5468;
+  --c-st-teal-bg: #e0f0f5;
+  --c-st-teal-line: #93c8d8;
   --c-st-orchid: #6a2a8b;
   --c-st-orchid-bg: #f5e9fc;
   --c-st-orchid-line: #cda6e4;
@@ -273,6 +282,9 @@
   --color-st-green: var(--c-st-green);
   --color-st-green-bg: var(--c-st-green-bg);
   --color-st-green-line: var(--c-st-green-line);
+  --color-st-teal: var(--c-st-teal);
+  --color-st-teal-bg: var(--c-st-teal-bg);
+  --color-st-teal-line: var(--c-st-teal-line);
   --color-st-orchid: var(--c-st-orchid);
   --color-st-orchid-bg: var(--c-st-orchid-bg);
   --color-st-orchid-line: var(--c-st-orchid-line);

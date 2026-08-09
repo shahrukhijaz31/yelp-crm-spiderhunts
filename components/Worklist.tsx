@@ -21,7 +21,10 @@ import { EMPTY_FILTERS, type CategoryOption, type LeadFilters } from "@/lib/filt
 import { todayIso, type LeadStats } from "@/lib/leadUtils";
 import {
   buildLeadSearchParams,
+  DEFAULT_SORT,
   type LeadPageMeta,
+  type LeadSort,
+  type LeadSortKey,
   type PageSize,
 } from "@/lib/leadQuery";
 import type { Lead } from "@/lib/types";
@@ -68,11 +71,12 @@ import { WORKLIST_VIEW_HINTS, type WorklistView } from "@/lib/views";
 function fetchKey(
   view: WorklistView,
   filters: LeadFilters,
+  sort: LeadSort,
   today: string,
   page: number,
   pageSize: number,
 ): string {
-  return JSON.stringify([view, filters, today, page, pageSize]);
+  return JSON.stringify([view, filters, sort, today, page, pageSize]);
 }
 
 /** How long the search box may go quiet before the query is sent. */
@@ -102,6 +106,7 @@ export default function Worklist({
 
   const [view, setView] = useState<WorklistView>("all");
   const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS);
+  const [sort, setSort] = useState<LeadSort>(DEFAULT_SORT);
   const [page, setPage] = useState(initialMeta.page);
   const [pageSize, setPageSize] = useState<PageSize>(initialMeta.pageSize as PageSize);
 
@@ -134,8 +139,12 @@ export default function Worklist({
    * an empty page after typing is the classic way a paginated table looks
    * broken. Done during render rather than in an effect so the reset and the
    * criteria change are one update, and the fetch below is made once.
+   *
+   * The sort counts as a change of criteria for the same reason. Re-ordering
+   * by business name and staying on page 4 lands an agent in the middle of the
+   * alphabet, which is not where anyone means to be after clicking a heading.
    */
-  const criteriaKey = JSON.stringify([view, appliedFilters, today]);
+  const criteriaKey = JSON.stringify([view, appliedFilters, sort, today]);
   const [lastCriteria, setLastCriteria] = useState(criteriaKey);
   if (lastCriteria !== criteriaKey) {
     setLastCriteria(criteriaKey);
@@ -146,13 +155,21 @@ export default function Worklist({
   // Seeded with the page the server already rendered, which is what stops this
   // screen from fetching on mount the data it was handed.
   const settledKey = useRef(
-    fetchKey("all", EMPTY_FILTERS, serverToday, initialMeta.page, initialMeta.pageSize),
+    fetchKey(
+      "all",
+      EMPTY_FILTERS,
+      DEFAULT_SORT,
+      serverToday,
+      initialMeta.page,
+      initialMeta.pageSize,
+    ),
   );
 
   useEffect(() => {
     const request = {
       view,
       filters: appliedFilters,
+      sort,
       today,
       page: effectivePage,
       pageSize,
@@ -160,6 +177,7 @@ export default function Worklist({
     const requestKey = fetchKey(
       request.view,
       request.filters,
+      request.sort,
       request.today,
       request.page,
       request.pageSize,
@@ -191,6 +209,7 @@ export default function Worklist({
         settledKey.current = fetchKey(
           request.view,
           request.filters,
+          request.sort,
           request.today,
           data.page,
           data.pageSize,
@@ -221,9 +240,9 @@ export default function Worklist({
 
     return () => controller.abort();
     // `appliedFilters` is memoised and `setStats` is stable, so these are the
-    // five values that actually describe a request plus the one way to report
+    // six values that actually describe a request plus the one way to report
     // its counts — this does not re-run per render.
-  }, [view, appliedFilters, today, effectivePage, pageSize, setStats]);
+  }, [view, appliedFilters, sort, today, effectivePage, pageSize, setStats]);
 
   /*
    * Page and page size live in the address bar so a reload, a bookmark or a
@@ -293,6 +312,29 @@ export default function Worklist({
     [stats],
   );
 
+  /*
+   * A heading click cycles that column: ascending, then descending, then off.
+   *
+   * The third step matters more here than in most tables. The default order is
+   * the order the leads were imported in, which is the order a scraped batch is
+   * meant to be worked down — so "put it back" has to be reachable from the
+   * same control that moved it, without hunting for a reset button.
+   *
+   * Moving to a different column always starts at ascending, whatever the last
+   * column was doing: a click on "Address" means "show me these by address",
+   * not "continue descending".
+   */
+  function cycleSort(key: LeadSortKey) {
+    setSort((current) => {
+      if (current.key !== key) return { key, direction: "asc" };
+      if (current.direction === "asc") return { key, direction: "desc" };
+      // Back to the default *exactly* — a `{ key: "default", direction: "desc" }`
+      // would send the same request as the default one but read as a different
+      // state, and the worklist would re-fetch a page it already has.
+      return DEFAULT_SORT;
+    });
+  }
+
   function changePageSize(next: PageSize) {
     setPageSize(next);
     // Page 12 at 20 rows is not page 12 at 100, and there may not be a page 12
@@ -353,7 +395,13 @@ export default function Worklist({
             busy ? "pointer-events-none opacity-60" : ""
           }`}
         >
-          <LeadTable leads={leads} today={today} onUpdate={updateLead} />
+          <LeadTable
+            leads={leads}
+            today={today}
+            sort={sort}
+            onSort={cycleSort}
+            onUpdate={updateLead}
+          />
         </div>
 
         <Pagination

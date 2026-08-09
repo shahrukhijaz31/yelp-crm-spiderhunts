@@ -41,7 +41,7 @@ export default function Breakdown({
           </p>
         </div>
 
-        {/* All seven counts as one object rather than seven equal boxes. The
+        {/* Every count as one object rather than a row of equal boxes. The
             inner shadow makes it a channel with the segments sitting in it,
             which is what stops a 8px bar from reading as a flat swatch. */}
         <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-rail shadow-[inset_0_1px_2px_-1px_rgb(0_0_0/0.35)]">

@@ -8,6 +8,11 @@ export const CALL_STATUSES = [
   "not_called",
   "no_answer",
   "voicemail",
+  // Someone picked up, but not the person who can say yes. Kept next to the
+  // other "reached nobody useful" outcomes rather than at the end of the list,
+  // because that is the order an agent works down the dropdown in — and the
+  // Postgres enum is declared in this same order, so the two never disagree.
+  "owner_not_available",
   "interested",
   "not_interested",
   "do_not_call",
@@ -20,6 +25,7 @@ export const CALL_STATUS_LABELS: Record<CallStatus, string> = {
   not_called: "Not called",
   no_answer: "Called - No answer",
   voicemail: "Called - Voicemail",
+  owner_not_available: "Called - Owner not available",
   interested: "Called - Interested",
   not_interested: "Called - Not interested",
   do_not_call: "Do not call",
@@ -31,6 +37,9 @@ export const CALL_STATUS_SHORT_LABELS: Record<CallStatus, string> = {
   not_called: "Not called",
   no_answer: "No answer",
   voicemail: "Voicemail",
+  // Shortened to fit the row chip beside its dot and chevron, where the full
+  // "Owner not available" would truncate at the width the Status column has.
+  owner_not_available: "Owner away",
   interested: "Interested",
   not_interested: "Not interested",
   do_not_call: "Do not call",
@@ -40,7 +49,7 @@ export const CALL_STATUS_SHORT_LABELS: Record<CallStatus, string> = {
 /**
  * Status colour lives here and nowhere else.
  *
- * Tuned for a dark surface: six hues that stay apart from each other *and*
+ * Tuned for a dark surface: seven hues that stay apart from each other *and*
  * from the app's red accent, which is reserved for the UI and for anything
  * time-critical. `do_not_call` is the odd one out on purpose — the only
  * light-filled chip in the app, because it is the only hard stop.
@@ -49,6 +58,7 @@ export const CALL_STATUS_STYLES: Record<CallStatus, string> = {
   not_called: "bg-transparent text-st-neutral ring-line-2",
   no_answer: "bg-st-gold-bg text-st-gold ring-st-gold-line",
   voicemail: "bg-st-sky-bg text-st-sky ring-st-sky-line",
+  owner_not_available: "bg-st-teal-bg text-st-teal ring-st-teal-line",
   interested: "bg-st-green-bg text-st-green ring-st-green-line",
   not_interested: "bg-st-orchid-bg text-st-orchid ring-st-orchid-line",
   do_not_call: "bg-fg text-on-accent ring-fg",
@@ -60,6 +70,7 @@ export const CALL_STATUS_DOTS: Record<CallStatus, string> = {
   not_called: "bg-fg-4",
   no_answer: "bg-st-gold",
   voicemail: "bg-st-sky",
+  owner_not_available: "bg-st-teal",
   interested: "bg-st-green",
   not_interested: "bg-st-orchid",
   do_not_call: "bg-fg",

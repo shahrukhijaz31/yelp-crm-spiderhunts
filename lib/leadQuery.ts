@@ -50,6 +50,36 @@ const MAX_QUERY_LENGTH = 200;
 
 const CALLBACK_RANGES = Object.keys(CALLBACK_RANGE_LABELS) as CallbackRange[];
 
+/**
+ * The columns a header click can sort by, plus `default` for the order the
+ * table has always had (insertion order — see `listLeads`).
+ *
+ * A closed set, not a column name passed through from the browser: this value
+ * ends up inside an `ORDER BY`, which is the one part of the worklist query
+ * that cannot be a bound parameter. Nothing outside this list ever reaches SQL
+ * — `leadOrderSql` maps each key to an expression it holds itself.
+ *
+ * Only the four scraped columns an agent scans by are here. The working columns
+ * are deliberately absent: sorting by status or callback would reshuffle rows
+ * *as they are edited*, which is exactly when an agent needs the list to hold
+ * still — that is what the tabs and the filter rail are for.
+ */
+export const LEAD_SORT_KEYS = ["default", "name", "phone", "address", "category"] as const;
+
+export type LeadSortKey = (typeof LEAD_SORT_KEYS)[number];
+
+export const SORT_DIRECTIONS = ["asc", "desc"] as const;
+
+export type SortDirection = (typeof SORT_DIRECTIONS)[number];
+
+/** How the table is currently ordered. `default` ignores `direction`. */
+export interface LeadSort {
+  key: LeadSortKey;
+  direction: SortDirection;
+}
+
+export const DEFAULT_SORT: LeadSort = { key: "default", direction: "asc" };
+
 /** Everything needed to answer "give me the rows for this screen". */
 export interface LeadPageQuery {
   /** The worklist tab — the *scope* being worked. */
@@ -62,6 +92,13 @@ export interface LeadPageQuery {
    * another timezone would quietly shift both.
    */
   today: string;
+  /**
+   * Which column the table is ordered by. Part of the query rather than of the
+   * client, because the client only holds one page: sorting the twenty rows in
+   * the browser would order the page instead of the list, and page 2 would
+   * still be whatever page 2 was before the click.
+   */
+  sort: LeadSort;
   /** 1-based. Clamped to the last page by the query, never by the caller. */
   page: number;
   pageSize: PageSize;
@@ -105,6 +142,14 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   if (filters.callback === "custom") {
     if (filters.callbackFrom) params.set("callbackFrom", filters.callbackFrom);
     if (filters.callbackTo) params.set("callbackTo", filters.callbackTo);
+  }
+
+  // `default` is the absence of a sort, so it is written as an absent param —
+  // which keeps an untouched worklist producing the same string it always did,
+  // and therefore still skipping the fetch for the page it was handed.
+  if (query.sort.key !== "default") {
+    params.set("sort", query.sort.key);
+    params.set("dir", query.sort.direction);
   }
 
   params.set("today", query.today);
@@ -179,6 +224,10 @@ export function parseLeadSearchParams(
   return {
     view: readOneOf(params.get("view"), WORKLIST_VIEWS, "all"),
     filters,
+    sort: {
+      key: readOneOf(params.get("sort"), LEAD_SORT_KEYS, "default"),
+      direction: readOneOf(params.get("dir"), SORT_DIRECTIONS, "asc"),
+    },
     today: isIsoDate(today) ? today : fallbackToday,
     page: readPage(params.get("page")),
     pageSize: readPageSize(params.get("pageSize")),

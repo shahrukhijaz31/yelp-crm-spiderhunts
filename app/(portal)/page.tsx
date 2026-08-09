@@ -2,7 +2,7 @@ import Worklist from "@/components/Worklist";
 import { requireUser } from "@/lib/authz";
 import { EMPTY_FILTERS } from "@/lib/filters";
 import { leadCategories, listLeadsPage } from "@/lib/leadDb";
-import { readPage, readPageSize } from "@/lib/leadQuery";
+import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
 
 /**
@@ -38,6 +38,11 @@ export default async function Home(props: PageProps<"/">) {
   const result = await listLeadsPage({
     view: "all",
     filters: EMPTY_FILTERS,
+    // The first paint is always the unsorted list, for the same reason the tab
+    // and the filters are not read from the URL: a heading click is client
+    // state the browser already holds, and putting it here would send the
+    // server off to render a whole new screen for a change of ORDER BY.
+    sort: DEFAULT_SORT,
     today,
     page: readPage(one(params.page)),
     pageSize: readPageSize(one(params.pageSize)),

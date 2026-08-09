@@ -46,7 +46,7 @@ export default function StatusSelect({
         } ${pending ? "outline outline-1 outline-offset-2 outline-st-gold" : ""}`}
       >
         {/* The dot carries a halo of its own colour. At 8px a flat dot is just
-            a coloured pixel; the bloom is what makes six statuses tellable
+            a coloured pixel; the bloom is what makes the statuses tellable
             apart from the far side of a desk. */}
         <span
           aria-hidden="true"

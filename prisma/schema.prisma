@@ -27,6 +27,11 @@ enum CallStatus {
   not_called
   no_answer
   voicemail
+  /// Added after the initial migration, and declared here in the same position
+  /// the migration inserts it into (`ADD VALUE ... AFTER 'voicemail'`) — an
+  /// enum's declaration order is its sort order in Postgres, so the two lists
+  /// have to agree or a later `prisma migrate diff` sees a change that is not.
+  owner_not_available
   interested
   not_interested
   do_not_call
