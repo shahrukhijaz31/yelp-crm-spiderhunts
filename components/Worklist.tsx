@@ -314,7 +314,7 @@ export default function Worklist({
       />
 
       {breakdownOpen && (
-        <div className="mt-4 rounded-xl border border-line bg-surface px-5 py-4">
+        <div className="panel mt-4 px-5 py-4">
           <Breakdown stats={stats} />
         </div>
       )}
@@ -336,7 +336,7 @@ export default function Worklist({
       {error && (
         <p
           role="alert"
-          className="mt-3 rounded-xl border border-accent/50 bg-accent-soft px-4 py-2.5 text-ui text-accent"
+          className="mt-3 flex items-start gap-2.5 rounded-xl border border-accent/50 bg-accent-soft px-4 py-2.5 text-ui text-accent shadow-e1"
         >
           {error}
         </p>

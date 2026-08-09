@@ -45,7 +45,7 @@ export default function Pagination({
   return (
     <nav
       aria-label="Lead list pages"
-      className="mt-3 flex flex-col gap-3 rounded-xl border border-line bg-surface px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+      className="panel mt-3 flex flex-col gap-3 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
     >
       {/* --- left: what you are looking at --------------------------------- */}
       {/* `aria-live` so a screen reader hears the new range after a page turn;
@@ -117,7 +117,9 @@ export default function Pagination({
                 onClick={() => onPageChange(item)}
                 className={`tnum h-8 min-w-8 rounded-lg px-2 font-mono text-caption font-medium transition-colors disabled:cursor-not-allowed ${
                   item === page
-                    ? "bg-accent text-on-accent"
+                    ? // The one saturated thing in the pager, and the only
+                      // thing here that has to be findable at a glance.
+                      "bg-accent text-on-accent shadow-[0_2px_10px_-3px_var(--c-accent)]"
                     : "border border-line text-fg-2 hover:border-line-2 hover:bg-hover hover:text-fg disabled:opacity-50"
                 }`}
               >

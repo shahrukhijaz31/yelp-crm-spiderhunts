@@ -147,11 +147,20 @@ export default function ImportPanel() {
           const file = event.dataTransfer.files?.[0];
           if (file) void handleFile(file);
         }}
-        className={`flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors ${
-          dragging ? "border-accent bg-accent-soft/40" : "border-line-2 bg-surface"
+        // The drop target is the largest object on the screen, so it carries
+        // the drag state on its own: accent border, a warmed fill and an
+        // accent halo the moment a file is over it. Anything subtler and an
+        // agent cannot tell whether the browser has taken the drag.
+        className={`flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-[border-color,background-color,box-shadow] duration-200 ${
+          dragging
+            ? "border-accent bg-accent-soft/40 shadow-[0_0_36px_-10px_var(--c-accent)]"
+            : "border-line-2 bg-surface/70 hover:border-fg-4"
         }`}
       >
-        <UploadIcon />
+        {/* The icon tile, matching the empty states elsewhere in the app. */}
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-recessed shadow-e1">
+          <UploadIcon />
+        </span>
         <div>
           <p className="text-cell font-semibold text-fg">
             Drop a CSV here, or choose a file
@@ -208,7 +217,7 @@ export default function ImportPanel() {
         </div>
       )}
 
-      <section className="rounded-xl border border-line bg-surface px-5 py-4">
+      <section className="panel px-5 py-4">
         <h2 className="eyebrow">Expected columns</h2>
         <ul className="mt-3 flex flex-wrap gap-1.5">
           {EXPECTED_COLUMNS.map((column) => (

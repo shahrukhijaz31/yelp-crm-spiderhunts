@@ -56,7 +56,7 @@ export default function LeadTable({
   onUpdate: (id: string, changes: Partial<LeadEditableFields>) => void;
 }) {
   return (
-    <div className="flex-1 overflow-auto rounded-xl border border-line bg-surface">
+    <div className="panel flex-1 overflow-auto">
       <table className="lead-table lead-table-frozen w-full min-w-[1460px] table-fixed border-collapse">
         <colgroup>
           {COLUMNS.map((column) => (
@@ -69,13 +69,17 @@ export default function LeadTable({
               <th
                 key={column.label}
                 scope="col"
-                className={`col-head border-b border-line-2 py-3.5 text-left ${
+                className={`col-head py-3.5 text-left ${
                   index === 0 ? "pl-[19px] pr-3" : "px-3"
                 } ${
                   // The editable columns are announced as a group: their
                   // headings sit on the same tinted panel as the controls
-                  // below them, one shade up from the scraped columns.
-                  column.working ? "bg-recessed text-fg-2" : "bg-surface"
+                  // below them, one shade up from the scraped columns. The
+                  // gradient fill and the rule under the whole header row come
+                  // from `.lead-table thead th` — see `globals.css`, where they
+                  // are drawn as a shadow because a sticky `border-collapse`
+                  // cell drops its borders in several browsers.
+                  column.working ? "is-working text-fg-2" : "bg-surface"
                 } ${column.label === "Status" ? "border-l border-line" : ""}`}
               >
                 {column.label}
@@ -94,10 +98,18 @@ export default function LeadTable({
           ))}
           {leads.length === 0 && (
             <tr>
-              <td colSpan={COLUMNS.length} className="px-5 py-16 text-center">
+              <td colSpan={COLUMNS.length} className="px-5 py-20 text-center">
+                {/* An empty table is the one place this app has room for a
+                    figure. It is drawn from the same hairline and fg-4 the
+                    rest of the chrome uses, so it reads as the table's own
+                    empty state rather than as an illustration dropped in. */}
+                <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-line bg-recessed text-fg-4 shadow-e1">
+                  <EmptyIcon />
+                </span>
                 <p className="display-num text-[22px] text-fg-2">Nothing here</p>
-                <p className="mt-2 text-ui text-fg-3">
-                  No leads match the current filters.
+                <p className="mx-auto mt-2 max-w-[38ch] text-ui leading-relaxed text-fg-3">
+                  No leads match the current view. Try clearing a filter, or
+                  widening the search.
                 </p>
               </td>
             </tr>
@@ -105,5 +117,28 @@ export default function LeadTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function EmptyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6">
+      <rect
+        x="3.2"
+        y="4.2"
+        width="17.6"
+        height="15.6"
+        rx="2.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path
+        d="M3.2 9.2h17.6M9 9.2v10.6"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }

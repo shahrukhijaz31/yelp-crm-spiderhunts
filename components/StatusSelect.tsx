@@ -34,17 +34,23 @@ export default function StatusSelect({
     // Full width of the cell, not shrink-to-fit: a column of chips that all
     // start and end in the same place can be read straight down, where ragged
     // ones have to be read one at a time.
-    <div className="group relative flex w-full">
+    <div className="group chip-host relative flex w-full">
       {/* `group-focus-within` on the chip: the real <select> is transparent and
           stacked on top, so a focus ring drawn on it would be invisible. */}
       <span
-        className={`pointer-events-none inline-flex w-full items-center gap-2 rounded-md py-1.5 pl-2.5 pr-2 text-ui font-medium ring-1 ring-inset transition-shadow group-hover:ring-2 group-focus-within:ring-2 group-focus-within:ring-accent ${
+        // `chip-press` adds the two things that separate a control from a
+        // label: it brightens under the cursor and gives 0.5px on click. Both
+        // live in `globals.css` so every chip in the app presses the same way.
+        className={`chip-press pointer-events-none inline-flex w-full items-center gap-2 rounded-lg py-1.5 pl-2.5 pr-2 text-ui font-medium shadow-e1 ring-1 ring-inset group-hover:ring-2 group-focus-within:ring-2 group-focus-within:ring-accent ${
           CALL_STATUS_STYLES[value]
         } ${pending ? "outline outline-1 outline-offset-2 outline-st-gold" : ""}`}
       >
+        {/* The dot carries a halo of its own colour. At 8px a flat dot is just
+            a coloured pixel; the bloom is what makes six statuses tellable
+            apart from the far side of a desk. */}
         <span
           aria-hidden="true"
-          className={`h-2 w-2 shrink-0 rounded-full ${
+          className={`h-2 w-2 shrink-0 rounded-full shadow-[0_0_5px_-0.5px_currentColor] ${
             value === "do_not_call" ? "bg-surface" : CALL_STATUS_DOTS[value]
           }`}
         />

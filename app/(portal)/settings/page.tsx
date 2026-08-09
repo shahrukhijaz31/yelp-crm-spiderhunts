@@ -37,7 +37,7 @@ export default async function SettingsPage() {
           </p>
         </header>
 
-        <ul className="flex flex-col gap-px overflow-hidden rounded-xl border border-line bg-line">
+        <ul className="panel flex flex-col gap-px overflow-hidden bg-line">
           {PLANNED.map((item) => (
             <li key={item.title} className="bg-surface px-5 py-4">
               <div className="flex items-center gap-2.5">

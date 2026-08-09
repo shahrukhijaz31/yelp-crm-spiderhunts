@@ -18,10 +18,10 @@ import Link from "next/link";
 export default function AccessDenied() {
   return (
     <main className="mx-auto w-full max-w-[1760px] flex-1 px-4 py-8 sm:px-7">
-      <div className="mx-auto flex max-w-md flex-col items-center gap-5 rounded-2xl border border-line bg-surface px-6 py-10 text-center">
+      <div className="panel mx-auto flex max-w-md flex-col items-center gap-5 rounded-2xl px-6 py-10 text-center">
         <span
           aria-hidden="true"
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-accent/40 bg-accent-soft text-accent"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-accent/40 bg-accent-soft text-accent shadow-[0_0_24px_-8px_var(--c-accent)]"
         >
           <LockIcon />
         </span>

@@ -73,7 +73,7 @@ export default function FilterToolbar({
   }, []);
 
   return (
-    <section className="rounded-xl border border-line bg-rail">
+    <section className="panel-inset">
       <div className="flex flex-wrap items-center gap-3 px-3 py-3">
         <div className="group relative w-full sm:w-auto">
           <SearchIcon />
@@ -85,7 +85,11 @@ export default function FilterToolbar({
             value={filters.query}
             onChange={(event) => onChange({ ...filters, query: event.target.value })}
             placeholder="Search name, address, phone, notes…"
-            className="h-10 w-full rounded-lg sm:w-[22rem] border border-line-2 bg-recessed pl-9 pr-9 text-ui text-fg outline-none transition-colors placeholder:text-fg-3 hover:border-fg-4 focus:border-accent focus:ring-2 focus:ring-accent/25"
+            // The one field on the worklist worth widening on focus: it grows
+            // by 2rem when you commit to it, which is room for a longer query
+            // and, more usefully, an unmistakable answer that the `/` shortcut
+            // landed. `transition-[width]` only — nothing else moves.
+            className="h-10 w-full rounded-lg border border-line-2 bg-recessed pl-9 pr-9 text-ui text-fg shadow-[inset_0_1px_2px_-1px_rgb(0_0_0/0.2)] outline-none transition-[width,border-color,box-shadow] duration-200 placeholder:text-fg-3 hover:border-fg-4 focus:border-accent focus:shadow-[var(--c-focus-ring)] sm:w-[22rem] sm:focus:w-[24rem]"
           />
           {/* Hidden once there is a query: a keycap sitting on top of the text
               an agent is reading back is worse than no hint at all. */}
@@ -97,10 +101,16 @@ export default function FilterToolbar({
           onClick={onToggleOpen}
           aria-expanded={open}
           aria-controls="filter-panel"
-          className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3.5 text-ui font-medium transition-colors ${
-            open || isFiltered
-              ? "border-accent/60 bg-accent-soft text-accent"
-              : "border-line-2 bg-recessed text-fg-2 hover:border-fg-4 hover:bg-hover hover:text-fg"
+          // Three states, and they are deliberately distinguishable from each
+          // other rather than just from "off": filters applied glows faintly
+          // (something is narrowing the list, even with the panel shut), the
+          // panel merely being open does not.
+          className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3.5 text-ui font-medium transition-[background-color,border-color,color,box-shadow] duration-150 ${
+            isFiltered
+              ? "border-accent/60 bg-accent-soft text-accent shadow-[0_0_16px_-6px_var(--c-accent)]"
+              : open
+                ? "border-line-2 bg-hover text-fg"
+                : "border-line-2 bg-recessed text-fg-2 hover:border-fg-4 hover:bg-hover hover:text-fg"
           }`}
         >
           <SlidersIcon />
@@ -133,7 +143,7 @@ export default function FilterToolbar({
               type="button"
               onClick={() => onChange(chip.next)}
               title={`Remove filter: ${chip.label}`}
-              className="group inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-line-2 bg-surface py-1 pl-2.5 pr-1.5 text-caption text-fg-2 transition-colors hover:border-accent/60 hover:text-fg"
+              className="group inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-line-2 bg-surface py-1 pl-2.5 pr-1.5 text-caption text-fg-2 shadow-e1 transition-colors hover:border-accent/60 hover:text-fg"
             >
               <span className="truncate">{chip.label}</span>
               <span

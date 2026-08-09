@@ -47,11 +47,11 @@ export default function ReportsPanel() {
         />
       </section>
 
-      <section className="rounded-xl border border-line bg-surface px-6 py-5">
+      <section className="panel px-6 py-5">
         <Breakdown stats={stats} size="full" />
       </section>
 
-      <section className="rounded-xl border border-line bg-surface px-6 py-5">
+      <section className="panel px-6 py-5">
         <h2 className="eyebrow">Outcome detail</h2>
         <table className="mt-4 w-full">
           <thead>
@@ -125,12 +125,18 @@ function Card({
   live?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-surface px-5 py-4">
-      <p className={`display-num text-[34px] leading-none ${live ? "text-accent" : "text-fg"}`}>
-        {value}
-      </p>
-      <p className="eyebrow mt-3">{label}</p>
-      <p className="mt-2 text-caption text-fg-3">{hint}</p>
+    // The same `.metric` chassis as the worklist's headline strip, so the two
+    // screens' cards are the same object rather than two takes on one.
+    <div className="metric px-5 py-4" data-tone={live ? "live" : "calm"}>
+      <div className="relative">
+        <p
+          className={`display-num text-[34px] leading-none ${live ? "text-accent" : "text-fg"}`}
+        >
+          {value}
+        </p>
+        <p className="eyebrow mt-3">{label}</p>
+        <p className="mt-2 text-caption text-fg-3">{hint}</p>
+      </div>
     </div>
   );
 }

@@ -68,12 +68,21 @@ export default function MeetingCard({
 
   return (
     <article
-      className={`rounded-xl border px-4 py-3 transition-colors ${
+      // Three states, three weights of surface. A completed meeting recedes
+      // (no shadow, dimmed fill — it is history); an open one sits on the page
+      // at normal elevation; one that has run past its time keeps the same
+      // elevation but warms its border and catches a little accent light down
+      // the left edge, which is where the eye enters the card.
+      // The hover shadow restates the inset highlight rather than using
+      // `shadow-e3` alone: a utility replaces the whole `box-shadow`, and
+      // `.panel`'s 1px of light along the top edge is part of that stack, so
+      // the card would go flat at exactly the moment it should look raised.
+      className={`panel px-4 py-3 transition-[box-shadow,border-color] duration-200 hover:shadow-[inset_0_1px_0_0_var(--c-highlight),var(--c-shadow-3)] ${
         completed
-          ? "border-line bg-surface/60"
+          ? "opacity-75 shadow-none"
           : overdue
-            ? "border-accent/40 bg-surface"
-            : "border-line bg-surface"
+            ? "border-accent/40 shadow-[inset_3px_0_0_0_var(--c-accent),inset_0_1px_0_0_var(--c-highlight),var(--c-shadow-2)] hover:shadow-[inset_3px_0_0_0_var(--c-accent),inset_0_1px_0_0_var(--c-highlight),var(--c-shadow-3)]"
+            : ""
       }`}
     >
       <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
@@ -81,7 +90,7 @@ export default function MeetingCard({
         <div className="w-20 shrink-0">
           {meeting.time ? (
             <span
-              className={`tnum block font-mono text-num font-semibold ${
+              className={`tnum block font-mono text-[17px] font-semibold leading-tight tracking-[-0.01em] ${
                 completed ? "text-fg-3" : "text-fg"
               }`}
             >
@@ -91,7 +100,7 @@ export default function MeetingCard({
             <span className="block text-caption text-fg-3">No time</span>
           )}
           {overdue && (
-            <span className="text-[10.5px] font-semibold uppercase tracking-wide text-accent-2">
+            <span className="mt-1 inline-flex items-center gap-1 rounded border border-accent/40 bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-2">
               Not done
             </span>
           )}
@@ -105,18 +114,18 @@ export default function MeetingCard({
               {lead.name}
             </h3>
             <span
-              className={`inline-flex items-center gap-1.5 rounded-[5px] px-2 py-0.5 text-caption font-medium ring-1 ring-inset ${CALL_STATUS_STYLES[lead.status]}`}
+              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-caption font-medium ring-1 ring-inset ${CALL_STATUS_STYLES[lead.status]}`}
             >
               <span
                 aria-hidden="true"
-                className={`h-1.5 w-1.5 rounded-full ${
+                className={`h-1.5 w-1.5 rounded-full shadow-[0_0_5px_-0.5px_currentColor] ${
                   lead.status === "do_not_call" ? "bg-surface" : CALL_STATUS_DOTS[lead.status]
                 }`}
               />
               {CALL_STATUS_SHORT_LABELS[lead.status]}
             </span>
             {completed && (
-              <span className="inline-flex items-center gap-1 rounded-[5px] bg-st-green-bg px-2 py-0.5 text-caption font-medium text-st-green ring-1 ring-inset ring-st-green-line">
+              <span className="inline-flex items-center gap-1 rounded-md bg-st-green-bg px-2 py-0.5 text-caption font-medium text-st-green ring-1 ring-inset ring-st-green-line">
                 <CheckIcon />
                 Done
               </span>

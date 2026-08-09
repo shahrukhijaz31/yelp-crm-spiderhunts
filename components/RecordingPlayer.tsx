@@ -103,15 +103,23 @@ export default function RecordingPlayer({
   const progress = total > 0 ? Math.min(current / total, 1) : 0;
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-line bg-rail px-2.5 py-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-line bg-[image:var(--c-rail-fill)] px-2.5 py-1.5 shadow-[inset_0_1px_0_0_var(--c-highlight)]">
       <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
 
+      {/* The transport button is the one filled thing in the player. It is
+          accent-filled while playing and outlined while stopped, so the state
+          is readable from the shape alone — not only from which glyph is in
+          it, which is a 12px difference. */}
       <button
         type="button"
         onClick={toggle}
         disabled={failed}
         aria-label={`${playing ? "Pause" : "Play"} the call recording for ${label}`}
-        className="ui-btn h-7 w-7 shrink-0 rounded-full border border-accent/50 !px-0 text-accent hover:bg-accent hover:text-on-accent"
+        className={`ui-btn h-7 w-7 shrink-0 rounded-full border !px-0 ${
+          playing
+            ? "border-transparent bg-accent text-on-accent shadow-[0_2px_10px_-3px_var(--c-accent)]"
+            : "border-accent/50 text-accent hover:bg-accent hover:text-on-accent"
+        }`}
       >
         {playing ? <PauseIcon /> : <PlayIcon />}
       </button>
@@ -132,7 +140,10 @@ export default function RecordingPlayer({
           style={{
             background: `linear-gradient(to right, var(--c-accent) ${progress * 100}%, var(--c-line-2) ${progress * 100}%)`,
           }}
-          className="h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none disabled:cursor-not-allowed disabled:opacity-50 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-accent"
+          // The thumb carries a ring of the rail behind it and a soft accent
+          // glow, so the playhead is findable on a 6px track without making
+          // the track itself any taller.
+          className="h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none transition-opacity disabled:cursor-not-allowed disabled:opacity-50 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:shadow-[0_0_0_2px_var(--c-rail),0_2px_8px_-2px_var(--c-accent)] [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_0_2px_var(--c-rail),0_2px_8px_-2px_var(--c-accent)] [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110"
         />
       </label>
 

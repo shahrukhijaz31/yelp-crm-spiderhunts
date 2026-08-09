@@ -126,10 +126,14 @@ export default function ExportControls() {
                   setFormat(candidate);
                   setStatus({ state: "idle" });
                 }}
-                className={`rounded-xl border px-3.5 py-3 text-left transition-colors ${
+                // A picked format is stated three ways — accent border, accent
+                // fill, accent label — plus a soft halo, because this choice
+                // decides what lands in the download and is worth being
+                // unmistakable about.
+                className={`rounded-xl border px-3.5 py-3 text-left transition-[border-color,background-color,box-shadow] duration-150 ${
                   active
-                    ? "border-accent bg-accent-soft"
-                    : "border-line bg-surface hover:border-line-2"
+                    ? "border-accent bg-accent-soft shadow-[0_0_20px_-8px_var(--c-accent)]"
+                    : "border-line bg-[image:var(--c-surface-fill)] shadow-e1 hover:border-line-2 hover:shadow-e2"
                 }`}
               >
                 <span
@@ -147,7 +151,7 @@ export default function ExportControls() {
       </section>
 
       {/* One unambiguous statement of what pressing the button will produce. */}
-      <section className="rounded-xl border border-line bg-surface px-4 py-3.5">
+      <section className="panel px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <p className="text-ui text-fg">
             {ticked.length > 0 ? (

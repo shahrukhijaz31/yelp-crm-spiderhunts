@@ -94,12 +94,15 @@ export default function BookMeetingDialog({
         type="button"
         aria-label="Cancel"
         onClick={onClose}
-        className="absolute inset-0 cursor-default bg-base/70"
+        // Blurred as well as darkened. A scrim that only dims still leaves the
+        // eight-column table behind it perfectly legible, and a modal you can
+        // read through is a modal people try to interact through.
+        className="absolute inset-0 cursor-default bg-base/60 backdrop-blur-[3px]"
       />
 
       <form
         onSubmit={submit}
-        className="relative w-full max-w-sm rounded-xl border border-line-2 bg-surface p-4 shadow-2xl"
+        className="panel-float relative w-full max-w-sm p-4"
       >
         <h2 className="text-cell font-semibold text-fg">
           {existing ? "Meeting" : "Book a meeting"}

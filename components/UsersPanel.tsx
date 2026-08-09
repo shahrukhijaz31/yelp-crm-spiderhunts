@@ -98,7 +98,10 @@ export default function UsersPanel({
         </p>
       )}
 
-      <ul className="flex flex-col gap-px overflow-hidden rounded-xl border border-line bg-line">
+      {/* One panel with hairline-separated rows, rather than a stack of cards:
+          a user list is a table of people, and eight separate cards would give
+          each of them a weight none of them has. */}
+      <ul className="panel flex flex-col gap-px overflow-hidden bg-line">
         {users.map((user) => {
           const isSelf = user.id === currentUserId;
           const busy = busyId === user.id;
@@ -106,7 +109,7 @@ export default function UsersPanel({
           return (
             <li
               key={user.id}
-              className="flex flex-wrap items-center gap-x-4 gap-y-3 bg-surface px-5 py-3.5"
+              className="flex flex-wrap items-center gap-x-4 gap-y-3 bg-surface px-5 py-3.5 transition-colors hover:bg-hover"
             >
               <div className="min-w-[190px] flex-1">
                 <div className="flex items-center gap-2">
@@ -220,7 +223,7 @@ export default function UsersPanel({
         })}
       </ul>
 
-      <section className="rounded-xl border border-line bg-surface px-5 py-4">
+      <section className="panel px-5 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-cell font-semibold text-fg">Add a user</h2>

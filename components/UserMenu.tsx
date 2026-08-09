@@ -97,7 +97,7 @@ export default function UserMenu({ user }: { user: SessionUser }) {
           id={menuId}
           role="menu"
           aria-label="Account"
-          className="absolute right-0 top-[calc(100%+6px)] z-40 w-60 overflow-hidden rounded-xl border border-line bg-surface shadow-lg shadow-black/20"
+          className="panel-float absolute right-0 top-[calc(100%+8px)] z-40 w-60 overflow-hidden"
         >
           <div className="flex items-start gap-2.5 border-b border-line px-3 py-3">
             <Initials name={user.name} size="lg" />
@@ -165,7 +165,9 @@ function Initials({ name, size = "sm" }: { name: string; size?: "sm" | "lg" }) {
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center rounded-md bg-rail font-semibold text-fg-2 ${
+      // A bordered tile with the raised fill, not a flat square of `rail`:
+      // this is the one avatar in the app, and it should look like an object.
+      className={`flex shrink-0 items-center justify-center rounded-md border border-line-2 bg-[image:var(--c-raise-fill)] font-semibold text-fg-2 shadow-e1 ${
         size === "lg" ? "h-9 w-9 text-ui" : "h-7 w-7 text-meta"
       }`}
     >

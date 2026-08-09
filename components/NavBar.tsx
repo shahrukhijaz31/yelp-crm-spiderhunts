@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
@@ -44,8 +45,31 @@ const SECONDARY = [
   { href: "/settings", label: "Settings" },
 ] as const;
 
+/**
+ * Whether the page has been scrolled at all.
+ *
+ * The bar is translucent, so at the top of the page it should be nothing but a
+ * hairline — a shadow under a bar with nothing beneath it is a shadow cast by
+ * nothing. Once content is passing underneath, it gains one. Passive listener,
+ * and the state only ever flips at the boundary, so this re-renders twice per
+ * scroll session rather than per frame.
+ */
+function useScrolled(): boolean {
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  return scrolled;
+}
+
 export default function NavBar({ today, user }: { today: string; user: SessionUser }) {
   const pathname = usePathname();
+  const scrolled = useScrolled();
   // The shell's counts, not the current screen's: seeded by the layout from a
   // Postgres aggregate and refreshed by whichever route knows better. The
   // worklist no longer holds every lead, so it cannot count them for the bar.
@@ -62,40 +86,51 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
   const secondary = SECONDARY.filter((item) => canAccess(user.role, item.href));
 
   return (
-    <nav className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
+    <nav className="glass-bar sticky top-0 z-30" data-scrolled={scrolled}>
       {/* 56px rather than 52: the tabs and the profile control both grew a
           little for legibility, and cramming them into the old height left
           them touching the hairline top and bottom. */}
-      <div className="mx-auto flex h-[56px] w-full max-w-[1760px] items-stretch gap-6 px-4 sm:px-6">
+      <div className="mx-auto flex h-[56px] w-full max-w-[1760px] items-stretch gap-5 px-4 sm:px-6">
         {/* --- brand --------------------------------------------------- */}
         <Link
           href="/"
           aria-label="SpiderHunts Leads Portal — go to the leads workspace"
-          className="flex shrink-0 items-center gap-2.5 self-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          className="group flex shrink-0 items-center gap-2.5 self-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
         >
-          {/* `unoptimized`: .ico is not a format the image optimiser handles,
-              and at 28px there is nothing worth optimising anyway. */}
-          <Image
-            src="/logo.ico"
-            alt=""
-            aria-hidden="true"
-            width={28}
-            height={28}
-            unoptimized
-            priority
-            // Desaturated on purpose: red is the bar's one signal colour, spent
-            // on the active tab and the overdue count. A full-colour mark up
-            // here would compete with both.
-            className="h-7 w-7 shrink-0 rounded-md object-contain grayscale"
-          />
+          {/* The mark sits in a tile rather than bare on the bar: a 28px
+              favicon floating on glass reads as a stray image, and the tile
+              gives it the same physical treatment as every other control up
+              here. `unoptimized` because .ico is not a format the image
+              optimiser handles, and at this size there is nothing to optimise. */}
+          <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-lg border border-line bg-rail shadow-e1 transition-colors group-hover:border-line-2">
+            <Image
+              src="/logo.ico"
+              alt=""
+              aria-hidden="true"
+              width={20}
+              height={20}
+              unoptimized
+              priority
+              // Desaturated at rest — red is the bar's one signal colour, spent
+              // on the active tab and the overdue count — and allowed its full
+              // colour under the cursor, which makes the brand the reward for
+              // reaching for it rather than a competitor to the tabs.
+              className="h-5 w-5 object-contain grayscale transition-[filter] duration-200 group-hover:grayscale-0"
+            />
+          </span>
           <span className="display-num whitespace-nowrap text-[16px] leading-none text-fg">
             SpiderHunts <span className="text-fg-2">Leads Portal</span>
           </span>
         </Link>
 
         {/* Version and workspace state: present for orientation, pitched low
-            enough that it never competes with the wordmark beside it. */}
-        <span className="hidden shrink-0 items-center gap-1.5 self-center rounded-full border border-line px-2.5 py-[3px] text-[10.5px] font-medium tracking-[0.02em] text-fg-3 lg:inline-flex">
+            enough that it never competes with the wordmark beside it. The live
+            dot is the only thing in the pill with any colour. */}
+        <span className="hidden shrink-0 items-center gap-1.5 self-center rounded-full border border-line bg-recessed px-2.5 py-[3px] text-[10.5px] font-medium tracking-[0.02em] text-fg-3 lg:inline-flex">
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 rounded-full bg-st-green shadow-[0_0_6px_0_var(--c-st-green)]"
+          />
           v1.0
           <span aria-hidden="true" className="text-fg-4/50">
             •
@@ -115,20 +150,34 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
                   role="tab"
                   aria-selected={active}
                   aria-current={active ? "page" : undefined}
-                  className={`relative flex items-center whitespace-nowrap px-3.5 text-ui outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50 ${
+                  className={`group/tab relative flex items-center whitespace-nowrap px-3.5 text-ui outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50 ${
                     active
                       ? "font-semibold text-fg"
-                      : "font-medium text-fg-3 hover:bg-hover hover:text-fg"
+                      : "font-medium text-fg-3 hover:text-fg"
                   }`}
                 >
-                  {item.label}
-                  {/* Active workspace is marked in the accent red, at the
-                      bar's edge — the same signal the worklist uses for
-                      time-critical rows, and the only red up here. */}
+                  {/* Hover is a soft inset panel rather than a full-height
+                      block of `bg-hover`: a 56px-tall colour change for a
+                      13px label is the cursor shouting. Inset by 6px top and
+                      bottom, it reads as the label lighting up. */}
+                  {!active && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute inset-x-1 inset-y-[9px] rounded-lg bg-hover opacity-0 transition-opacity duration-150 group-hover/tab:opacity-100"
+                    />
+                  )}
+                  <span className="relative">{item.label}</span>
+                  {/* Active workspace is marked in the accent red, at the bar's
+                      edge — the same signal the worklist uses for time-critical
+                      rows, and the only red up here. It grows from the centre
+                      (`.tab-rule`) so moving between tabs reads as one mark
+                      travelling rather than two marks blinking, and it carries
+                      a little of its own light. */}
                   <span
                     aria-hidden="true"
-                    className={`absolute inset-x-1.5 bottom-0 h-[2px] rounded-t-full transition-colors ${
-                      active ? "bg-accent" : "bg-transparent"
+                    data-active={active}
+                    className={`tab-rule absolute inset-x-2 bottom-0 h-[2px] rounded-t-full bg-accent ${
+                      active ? "shadow-[0_-3px_10px_-1px_var(--c-accent)]" : ""
                     }`}
                   />
                 </Link>
@@ -146,7 +195,9 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
                   href={item.href}
                   aria-current={isActive(item.href) ? "page" : undefined}
                   className={`rounded-md px-2 py-1 text-caption transition-colors hover:bg-hover hover:text-fg ${
-                    isActive(item.href) ? "font-medium text-fg" : "text-fg-3"
+                    isActive(item.href)
+                      ? "bg-hover font-medium text-fg"
+                      : "text-fg-3"
                   }`}
                 >
                   {item.label}
@@ -178,7 +229,7 @@ export default function NavBar({ today, user }: { today: string; user: SessionUs
  */
 function QuickStats({ total, due }: { total: number; due: number }) {
   return (
-    <div className="hidden items-center gap-2.5 rounded-lg border border-line bg-recessed px-2.5 py-1.5 md:flex">
+    <div className="hidden items-center gap-2.5 rounded-lg border border-line bg-recessed px-2.5 py-1.5 shadow-[inset_0_1px_2px_-1px_rgb(0_0_0/0.18)] md:flex">
       <span className="flex items-baseline gap-1.5" title={`${total} leads in this workspace`}>
         <span className="tnum font-mono text-caption font-semibold leading-none text-fg">
           {total}

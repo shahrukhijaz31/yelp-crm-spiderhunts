@@ -87,6 +87,57 @@
   /* Save confirmation wash */
   --c-saved-flash: color-mix(in srgb, var(--c-st-green) 11%, transparent);
   --c-saved-flash-hold: color-mix(in srgb, var(--c-st-green) 9%, transparent);
+
+  /*
+   * Elevation.
+   *
+   * Four steps, and the jump between them is deliberately large: on a dark UI a
+   * shadow is nearly invisible until it is generous, so a timid one reads as a
+   * rendering artefact rather than as height. Each step is a tight contact
+   * shadow plus a wide ambient one, which is what stops a raised surface from
+   * looking like it is painted onto the page.
+   */
+  --c-shadow-1: 0 1px 2px -1px rgb(0 0 0 / 0.5);
+  --c-shadow-2:
+    0 1px 2px -1px rgb(0 0 0 / 0.5), 0 6px 16px -8px rgb(0 0 0 / 0.6);
+  --c-shadow-3:
+    0 2px 4px -2px rgb(0 0 0 / 0.55), 0 16px 40px -16px rgb(0 0 0 / 0.7);
+  --c-shadow-4:
+    0 4px 8px -4px rgb(0 0 0 / 0.6), 0 32px 64px -24px rgb(0 0 0 / 0.75);
+
+  /*
+   * The 1px of light along the top edge of a raised surface. It is the whole
+   * difference between a card and a rectangle of slightly different grey: real
+   * surfaces catch the light where they turn away from you.
+   */
+  --c-highlight: rgb(255 255 255 / 0.055);
+  --c-highlight-strong: rgb(255 255 255 / 0.1);
+
+  /*
+   * Panel fills. A surface with a vertical gradient of about 2% reads as lit
+   * from above; flat fills read as a diagram of a surface.
+   */
+  --c-surface-fill: linear-gradient(180deg, #171a22 0%, #14171d 100%);
+  --c-recessed-fill: linear-gradient(180deg, #111419 0%, #0e1116 100%);
+  --c-rail-fill: linear-gradient(180deg, #1c2029 0%, #181c23 100%);
+  --c-raise-fill: linear-gradient(180deg, #232833 0%, #1e222b 100%);
+
+  /* Accent gradient for the one primary button on any given screen. */
+  --c-accent-fill: linear-gradient(
+    180deg,
+    #f05a5f 0%,
+    var(--c-accent) 52%,
+    #c8383d 100%
+  );
+  --c-accent-glow: 0 6px 20px -8px color-mix(in srgb, var(--c-accent) 75%, transparent);
+  --c-accent-glow-strong:
+    0 8px 26px -8px color-mix(in srgb, var(--c-accent) 85%, transparent);
+  /* The soft ring a focused field grows. Wider and fainter than a border. */
+  --c-focus-ring: 0 0 0 3px color-mix(in srgb, var(--c-accent) 22%, transparent);
+
+  /* Ambient page light — two enormous, nearly invisible washes. */
+  --c-ambient-1: color-mix(in srgb, var(--c-accent) 8%, transparent);
+  --c-ambient-2: color-mix(in srgb, #4d6bd8 6%, transparent);
 }
 
 :root[data-theme="light"] {
@@ -147,6 +198,48 @@
   /* The wash needs more weight to register against white */
   --c-saved-flash: color-mix(in srgb, var(--c-st-green) 20%, transparent);
   --c-saved-flash-hold: color-mix(in srgb, var(--c-st-green) 16%, transparent);
+
+  /*
+   * Elevation, light theme.
+   *
+   * Not the dark theme's shadows at lower opacity: those are black, and black
+   * on a cool off-white goes grey and muddy. These are tinted with the ink
+   * colour instead, which is how a shadow on paper actually looks, and they are
+   * far tighter — on light, a large soft shadow reads as smudge rather than
+   * height, and the hairline does most of the separating.
+   */
+  --c-shadow-1: 0 1px 2px -1px rgb(15 23 36 / 0.1);
+  --c-shadow-2:
+    0 1px 2px -1px rgb(15 23 36 / 0.08), 0 6px 16px -10px rgb(15 23 36 / 0.18);
+  --c-shadow-3:
+    0 2px 4px -2px rgb(15 23 36 / 0.08), 0 14px 32px -16px rgb(15 23 36 / 0.22);
+  --c-shadow-4:
+    0 4px 8px -4px rgb(15 23 36 / 0.1), 0 28px 56px -24px rgb(15 23 36 / 0.26);
+
+  /* On light the top edge catches near-white, and it is nearly opaque. */
+  --c-highlight: rgb(255 255 255 / 0.9);
+  --c-highlight-strong: rgb(255 255 255 / 1);
+
+  --c-surface-fill: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  --c-recessed-fill: linear-gradient(180deg, #e9edf4 0%, #e4e9f1 100%);
+  --c-rail-fill: linear-gradient(180deg, #eaeff7 0%, #e2e8f1 100%);
+  --c-raise-fill: linear-gradient(180deg, #ffffff 0%, #f2f5fa 100%);
+
+  --c-accent-fill: linear-gradient(
+    180deg,
+    #e0393f 0%,
+    var(--c-accent) 52%,
+    #ab1e24 100%
+  );
+  --c-accent-glow: 0 6px 18px -8px color-mix(in srgb, var(--c-accent) 55%, transparent);
+  --c-accent-glow-strong:
+    0 8px 22px -8px color-mix(in srgb, var(--c-accent) 65%, transparent);
+  --c-focus-ring: 0 0 0 3px color-mix(in srgb, var(--c-accent) 18%, transparent);
+
+  /* Weaker than dark's: a wash that reads as "lit" on graphite reads as
+     "printed on the wrong paper" over an off-white page. */
+  --c-ambient-1: color-mix(in srgb, var(--c-accent) 5%, transparent);
+  --c-ambient-2: color-mix(in srgb, #4d6bd8 4%, transparent);
 }
 
 @theme inline {
@@ -192,6 +285,27 @@
   --color-dup-bg: var(--c-dup-bg);
   --color-dup-line: var(--c-dup-line);
 
+  /*
+   * Elevation as utilities, so `shadow-e2` in markup and `var(--c-shadow-2)` in
+   * a component class are the same value — a card and the dropdown that opens
+   * from it cannot drift onto different heights.
+   */
+  --shadow-e1: var(--c-shadow-1);
+  --shadow-e2: var(--c-shadow-2);
+  --shadow-e3: var(--c-shadow-3);
+  --shadow-e4: var(--c-shadow-4);
+  --shadow-glow: var(--c-accent-glow);
+
+  /*
+   * Motion. Two durations and one easing curve for the whole app: `fast` for
+   * anything that follows the cursor (hover, focus) and `base` for anything
+   * that changes state (a panel opening, a chip committing). The curve is a
+   * gentle decelerate — things arrive and settle, they never bounce.
+   */
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --duration-fast: 140ms;
+  --duration-base: 220ms;
+
   /* Type */
   --font-display: var(--font-fraunces);
   --font-sans: var(--font-instrument);
@@ -228,6 +342,41 @@ body {
   background: var(--c-base);
   color: var(--c-fg);
   font-family: var(--font-instrument), system-ui, sans-serif;
+  /* Instrument Sans sets a fraction wide by default for a UI at these sizes. */
+  letter-spacing: -0.003em;
+}
+
+/*
+ * Ambient page light.
+ *
+ * Two enormous radial washes pinned behind everything — one accent-warm at the
+ * top left, one cool at the top right. At 5–8% they are not seen as colour;
+ * what they do is stop `--c-base` from being one flat value across a 1600px
+ * screen, which is the single thing that separates a lit interface from a
+ * painted one.
+ *
+ * A fixed pseudo-element on `<body>` rather than a background on `<html>`: it
+ * must not scroll with the content, and it must not be repainted by anything.
+ * `z-index: 0` with the app's own stacking left alone above it — the portal
+ * shell paints its own surfaces, so this only ever shows through the gutters.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      70rem 45rem at 8% -12%,
+      var(--c-ambient-1),
+      transparent 62%
+    ),
+    radial-gradient(
+      60rem 40rem at 100% -8%,
+      var(--c-ambient-2),
+      transparent 60%
+    );
 }
 
 /* Native form controls need telling, or they render light-on-light. */
@@ -327,9 +476,15 @@ select option {
     border-color: var(--c-fg-4);
   }
 
+  /*
+   * Focus is a border *and* a soft ambient ring, not a hard 2px halo. The ring
+   * is wider and about a third the opacity it used to be, so a focused field
+   * reads as lit from within rather than outlined in red — which matters most
+   * on the login screen, where two of them sit side by side under nothing else.
+   */
   .ui-field:focus {
     border-color: var(--c-accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--c-accent) 28%, transparent);
+    box-shadow: var(--c-focus-ring);
   }
 
   /* Paired with `aria-invalid`, so the ring and the screen-reader state can
@@ -356,10 +511,16 @@ select option {
     font-weight: 500;
     white-space: nowrap;
     cursor: pointer;
+    /* `transform` and `box-shadow` join the list so the raised variants below
+       can lift on hover and sit back down on press. Both are compositor
+       properties, so this is free even on a screen full of buttons. */
     transition:
-      background-color 150ms,
-      border-color 150ms,
-      color 150ms;
+      background-color var(--duration-fast) var(--ease-out-soft),
+      border-color var(--duration-fast) var(--ease-out-soft),
+      color var(--duration-fast) var(--ease-out-soft),
+      box-shadow var(--duration-fast) var(--ease-out-soft),
+      transform var(--duration-fast) var(--ease-out-soft),
+      filter var(--duration-fast) var(--ease-out-soft);
   }
 
   .ui-btn:disabled {
@@ -373,24 +534,118 @@ select option {
     cursor: progress;
   }
 
+  /*
+   * The primary button is the one saturated, raised object on a screen, so it
+   * is the one place the app spends a gradient: a lighter red at the top, the
+   * brand red through the middle, a darker red at the foot, with a hairline of
+   * white along the top edge. That is a lit cylinder rather than a red
+   * rectangle, and it costs nothing to paint.
+   *
+   * Hover brightens and lifts 1px; press drops it back to 0 and dims slightly,
+   * so the click has a physical answer. The glow underneath is accent-tinted
+   * rather than black — a red button casts red light.
+   */
   .ui-btn-primary {
-    background: var(--c-accent);
+    background-image: var(--c-accent-fill);
     color: var(--c-on-accent);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-highlight-strong),
+      var(--c-accent-glow);
   }
 
   .ui-btn-primary:hover:not(:disabled) {
-    background: var(--c-accent-2);
+    filter: brightness(1.07);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-highlight-strong),
+      var(--c-accent-glow-strong);
+  }
+
+  .ui-btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+    filter: brightness(0.95);
+    box-shadow:
+      inset 0 1px 2px 0 rgb(0 0 0 / 0.25),
+      var(--c-shadow-1);
   }
 
   .ui-btn-secondary {
     border: 1px solid var(--c-line-2);
     color: var(--c-fg-2);
+    background-image: var(--c-raise-fill);
+    box-shadow: var(--c-shadow-1);
   }
 
   .ui-btn-secondary:hover:not(:disabled) {
     border-color: var(--c-fg-4);
-    background: var(--c-hover);
     color: var(--c-fg);
+    box-shadow: var(--c-shadow-2);
+  }
+
+  .ui-btn-secondary:active:not(:disabled) {
+    box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.16);
+  }
+
+  /* ---- surfaces ----------------------------------------------------------
+   *
+   * Every card, panel and table wrapper in the app was independently written
+   * as `rounded-xl border border-line bg-surface`, which is a flat rectangle
+   * and reads as one. `.panel` is that same chassis plus the two things that
+   * make a surface look raised: a gradient fill and a contact shadow, with the
+   * 1px top highlight that stands in for the edge catching the light.
+   */
+  .panel {
+    border: 1px solid var(--c-line);
+    border-radius: 0.75rem;
+    background-image: var(--c-surface-fill);
+    background-color: var(--c-surface);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-highlight),
+      var(--c-shadow-2);
+  }
+
+  /* The same material one step higher — for menus, dialogs and anything that
+     floats over the page rather than sitting in it. */
+  .panel-float {
+    border: 1px solid var(--c-line-2);
+    border-radius: 0.75rem;
+    background-image: var(--c-raise-fill);
+    background-color: var(--c-surface);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-highlight),
+      var(--c-shadow-4);
+  }
+
+  /* A recessed working area — the filter rail, a breakdown drawer. Reads as cut
+     into the page rather than laid on it, so the inner shadow points the other
+     way and there is no highlight along the top. */
+  .panel-inset {
+    border: 1px solid var(--c-line);
+    border-radius: 0.75rem;
+    background-image: var(--c-rail-fill);
+    background-color: var(--c-rail);
+    box-shadow: inset 0 1px 2px -1px rgb(0 0 0 / 0.18);
+  }
+
+  /*
+   * The sticky top bar. Translucent with a real blur, so the page tinting
+   * through it is what says "this is above the content" — one hairline and no
+   * shadow at rest, gaining a shadow only once the page has scrolled under it
+   * (see `[data-scrolled]` below).
+   */
+  .glass-bar {
+    background-color: color-mix(in srgb, var(--c-surface) 78%, transparent);
+    backdrop-filter: blur(16px) saturate(1.6);
+    -webkit-backdrop-filter: blur(16px) saturate(1.6);
+    border-bottom: 1px solid var(--c-line);
+    box-shadow: inset 0 -1px 0 0 var(--c-highlight);
+    transition: box-shadow var(--duration-base) var(--ease-out-soft);
+  }
+
+  .glass-bar[data-scrolled="true"] {
+    box-shadow:
+      inset 0 -1px 0 0 var(--c-highlight),
+      var(--c-shadow-2);
   }
 
   /* ---- page furniture, shared by every non-worklist screen ---- */
@@ -418,13 +673,88 @@ select option {
     font-weight: 500;
     color: var(--c-fg-2);
   }
+
+  /* ---- headline metrics --------------------------------------------------
+   *
+   * A card, but a restrained one: the numeral is still the element and the
+   * card is only what holds it apart from its neighbours. Contextual tone is
+   * opt-in via `data-tone`, because if all three cards glow red then none of
+   * them is telling you anything.
+   */
+  .metric {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--c-line);
+    border-radius: 0.75rem;
+    background-image: var(--c-surface-fill);
+    background-color: var(--c-surface);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-highlight),
+      var(--c-shadow-1);
+    transition:
+      border-color var(--duration-base) var(--ease-out-soft),
+      box-shadow var(--duration-base) var(--ease-out-soft);
+  }
+
+  .metric:hover {
+    border-color: var(--c-line-2);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-highlight),
+      var(--c-shadow-2);
+  }
+
+  /*
+   * The live state. A corner wash and a warmed border — no fill, because a
+   * solid red card at the top of the page is a klaxon, and this number is read
+   * once a minute all day.
+   */
+  .metric[data-tone="live"] {
+    border-color: color-mix(in srgb, var(--c-accent) 32%, var(--c-line));
+  }
+
+  .metric[data-tone="live"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      14rem 8rem at 100% 0%,
+      color-mix(in srgb, var(--c-accent) 13%, transparent),
+      transparent 70%
+    );
+  }
+
+  .metric[data-tone="live"]:hover {
+    box-shadow:
+      inset 0 1px 0 0 var(--c-highlight),
+      var(--c-accent-glow);
+  }
 }
 
-/* Sticky table header sits above row content while scrolling. */
+/*
+ * Sticky table header sits above row content while scrolling.
+ *
+ * It also has to *look* like it is above them, or a header scrolled over rows
+ * of identical weight simply merges into the list. The gradient fill and the
+ * shadow under the bottom edge are what separate the two — drawn as a shadow
+ * rather than a border because the header cells are sticky, and several
+ * browsers drop borders on sticky `border-collapse` cells.
+ */
 .lead-table thead th {
   position: sticky;
   top: 0;
   z-index: 10;
+  background-image: var(--c-rail-fill);
+  box-shadow: 0 1px 0 0 var(--c-line-2);
+}
+
+/*
+ * The working columns keep their tint. It is a *recessed* one — the editable
+ * cells beneath them sit on `bg-recessed`, and a heading lighter than the
+ * column it names would break the group it exists to draw.
+ */
+.lead-table thead th.is-working {
+  background-image: var(--c-recessed-fill);
 }
 
 /*
@@ -450,8 +780,21 @@ select option {
   box-shadow: 1px 0 0 0 var(--c-line);
 }
 
+/*
+ * The frozen *header* cell needs restating, and the order matters: the rule
+ * above sets `background` (the shorthand, which clears `background-image`) so
+ * that a scrolling row never shows through the frozen column. That shorthand
+ * would also wipe the gradient `.lead-table thead th` paints, leaving the
+ * Business heading flat while the seven beside it are lit. So the header's fill
+ * is applied again here, on the more specific selector.
+ */
 .lead-table-frozen thead th:first-child {
   z-index: 15;
+  background-color: var(--c-rail);
+  background-image: var(--c-rail-fill);
+  box-shadow:
+    1px 0 0 0 var(--c-line),
+    0 1px 0 0 var(--c-line-2);
 }
 
 /*
@@ -541,4 +884,275 @@ select option {
 
 * {
   scrollbar-color: var(--c-line-2) transparent;
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * The sign-in stage
+ * ---------------------------------------------------------------------------
+ *
+ * The one screen in the app with no data on it, and the first thing anyone
+ * sees — so it is the one screen allowed to spend pixels on depth rather than
+ * on density. Everything here is built from the same tokens as the portal; it
+ * is the *amount* of light that differs, not the palette.
+ *
+ * Three layers, back to front:
+ *
+ *   `.auth-stage`         four vast radial gradients — a warm accent bloom low
+ *                         and left, a cool one high and right, and two dimmer
+ *                         fills that keep the corners from going flat.
+ *   `.auth-stage::before` the same field again, rotated and animated, drifting
+ *                         over ~40s. Slow enough that it is never seen moving;
+ *                         what it does is stop a static screen from looking
+ *                         like a screenshot.
+ *   `.auth-stage::after`  a fine grain. Two tenths of a percent of noise is
+ *                         what keeps a large soft gradient from banding on an
+ *                         8-bit panel, and it reads as texture rather than as
+ *                         dirt because it is fixed and never moves.
+ *
+ * All of it is behind `z-index: 0` on a `position: fixed` element with
+ * `pointer-events: none`, so it cannot intercept a click or shift the form.
+ */
+.auth-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      55rem 40rem at 18% 88%,
+      color-mix(in srgb, var(--c-accent) 12%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      50rem 38rem at 82% 8%,
+      color-mix(in srgb, #4d6bd8 9%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      40rem 30rem at 50% 50%,
+      color-mix(in srgb, var(--c-rail) 70%, transparent),
+      transparent 70%
+    );
+}
+
+.auth-stage::before {
+  content: "";
+  position: absolute;
+  /* Oversized and off-centre so the drift never brings an edge into frame. */
+  inset: -30%;
+  background:
+    radial-gradient(
+      32rem 24rem at 30% 30%,
+      color-mix(in srgb, var(--c-accent) 9%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      28rem 22rem at 70% 70%,
+      color-mix(in srgb, #5a7ae8 7%, transparent),
+      transparent 60%
+    );
+  animation: auth-drift 40s ease-in-out infinite alternate;
+}
+
+.auth-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  /* An inline feTurbulence, so the grain costs one small data URI and no
+     network request. Fixed, un-animated, and composited once. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+/* Light theme wants a fraction of that: the same washes over an off-white page
+   read as a stain rather than as light, and the grain has to nearly vanish. */
+:root[data-theme="light"] .auth-stage {
+  background:
+    radial-gradient(
+      55rem 40rem at 18% 88%,
+      color-mix(in srgb, var(--c-accent) 7%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      50rem 38rem at 82% 8%,
+      color-mix(in srgb, #4d6bd8 6%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      45rem 34rem at 50% 40%,
+      rgb(255 255 255 / 0.7),
+      transparent 70%
+    );
+}
+
+:root[data-theme="light"] .auth-stage::after {
+  opacity: 0.22;
+}
+
+@keyframes auth-drift {
+  from {
+    transform: translate3d(-2%, -1.5%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2%, 1.5%, 0) scale(1.06);
+  }
+}
+
+/*
+ * The card itself: a physical surface floating above that field.
+ *
+ * Semi-transparent over a real blur, so the ambient light behind it tints the
+ * card instead of being hidden by it — that is what makes it read as glass
+ * rather than as a lighter rectangle. Held to 82%: past about 70% the text
+ * starts competing with whatever is behind it, which is where glassmorphism
+ * stops being a material and starts being a legibility problem.
+ *
+ * The shadow stack is doing three separate jobs: a hairline of light along the
+ * top edge, a faint red halo that ties the card to the brand without drawing a
+ * red border, and a deep ambient shadow that lifts it off the page.
+ */
+.auth-card {
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--c-line-2) 80%, transparent);
+  border-radius: 1rem;
+  background-color: color-mix(in srgb, var(--c-surface) 82%, transparent);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 0 var(--c-highlight-strong),
+    0 0 0 1px color-mix(in srgb, var(--c-accent) 7%, transparent),
+    0 0 40px -12px color-mix(in srgb, var(--c-accent) 20%, transparent),
+    var(--c-shadow-4);
+}
+
+/*
+ * A single accent hairline across the top of the card, fading out at both
+ * ends. One deliberate stroke of brand colour, on the edge where the light
+ * would catch it — cheaper and calmer than an animated border.
+ */
+.auth-card::before {
+  content: "";
+  position: absolute;
+  inset-inline: 15%;
+  top: -1px;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--c-accent) 55%, transparent),
+    transparent
+  );
+}
+
+/*
+ * The mark, in a ring of its own light. The logo is untouched — this is a halo
+ * behind it and a rim around it, so the artwork stays exactly the artwork.
+ */
+.auth-logo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 1rem;
+  background-image: var(--c-raise-fill);
+  border: 1px solid var(--c-line-2);
+  box-shadow:
+    inset 0 1px 0 0 var(--c-highlight-strong),
+    0 0 28px -6px color-mix(in srgb, var(--c-accent) 32%, transparent),
+    var(--c-shadow-3);
+}
+
+/* The soft bloom the mark sits in. Sized past the tile so it reads as light
+   coming off it rather than as a second, larger tile. */
+.auth-logo::after {
+  content: "";
+  position: absolute;
+  inset: -45%;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 9999px;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--c-accent) 22%, transparent),
+    transparent 75%
+  );
+}
+
+/* The wordmark on the sign-in screen carries the faintest glow — enough to
+   separate it from the background wash, nowhere near enough to read as neon. */
+.auth-wordmark {
+  text-shadow: 0 0 28px color-mix(in srgb, var(--c-accent) 22%, transparent);
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Shared interaction polish
+ * ---------------------------------------------------------------------------
+ */
+
+/*
+ * Status chips press.
+ *
+ * A control that says "you can change me" with a chevron should answer the
+ * mouse with more than a colour change — half a pixel is the smallest movement
+ * that registers as a response and the largest that never distracts.
+ *
+ * Keyed off `.chip-host` rather than Tailwind's `.group`, deliberately: the
+ * chip sits inside a table row that is *also* a `group`, so `.group:active`
+ * would nudge the chip whenever anything anywhere in the row was clicked — a
+ * note, a date, the Save button. The host is the chip's own wrapper, so the
+ * only thing that presses it is pressing it.
+ */
+.chip-press {
+  transition:
+    box-shadow var(--duration-fast) var(--ease-out-soft),
+    transform var(--duration-fast) var(--ease-out-soft),
+    filter var(--duration-fast) var(--ease-out-soft);
+}
+
+.chip-host:hover .chip-press {
+  filter: brightness(1.08);
+}
+
+.chip-host:active .chip-press {
+  transform: translateY(0.5px);
+}
+
+/*
+ * Nav tabs and view tabs share an underline that grows from the centre rather
+ * than appearing. `transform` on a compositor property, so a tab strip can
+ * animate on a page that is also fetching without dropping a frame.
+ */
+.tab-rule {
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform var(--duration-base) var(--ease-out-soft);
+}
+
+.tab-rule[data-active="true"] {
+  transform: scaleX(1);
+}
+
+/*
+ * The one global promise about motion: anything decorative stops. The drift on
+ * the sign-in stage, the underline, the button lift and the save wash all wind
+ * down to nothing here — none of them carries information that is not also
+ * carried by colour, weight or text.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .auth-stage::before {
+    animation: none;
+  }
+
+  .tab-rule {
+    transition: none;
+  }
+
+  .ui-btn-primary:hover:not(:disabled),
+  .ui-btn-primary:active:not(:disabled),
+  .chip-host:active .chip-press {
+    transform: none;
+  }
 }

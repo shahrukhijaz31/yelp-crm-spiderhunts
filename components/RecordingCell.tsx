@@ -146,7 +146,7 @@ export default function RecordingCell({
 
         {recording ? (
           <>
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-[5px] bg-st-sky-bg px-2 py-0.5 text-caption font-medium text-st-sky ring-1 ring-inset ring-st-sky-line">
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-st-sky-bg px-2 py-0.5 text-caption font-medium text-st-sky ring-1 ring-inset ring-st-sky-line">
               <HeadphonesIcon />
               Available
             </span>
@@ -220,7 +220,7 @@ export default function RecordingCell({
       )}
 
       {open && (
-        <div className="mt-2.5 rounded-lg border border-line-2 bg-recessed p-3">
+        <div className="panel-inset mt-2.5 rounded-lg p-3">
           {/* The compliance reminder sits on the action itself rather than in a
               tooltip or a page footer: it is the sentence the agent should read
               at the moment they pick a file, and it is deliberately a reminder
@@ -264,10 +264,12 @@ export default function RecordingCell({
                 aria-valuemax={100}
                 aria-valuenow={Math.round(progress * 100)}
                 aria-label="Upload progress"
-                className="h-1.5 w-full overflow-hidden rounded-full bg-line-2"
+                className="h-1.5 w-full overflow-hidden rounded-full bg-line-2 shadow-[inset_0_1px_2px_-1px_rgb(0_0_0/0.3)]"
               >
                 <div
-                  className="h-full bg-accent transition-[width] duration-150"
+                  // Lighter at the leading edge, so the bar reads as filling
+                  // rather than as a rectangle being resized.
+                  className="h-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-150"
                   style={{ width: `${Math.round(progress * 100)}%` }}
                 />
               </div>

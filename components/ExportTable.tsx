@@ -54,7 +54,7 @@ export default function ExportTable({
   }
 
   return (
-    <div className="max-h-[420px] overflow-auto rounded-xl border border-line bg-surface">
+    <div className="panel max-h-[420px] overflow-auto">
       <table className="lead-table w-full table-fixed border-collapse">
         <colgroup>
           <col style={{ width: "5%" }} />
@@ -68,7 +68,7 @@ export default function ExportTable({
           <tr>
             <th
               scope="col"
-              className="border-b border-line-2 bg-surface py-2.5 pl-4 pr-1 text-left"
+              className="bg-surface py-2.5 pl-4 pr-1 text-left"
             >
               <input
                 ref={headerRef}
@@ -85,7 +85,7 @@ export default function ExportTable({
               <th
                 key={label}
                 scope="col"
-                className="col-head border-b border-line-2 bg-surface px-3 py-3 text-left"
+                className="col-head bg-surface px-3 py-3 text-left"
               >
                 {label}
               </th>

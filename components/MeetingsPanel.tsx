@@ -94,7 +94,12 @@ export default function MeetingsPanel({
       </header>
 
       {counts.today > 0 && (
-        <p className="rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5 text-ui text-fg">
+        <p className="flex items-center gap-2.5 rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5 text-ui text-fg shadow-e1">
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_7px_0_var(--c-accent)]"
+          />
+          <span>
           <span className="tnum font-mono font-medium text-accent">{openToday}</span>{" "}
           still to run today
           {doneToday > 0 && (
@@ -103,6 +108,7 @@ export default function MeetingsPanel({
               · <span className="tnum font-mono">{doneToday}</span> already done
             </span>
           )}
+          </span>
         </p>
       )}
 
@@ -139,15 +145,15 @@ export default function MeetingsPanel({
                   // together with the accent rule, so the active tab is
                   // obvious from three signals rather than one.
                   active
-                    ? "font-semibold text-fg"
+                    ? "bg-gradient-to-b from-transparent to-[var(--c-surface)] font-semibold text-fg"
                     : "font-medium text-fg-3 hover:bg-hover hover:text-fg-2"
                 }`}
               >
                 {MEETING_BUCKET_LABELS[candidate]}
                 <span
-                  className={`tnum rounded px-1.5 py-0.5 font-mono text-meta font-medium transition-colors ${
+                  className={`tnum rounded-md px-1.5 py-0.5 font-mono text-meta font-medium transition-colors ${
                     active
-                      ? "bg-accent text-on-accent"
+                      ? "bg-accent text-on-accent shadow-[0_2px_8px_-3px_var(--c-accent)]"
                       : "bg-rail text-fg-3 group-hover:text-fg-2"
                   }`}
                 >
@@ -155,9 +161,8 @@ export default function MeetingsPanel({
                 </span>
                 <span
                   aria-hidden="true"
-                  className={`absolute inset-x-0 -bottom-px h-[2px] transition-colors ${
-                    active ? "bg-accent" : "bg-transparent"
-                  }`}
+                  data-active={active}
+                  className="tab-rule absolute inset-x-0 -bottom-px h-[2px] bg-accent"
                 />
               </button>
             );
@@ -169,11 +174,19 @@ export default function MeetingsPanel({
       </div>
 
       {shown.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line-2 bg-surface px-4 py-10 text-center text-ui text-fg-3">
-          {bucket === "unscheduled"
-            ? "Every interested lead has a date booked."
-            : `Nothing ${MEETING_BUCKET_LABELS[bucket].toLowerCase()}.`}
-        </p>
+        <div className="rounded-xl border border-dashed border-line-2 bg-surface/60 px-4 py-12 text-center">
+          <span
+            aria-hidden="true"
+            className="mx-auto mb-3.5 flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-recessed text-fg-4 shadow-e1"
+          >
+            <CalendarIcon />
+          </span>
+          <p className="text-ui text-fg-3">
+            {bucket === "unscheduled"
+              ? "Every interested lead has a date booked."
+              : `Nothing ${MEETING_BUCKET_LABELS[bucket].toLowerCase()}.`}
+          </p>
+        </div>
       ) : (
         <div className="flex flex-col gap-6">
           {days.map((day) => (
@@ -199,5 +212,28 @@ export default function MeetingsPanel({
         </div>
       )}
     </div>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <rect
+        x="3.4"
+        y="4.8"
+        width="17.2"
+        height="15"
+        rx="2.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path
+        d="M3.4 9.6h17.2M8.4 2.8v3.6M15.6 2.8v3.6"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }

@@ -44,7 +44,10 @@ export default function ViewTabs({
             // below it. Any single one of them is easy to miss at a glance.
             className={`group relative flex items-center gap-2 rounded-t-lg px-3.5 pb-2.5 pt-2 text-ui transition-colors ${
               active
-                ? "font-semibold text-fg"
+                ? // The active tab is joined to the panel below it: a faint
+                  // upward gradient makes the tab and the table read as one
+                  // surface, which is the whole claim a tab strip makes.
+                  "bg-gradient-to-b from-transparent to-[var(--c-surface)] font-semibold text-fg"
                 : "font-medium text-fg-3 hover:bg-hover hover:text-fg-2"
             }`}
           >
@@ -53,19 +56,20 @@ export default function ViewTabs({
                 it: no border, and on inactive tabs it tracks the label's own
                 colour so the pair reads as one thing. */}
             <span
-              className={`tnum rounded px-1.5 py-0.5 font-mono text-meta font-medium transition-colors ${
+              className={`tnum rounded-md px-1.5 py-0.5 font-mono text-meta font-medium transition-colors ${
                 active
-                  ? "bg-accent text-on-accent"
+                  ? "bg-accent text-on-accent shadow-[0_2px_8px_-3px_var(--c-accent)]"
                   : "bg-rail text-fg-3 group-hover:text-fg-2"
               }`}
             >
               {counts[candidate]}
             </span>
+            {/* Grows from the centre rather than blinking on, so moving
+                between tabs reads as one mark travelling. */}
             <span
               aria-hidden="true"
-              className={`absolute inset-x-0 -bottom-px h-[2px] transition-colors ${
-                active ? "bg-accent" : "bg-transparent"
-              }`}
+              data-active={active}
+              className="tab-rule absolute inset-x-0 -bottom-px h-[2px] bg-accent"
             />
           </button>
         );
@@ -75,7 +79,11 @@ export default function ViewTabs({
         type="button"
         onClick={onToggleBreakdown}
         aria-expanded={breakdownOpen}
-        className="ml-auto mb-1.5 flex h-8 items-center gap-1.5 rounded-lg border border-line px-2.5 text-caption font-medium text-fg-3 transition-colors hover:border-line-2 hover:bg-hover hover:text-fg-2"
+        className={`ml-auto mb-1.5 flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-caption font-medium transition-colors ${
+          breakdownOpen
+            ? "border-line-2 bg-hover text-fg"
+            : "border-line text-fg-3 hover:border-line-2 hover:bg-hover hover:text-fg-2"
+        }`}
       >
         Breakdown
         <svg

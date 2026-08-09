@@ -48,7 +48,7 @@ export default function ExportPanel() {
 
       <ExportControls />
 
-      <section className="rounded-xl border border-line bg-surface px-5 py-4">
+      <section className="panel px-5 py-4">
         <h2 className="eyebrow">Columns included</h2>
         <ul className="mt-3 flex flex-wrap gap-1.5">
           {EXPORT_COLUMN_HEADERS.map((header) => (

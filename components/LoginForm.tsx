@@ -10,14 +10,15 @@ import { AUTH_ERROR_MESSAGES, signIn } from "@/lib/auth";
 /**
  * The sign-in screen.
  *
- * Deliberately the same material as the rest of the portal — `bg-surface` on
- * `bg-base`, `border-line` hairlines, the Fraunces wordmark from the nav bar,
- * the 36px control height and accent-red primary button used on every other
- * view. A login page is the first thing anyone sees, so a second design
- * language here would read as a different product.
+ * Built from the same tokens as the rest of the portal — the same accent, the
+ * same hairlines, the same Fraunces wordmark as the nav bar, the same
+ * `.ui-field` and `.ui-btn` chassis every other view uses. What differs is the
+ * *amount of light*: this is the one screen with no data on it, so it is the
+ * one screen that can spend its pixels on depth (see `.auth-stage` and
+ * `.auth-card` in `globals.css`) rather than on density.
  *
- * Small on purpose: a 384px card, not a full-bleed hero. Two fields do not
- * need half a screen, and the workspace this fronts is a dense table tool.
+ * Still small on purpose: a 400px card, not a full-bleed hero. Two fields do
+ * not need half a screen, and the workspace this fronts is a dense table tool.
  *
  * Validation runs on submit, then live on every keystroke — so nobody is
  * scolded for a field they have not finished typing, but a field they have
@@ -114,43 +115,62 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
   }
 
   return (
-    <main className="relative flex flex-1 flex-col items-center justify-center px-5 py-10 sm:px-6">
+    <main className="relative isolate flex flex-1 flex-col items-center justify-center px-5 py-12 sm:px-6">
+      {/* The lit backdrop: gradients, drift and grain, all in CSS and all
+          `pointer-events: none`. Nothing in here can be tabbed to or clicked
+          through, and it is `aria-hidden` because it says nothing. */}
+      <div aria-hidden="true" className="auth-stage" />
+
       {/* The nav bar is hidden on this route, so the theme control comes with
           the page — an agent on a night shift should not have to sign in
           through a screen set to the wrong theme first. */}
-      <div className="absolute right-4 top-4 sm:right-6 sm:top-6">
+      <div className="absolute right-4 top-4 z-10 sm:right-6 sm:top-6">
         <ThemeToggle />
       </div>
 
-      <div className="flex w-full max-w-[400px] flex-col gap-7">
+      <div className="relative z-10 flex w-full max-w-[400px] flex-col gap-8">
         {/* --- brand ---------------------------------------------------- */}
-        <div className="flex flex-col items-center gap-3.5 text-center">
-          <Image
-            src="/logo.ico"
-            alt=""
-            aria-hidden="true"
-            width={44}
-            height={44}
-            unoptimized
-            priority
-            // Not desaturated, unlike the nav bar's: up there the mark competes
-            // with the active-tab red, and here there is nothing to compete
-            // with. This is the one screen that is allowed to be branding.
-            className="h-11 w-11 rounded-xl object-contain"
-          />
-          <h1 className="display-num text-[21px] leading-none text-fg">
-            SpiderHunts <span className="text-fg-2">Leads Portal</span>
-          </h1>
+        <div className="flex flex-col items-center gap-4 text-center">
+          {/* The mark sits in a tile of its own, in its own bloom — the artwork
+              is untouched, and everything around it is CSS. A logo scaled up
+              and given a drop shadow would just look like a bigger logo. */}
+          <span className="auth-logo h-[58px] w-[58px]">
+            <Image
+              src="/logo.ico"
+              alt=""
+              aria-hidden="true"
+              width={34}
+              height={34}
+              unoptimized
+              priority
+              // Not desaturated, unlike the nav bar's: up there the mark
+              // competes with the active-tab red, and here there is nothing to
+              // compete with. This is the one screen allowed to be branding.
+              className="h-[34px] w-[34px] object-contain"
+            />
+          </span>
+
+          <div className="flex flex-col items-center gap-2">
+            <h1 className="auth-wordmark display-num text-[23px] leading-none text-fg">
+              SpiderHunts <span className="text-fg-2">Leads Portal</span>
+            </h1>
+            {/* The quietest step in the hierarchy, and the widest tracking —
+                it names the product category, it is not read twice. */}
+            <p className="eyebrow">Outbound call workspace</p>
+          </div>
         </div>
 
         {/* --- card ----------------------------------------------------- */}
-        <div className="rounded-2xl border border-line bg-surface px-5 py-7 sm:px-7">
+        <div className="auth-card px-5 py-7 sm:px-7">
           <header>
-            {/* The card's own heading steps below the wordmark rather than
-                matching it — two headings at one size is two first things. */}
-            <h2 className="text-cell font-semibold leading-none text-fg">Sign in</h2>
+            {/* Three steps down from the wordmark, in order: the greeting is
+                the card's own heading, the sentence under it is instruction.
+                Two headings at one size would be two first things. */}
+            <h2 className="text-[19px] font-semibold leading-none tracking-[-0.015em] text-fg">
+              Welcome back
+            </h2>
             <p className="mt-2.5 text-ui leading-relaxed text-fg-3">
-              Use the workspace credentials issued to you.
+              Sign in with the workspace credentials issued to you.
             </p>
           </header>
 
@@ -159,7 +179,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
           {formError && (
             <p
               role="alert"
-              className="mt-5 flex items-start gap-2 rounded-lg border border-accent-3 bg-accent-soft px-3 py-2.5 text-ui leading-relaxed text-accent-2"
+              className="mt-5 flex items-start gap-2.5 rounded-lg border border-accent-3 bg-accent-soft px-3 py-2.5 text-ui leading-relaxed text-accent-2 shadow-e1"
             >
               <WarningIcon />
               <span>{formError}</span>
@@ -193,7 +213,10 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                 // The error border now rides on `aria-invalid` inside
                 // `.ui-field`, so the ring and what a screen reader is told
                 // can no longer disagree.
-                className="ui-field h-10 w-full"
+                // Taller than the portal's 36px chassis. There are two fields
+                // on this screen and nothing else to fit around them, so they
+                // get the comfortable height a dense table cannot afford.
+                className="ui-field h-11 w-full rounded-[10px]"
               />
               {showErrors.username && (
                 <FieldError id={`${usernameId}-error`}>{showErrors.username}</FieldError>
@@ -226,7 +249,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                   placeholder="••••••••"
                   // Right padding clears the reveal button, so a long password
                   // scrolls under the label rather than behind the icon.
-                  className="ui-field h-10 w-full pr-11"
+                  className="ui-field h-11 w-full rounded-[10px] pr-12"
                 />
                 <button
                   type="button"
@@ -235,10 +258,10 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                   aria-pressed={revealed}
                   aria-controls={passwordId}
                   title={revealed ? "Hide password" : "Show password"}
-                  // 32px target inside a 40px field, and fg-3 rather than
+                  // 36px target inside a 44px field, and fg-3 rather than
                   // fg-4: this is a control people hunt for when a password
                   // will not take, not decoration beside the field.
-                  className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-fg-3 transition-colors hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-55"
+                  className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-fg-3 transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-55"
                 >
                   {revealed ? <EyeOffIcon /> : <EyeIcon />}
                   <span className="sr-only">
@@ -257,7 +280,9 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
               // `aria-busy` says to a screen reader what the spinner and the
               // changed label say to the eye.
               aria-busy={submitting}
-              className="ui-btn ui-btn-primary mt-2 h-10 w-full"
+              // Matches the fields it sits under, and carries the gradient,
+              // the accent glow and the press state from `.ui-btn-primary`.
+              className="ui-btn ui-btn-primary mt-2 h-11 w-full rounded-[10px] text-[14px] font-semibold"
             >
               {submitting && <Spinner />}
               {submitting ? "Signing in…" : "Sign in"}
@@ -265,7 +290,8 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
           </form>
         </div>
 
-        <p className="text-center text-caption leading-relaxed text-fg-3">
+        <p className="flex items-center justify-center gap-2 text-center text-caption leading-relaxed text-fg-3">
+          <LockIcon />
           Access is issued by your workspace administrator.
         </p>
       </div>
@@ -297,6 +323,34 @@ function WarningIcon() {
       <circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
       <path d="M8 4.9v3.4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
       <circle cx="8" cy="10.8" r="0.65" fill="currentColor" />
+    </svg>
+  );
+}
+
+/**
+ * The closing line's glyph. Decorative — the sentence beside it already says
+ * everything, so it is hidden rather than labelled.
+ */
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 12 12" aria-hidden="true" className="h-3 w-3 shrink-0 text-fg-4">
+      <rect
+        x="2.4"
+        y="5.2"
+        width="7.2"
+        height="5.2"
+        rx="1.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+      />
+      <path
+        d="M4.2 5.2V3.9a1.8 1.8 0 0 1 3.6 0v1.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

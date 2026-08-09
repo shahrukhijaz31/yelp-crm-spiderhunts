@@ -41,8 +41,10 @@ export default function Breakdown({
           </p>
         </div>
 
-        {/* All seven counts as one object rather than seven equal boxes. */}
-        <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-rail">
+        {/* All seven counts as one object rather than seven equal boxes. The
+            inner shadow makes it a channel with the segments sitting in it,
+            which is what stops a 8px bar from reading as a flat swatch. */}
+        <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-rail shadow-[inset_0_1px_2px_-1px_rgb(0_0_0/0.35)]">
           {CALL_STATUSES.map((status) => {
             const count = stats.byStatus[status];
             if (count === 0) return null;
@@ -51,7 +53,9 @@ export default function Breakdown({
                 key={status}
                 title={`${CALL_STATUS_SHORT_LABELS[status]}: ${count}`}
                 style={{ flexGrow: count }}
-                className={`h-full ${CALL_STATUS_DOTS[status]} ${
+                // The segments grow and shrink as work lands rather than
+                // snapping — the bar is read as a shape changing over a shift.
+                className={`h-full transition-[flex-grow] duration-500 ${CALL_STATUS_DOTS[status]} ${
                   status === "not_called" ? "opacity-40" : ""
                 }`}
               />
