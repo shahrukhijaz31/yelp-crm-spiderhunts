@@ -18,15 +18,20 @@ export default function ReportsPanel() {
   const withWebsite = leads.filter((lead) => Boolean(lead.website)).length;
 
   return (
-    <div className="flex flex-col gap-7">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
       <header>
         <h1 className="page-title">Summary</h1>
-        <p className="mt-3 page-intro">
+        <p className="mt-2 page-intro">
           Snapshot of the current list, {longDate(today)}.
         </p>
       </header>
 
-      <section className="grid grid-cols-4 gap-4">
+      {/* The same divided strip as the worklist's headline, so the two
+          screens' summaries are one component wearing different numbers
+          rather than two takes on the idea of a stat card. Hairlines are 1px
+          gaps showing the panel colour through — correct however the grid
+          wraps, which `divide-x` is not. */}
+      <section className="panel grid grid-cols-1 gap-px overflow-hidden bg-line sm:grid-cols-2 lg:grid-cols-4">
         <Card value={`${reachRate}%`} label="List worked" hint={`${stats.called} of ${stats.total} leads`} />
         <Card
           value={`${interestRate}%`}
@@ -47,12 +52,12 @@ export default function ReportsPanel() {
         />
       </section>
 
-      <section className="panel px-6 py-5">
+      <section className="panel px-5 py-4">
         <Breakdown stats={stats} size="full" />
       </section>
 
-      <section className="panel px-6 py-5">
-        <h2 className="eyebrow">Outcome detail</h2>
+      <section className="panel px-5 py-4">
+        <h2 className="text-caption font-medium text-fg-2">Outcome detail</h2>
         <table className="mt-4 w-full">
           <thead>
             <tr className="border-b border-line">
@@ -125,18 +130,14 @@ function Card({
   live?: boolean;
 }) {
   return (
-    // The same `.metric` chassis as the worklist's headline strip, so the two
-    // screens' cards are the same object rather than two takes on one.
-    <div className="metric px-5 py-4" data-tone={live ? "live" : "calm"}>
-      <div className="relative">
-        <p
-          className={`display-num text-[34px] leading-none ${live ? "text-accent" : "text-fg"}`}
-        >
-          {value}
-        </p>
-        <p className="eyebrow mt-3">{label}</p>
-        <p className="mt-2 text-caption text-fg-3">{hint}</p>
-      </div>
+    <div className="bg-surface px-4 py-3.5">
+      <p className="text-caption font-medium text-fg-3">{label}</p>
+      <p
+        className={`display-num mt-1.5 text-[26px] leading-none ${live ? "text-accent" : "text-fg"}`}
+      >
+        {value}
+      </p>
+      <p className="mt-1.5 text-meta text-fg-4">{hint}</p>
     </div>
   );
 }

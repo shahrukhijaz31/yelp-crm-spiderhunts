@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CalendarDays, CalendarPlus, X } from "lucide-react";
 
 import BookMeetingDialog from "./BookMeetingDialog";
 import { callbackState, formatCallbackDate } from "@/lib/leadUtils";
@@ -28,30 +29,40 @@ import type { Lead, LeadEditableFields } from "@/lib/types";
  * So the cell opens a small dialog instead. Date alone is still one field and
  * one click; a time turns it into a booked meeting.
  */
+/**
+ * Four states, and the difference between them is carried by *fill* rather
+ * than by four colours.
+ *
+ *   overdue   a filled accent chip — the only red fill in a table row, and the
+ *             one thing here that should stop an agent scrolling past
+ *   today     accent text on a soft accent tint, one step quieter
+ *   future    plain text; a date in the diary is information, not a warning
+ *   none      the quietest thing in the row, and an invitation to click
+ *
+ * One hue, four intensities. Using a second colour for "overdue" would put it
+ * in competition with the status pill two columns to the left, which is
+ * already carrying six colours of its own.
+ */
 const STATE = {
   overdue: {
-    stripe: "bg-accent",
-    text: "text-accent-2",
-    icon: "text-accent-2",
-    fill: "bg-accent-soft",
+    text: "text-on-accent",
+    icon: "text-on-accent",
+    fill: "bg-accent-solid border-transparent",
   },
   today: {
-    stripe: "bg-accent",
     text: "text-accent",
     icon: "text-accent",
-    fill: "bg-transparent",
+    fill: "bg-accent-soft border-accent-line",
   },
   future: {
-    stripe: "bg-line-2",
     text: "text-fg-2",
     icon: "text-fg-4",
-    fill: "bg-transparent",
+    fill: "bg-transparent border-transparent",
   },
   none: {
-    stripe: "bg-transparent",
     text: "text-fg-3",
     icon: "text-fg-4",
-    fill: "bg-transparent",
+    fill: "bg-transparent border-transparent",
   },
 } as const;
 
@@ -93,41 +104,47 @@ export default function CallbackCell({
               }. Change it`
             : `Book a meeting or a call-back for ${lead.name}`
         }
-        className={`inline-flex cursor-pointer items-stretch overflow-hidden rounded-r text-left transition-colors ${tone.fill}`}
+        className={`inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-md border px-1.5 py-1 text-left transition-colors ${tone.fill} ${
+          !lead.callbackDate ? "hover:border-line-2 hover:bg-hover" : ""
+        }`}
       >
-        <span aria-hidden="true" className={`w-[2px] shrink-0 ${tone.stripe}`} />
         {lead.callbackDate ? (
-          <span className="inline-flex items-center gap-1.5 py-1.5 pl-2 pr-1.5">
-            <CalendarIcon className={tone.icon} />
+          <>
+            <CalendarDays
+              className={`h-3.5 w-3.5 shrink-0 ${tone.icon}`}
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
             <span
-              className={`tnum whitespace-nowrap font-mono text-caption font-semibold ${tone.text}`}
+              className={`tnum min-w-0 truncate font-mono text-caption font-medium ${tone.text}`}
             >
               {formatCallbackDate(lead.callbackDate, today)}
-              {/* The booked time, where there is one. The worklist never showed
-                  it before, so an agent had to open Meetings to find out
-                  whether a date was a call-back or a 2pm appointment. */}
+              {/* The booked time, where there is one. Without it an agent had
+                  to open Meetings to find out whether a date was a call-back
+                  or a 2pm appointment. */}
               {lead.meetingTime && (
-                <span className="font-medium text-fg-3">
+                <span className={state === "overdue" ? "opacity-80" : "text-fg-3"}>
                   {" "}
                   {formatMeetingTime(lead.meetingTime)}
                 </span>
               )}
             </span>
-            {state === "overdue" && (
-              <span className="text-[10.5px] font-semibold uppercase tracking-wide text-accent-2">
-                late
-              </span>
-            )}
-          </span>
+          </>
         ) : (
           // Names the action rather than the absence. "No callback" was
           // accurate and told an agent nothing about what to do with the cell —
           // which, since this cell is how a meeting gets booked at all, was the
           // one thing it needed to say.
-          <span className="inline-flex items-center gap-1.5 py-1.5 pl-2 pr-2 text-fg-3 transition-colors group-hover/cb:text-fg">
-            <CalendarIcon className="" />
-            <span className="whitespace-nowrap text-caption">Book…</span>
-          </span>
+          <>
+            <CalendarPlus
+              className="h-3.5 w-3.5 shrink-0 text-fg-4"
+              strokeWidth={1.75}
+              aria-hidden="true"
+            />
+            <span className="whitespace-nowrap text-caption text-fg-3 transition-colors group-hover/cb:text-fg-2">
+              Book…
+            </span>
+          </>
         )}
       </button>
 
@@ -145,51 +162,11 @@ export default function CallbackCell({
           // Revealed by keyboard focus as well as by the cursor. Hidden on
           // `opacity` alone it was reachable by Tab but invisible once there,
           // which is the worst of both.
-          className="ml-0.5 rounded p-1 leading-none text-fg-3 opacity-0 transition-opacity hover:text-fg focus-visible:opacity-100 group-hover/cb:opacity-100 group-focus-within/cb:opacity-100"
+          className="ml-0.5 shrink-0 rounded p-1 leading-none text-fg-4 opacity-0 transition-opacity hover:text-fg focus-visible:opacity-100 group-hover/cb:opacity-100 group-focus-within/cb:opacity-100"
         >
-          <CrossIcon />
+          <X className="h-3 w-3" strokeWidth={2.25} aria-hidden="true" />
         </button>
       )}
     </div>
-  );
-}
-
-function CrossIcon() {
-  return (
-    <svg viewBox="0 0 10 10" aria-hidden="true" className="h-2.5 w-2.5">
-      <path
-        d="m2.5 2.5 5 5m0-5-5 5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function CalendarIcon({ className }: { className: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      className={`h-3.5 w-3.5 shrink-0 ${className}`}
-      aria-hidden="true"
-    >
-      <rect
-        x="2.25"
-        y="3.25"
-        width="11.5"
-        height="10.5"
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      <path
-        d="M2.25 6.5h11.5M5.5 2v2.4M10.5 2v2.4"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

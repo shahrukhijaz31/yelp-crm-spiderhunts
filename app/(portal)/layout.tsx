@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import NavBar from "@/components/NavBar";
+import AppShell from "@/components/AppShell";
 import { PortalStatsProvider } from "@/components/PortalStatsProvider";
 import { requireUser } from "@/lib/authz";
 import { leadStats } from "@/lib/leadDb";
@@ -42,8 +42,9 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
     // One set of counts for the shell. Whichever screen learns a fresher set
     // replaces them, so the bar keeps moving as an agent works.
     <PortalStatsProvider initialStats={stats}>
-      <NavBar today={today} user={user} />
-      {children}
+      <AppShell today={today} user={user}>
+        {children}
+      </AppShell>
     </PortalStatsProvider>
   );
 }

@@ -102,21 +102,21 @@ export default function BookMeetingDialog({
 
       <form
         onSubmit={submit}
-        className="panel-float relative w-full max-w-sm p-4"
+        className="panel-float pop-in relative w-full max-w-sm p-4 [--pop-origin:center]"
       >
-        <h2 className="text-cell font-semibold text-fg">
+        <h2 className="text-cell font-medium tracking-[-0.015em] text-fg">
           {existing ? "Meeting" : "Book a meeting"}
         </h2>
-        <p className="mt-0.5 truncate text-ui text-fg-3" title={lead.name}>
+        <p className="mt-1 truncate text-caption text-fg-3" title={lead.name}>
           {lead.name}
           {lead.phone && (
-            <span className="tnum font-mono text-num text-fg-2"> · {lead.phone}</span>
+            <span className="tnum font-mono text-fg-2"> · {lead.phone}</span>
           )}
         </p>
 
         <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_120px]">
           <label className="flex flex-col gap-1">
-            <span className="eyebrow">Date</span>
+            <span className="field-label">Date</span>
             <input
               ref={dateRef}
               type="date"
@@ -128,7 +128,7 @@ export default function BookMeetingDialog({
           </label>
 
           <label className="flex flex-col gap-1">
-            <span className="eyebrow">Time</span>
+            <span className="field-label">Time</span>
             <input
               type="time"
               value={time}
@@ -139,7 +139,7 @@ export default function BookMeetingDialog({
         </div>
 
         <label className="mt-3 flex flex-col gap-1">
-          <span className="eyebrow">With</span>
+          <span className="field-label">With</span>
           <input
             type="text"
             value={attendees}
@@ -149,7 +149,7 @@ export default function BookMeetingDialog({
           />
         </label>
 
-        <p className="mt-2.5 text-meta leading-relaxed text-fg-3">
+        <p className="mt-2.5 text-meta leading-relaxed text-fg-4">
           {time ? (
             <>
               Books a meeting and marks this lead{" "}
@@ -171,7 +171,7 @@ export default function BookMeetingDialog({
           <button
             type="button"
             onClick={onClose}
-            className="ui-btn h-9 text-fg-3 hover:bg-hover hover:text-fg"
+            className="ui-btn ui-btn-ghost h-9"
           >
             Cancel
           </button>
@@ -179,7 +179,7 @@ export default function BookMeetingDialog({
             <button
               type="button"
               onClick={clear}
-              className="ui-btn ml-auto h-9 px-2.5 text-fg-3 underline decoration-line-2 underline-offset-4 hover:text-accent"
+              className="ui-btn ui-btn-ghost ml-auto h-9 px-2.5 hover:text-danger"
             >
               Remove
             </button>

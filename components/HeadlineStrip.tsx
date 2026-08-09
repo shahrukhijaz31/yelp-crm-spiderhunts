@@ -1,154 +1,173 @@
+"use client";
+
+import { AlertTriangle, PhoneCall, Users2 } from "lucide-react";
+
+import CountUp from "./CountUp";
+import { useSpotlight } from "./useSpotlight";
 import type { LeadStats } from "@/lib/leadUtils";
 
 /**
- * The three numbers that decide what an agent does next. Everything else lives
- * behind the Breakdown panel and the Reports view.
+ * The three numbers that decide what an agent does next.
  *
- * These were three numerals separated by hairlines — honest, and completely
- * flat. They are now three cards, which is a different claim: a card says "this
- * is a thing you can look at on its own", and at the top of a workspace that is
- * exactly right. What has *not* changed is the weight given to them. The cards
- * are 1fr each and short; the numeral is still the element and the card is only
- * what holds it apart from its neighbours. A dashboard where the metric strip
- * is taller than four rows of the table it introduces has its priorities
- * backwards.
+ * **One object, three segments** — not three cards. Three separately-bordered
+ * cards is the default dashboard shape, and it makes three related figures
+ * look like three unrelated widgets that happen to be adjacent. Divided by
+ * hairlines inside a single panel, they read as what they are: one summary of
+ * one list, split three ways.
  *
- * Colour is contextual and earned. `Total leads` is never anything but neutral
- * — it is a fact about the workspace, not a call to action. The two callback
- * counts turn accent *only when they are non-zero*, because a permanently red
- * number is a number people stop seeing.
+ * Each segment has a *semantic personality*, and it is carried by where the
+ * light in it comes from rather than by how much colour is in it:
+ *
+ *   Total leads      neutral. A fact about the workspace, never coloured.
+ *   Callback today   warm. An amber corner wash when there is work owed.
+ *   Overdue          danger. An accent wash, an accent numeral, and an accent
+ *                    hairline along its top edge — the only gradient border in
+ *                    the strip, and only when the count is non-zero.
+ *
+ * The tone is *earned*, never permanent: at zero, all three are identical
+ * neutral segments. A dashboard where "Overdue" is red whether or not anything
+ * is overdue has taught its users to ignore red.
+ *
+ * Nothing here is invented. Three counts in, three counts out — no trends, no
+ * percentages, no deltas.
  */
 export default function HeadlineStrip({ stats }: { stats: LeadStats }) {
-  const overdue = stats.callbackOverdue;
   const dueToday = stats.callbackDueToday;
+  const overdue = stats.callbackOverdue;
 
   return (
-    <div className="grid grid-cols-1 gap-3 py-4 sm:grid-cols-3">
-      <Metric
-        value={stats.total}
-        label="Total leads"
-        hint="in this workspace"
-        icon={<ListIcon />}
-      />
-      <Metric
-        value={dueToday}
-        label="Callback today"
-        hint={dueToday > 0 ? "waiting on a call" : "nothing owed today"}
-        live={dueToday > 0}
-        icon={<ClockIcon />}
-      />
-      <Metric
-        value={overdue}
-        label="Overdue"
-        hint={overdue > 0 ? "past their date" : "nothing running late"}
-        live={overdue > 0}
-        icon={<AlertIcon />}
-      />
+    <div className="panel grid grid-cols-1 gap-px overflow-hidden bg-line sm:grid-cols-3">
+      {[
+        {
+          value: stats.total,
+          label: "Total leads",
+          hint: "in this workspace",
+          icon: Users2,
+          tone: "neutral" as const,
+          live: false,
+        },
+        {
+          value: dueToday,
+          label: "Callback today",
+          hint: dueToday > 0 ? "waiting on a call" : "nothing owed today",
+          icon: PhoneCall,
+          tone: "warm" as const,
+          live: dueToday > 0,
+        },
+        {
+          value: overdue,
+          label: "Overdue",
+          hint: overdue > 0 ? "past their date" : "nothing running late",
+          icon: AlertTriangle,
+          tone: "danger" as const,
+          live: overdue > 0,
+        },
+      ].map((metric, index) => (
+        // A short stagger on first paint only — the strip assembles left to
+        // right, then never moves again. In CSS rather than in Framer: a
+        // `motion.div` with an `initial` would server-render these three
+        // segments at `opacity: 0`, so the first thing an agent sees on the
+        // worklist would depend on JavaScript having arrived. `.rise-in` runs
+        // without it and stops under `prefers-reduced-motion`.
+        <div
+          key={metric.label}
+          className="rise-in"
+          style={
+            { "--delay": `${index * 60}ms`, "--rise": "6px" } as React.CSSProperties
+          }
+        >
+          <Metric {...metric} />
+        </div>
+      ))}
     </div>
   );
 }
+
+/** Where each segment's light comes from, and what colour it is. */
+const TONES = {
+  neutral: { wash: "", numeral: "text-fg", icon: "text-fg-4", dot: "" },
+  warm: {
+    wash: "before:bg-[radial-gradient(14rem_9rem_at_100%_0%,color-mix(in_srgb,var(--c-warning)_16%,transparent),transparent_70%)]",
+    numeral: "text-warning",
+    icon: "text-warning",
+    dot: "bg-warning",
+  },
+  danger: {
+    wash: "before:bg-[radial-gradient(14rem_9rem_at_100%_0%,color-mix(in_srgb,var(--c-accent)_18%,transparent),transparent_70%)]",
+    numeral: "text-accent",
+    icon: "text-accent",
+    dot: "bg-accent",
+  },
+} as const;
 
 function Metric({
   value,
   label,
   hint,
   live,
-  icon,
+  tone,
+  icon: Icon,
 }: {
   value: number;
   label: string;
   hint: string;
-  /** Non-zero and time-critical: warms the border and lights the corner. */
-  live?: boolean;
-  icon: React.ReactNode;
+  live: boolean;
+  tone: keyof typeof TONES;
+  icon: React.ElementType;
 }) {
+  const spotlight = useSpotlight<HTMLDivElement>();
+  const style = TONES[live ? tone : "neutral"];
+
   return (
-    <div className="metric px-4 py-3.5" data-tone={live ? "live" : "calm"}>
-      {/* `relative` lifts the content over the corner wash `.metric[data-tone]`
-          paints behind it. */}
-      <div className="relative flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1.5">
-          {/* The label stays an eyebrow — quiet, wide-tracked, clearly
-              subordinate. The numeral is the element; this only names it. */}
-          <span className="eyebrow flex items-center gap-1.5 whitespace-nowrap">
+    <div
+      {...spotlight}
+      // `spotlight` gives it cursor-tracking light; `edge-accent` draws the
+      // fading accent hairline along the top, and only the live danger segment
+      // gets it — it is the strip's one gradient border, so it has to mean
+      // something.
+      className={`spotlight group relative isolate h-full bg-surface px-4 py-3.5 transition-colors duration-200 ${
+        live && tone === "danger" ? "edge-accent" : ""
+      }`}
+    >
+      {/* The tone wash, on its own layer beneath the content. A pseudo-element
+          rather than a background on the segment itself, so it can sit under
+          the spotlight without the two gradients having to be composed into
+          one declaration. */}
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-0 -z-10 before:absolute before:inset-0 ${style.wash}`}
+      />
+
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-caption font-medium text-fg-3">
+            {label}
             {live && (
               <span
                 aria-hidden="true"
-                className="h-1 w-1 rounded-full bg-accent shadow-[0_0_6px_0_var(--c-accent)]"
+                className={`h-1.5 w-1.5 rounded-full ${style.dot}`}
               />
             )}
-            {label}
-          </span>
-          <span
-            className={`display-num text-[32px] leading-none ${
-              live ? "text-accent" : "text-fg"
-            }`}
+          </p>
+          <p
+            className={`display-num mt-1.5 text-[28px] leading-none transition-colors duration-300 ${style.numeral}`}
           >
-            {value.toLocaleString()}
-          </span>
-          {/* The one line of prose in the card. It is what turns "3" into
-              "3 leads past their date", and it costs 14px of height. */}
-          <span className="text-meta text-fg-3">{hint}</span>
+            <CountUp value={value} />
+          </p>
+          {/* The one line of prose. It is what turns "3" into "3 leads past
+              their date", and it costs 16px of height. */}
+          <p className="mt-1.5 truncate text-meta text-fg-4">{hint}</p>
         </div>
 
         {/* Iconography sits at fg-4 — the step reserved for marks rather than
-            text, where 3:1 is the bar and 4.5:1 is not required. It labels the
-            card at a glance and is never the thing being read. */}
-        <span
+            text, where 3:1 is the bar. It nudges up a pixel on hover, which is
+            the smallest possible acknowledgement that the card is a thing. */}
+        <Icon
+          className={`h-4 w-4 shrink-0 transition-all duration-300 group-hover:-translate-y-0.5 ${style.icon}`}
+          strokeWidth={1.75}
           aria-hidden="true"
-          className={live ? "text-accent/70" : "text-fg-4"}
-        >
-          {icon}
-        </span>
+        />
       </div>
     </div>
-  );
-}
-
-function ListIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-4 w-4">
-      <path
-        d="M5.5 4h8M5.5 8h8M5.5 12h8"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-      />
-      <circle cx="2.6" cy="4" r="1" fill="currentColor" />
-      <circle cx="2.6" cy="8" r="1" fill="currentColor" />
-      <circle cx="2.6" cy="12" r="1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-4 w-4">
-      <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <path
-        d="M8 4.6V8l2.4 1.6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function AlertIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-4 w-4">
-      <path
-        d="M8 2.2 14.6 13.4H1.4z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
-      <path d="M8 6.6v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-      <circle cx="8" cy="11.3" r="0.7" fill="currentColor" />
-    </svg>
   );
 }

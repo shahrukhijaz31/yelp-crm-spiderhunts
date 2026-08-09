@@ -1,254 +1,437 @@
 @import "tailwindcss";
 
 /*
- * Two themes, one token set.
+ * =============================================================================
+ * SpiderHunts Leads Portal — design system
+ * =============================================================================
  *
- * Every colour is a `--c-*` variable defined twice — once per theme — and the
- * Tailwind theme below only ever *points* at those variables. Components never
- * name a theme: `bg-surface` is correct in both, so adding a third theme later
- * means adding one block here and touching nothing else.
+ * Two themes, one token set. Every colour is a `--c-*` variable defined twice —
+ * once per theme — and the Tailwind theme block below only ever *points* at
+ * those variables. Components never name a theme: `bg-surface` is correct in
+ * both, so adding a third means adding one block here and touching nothing else.
  *
- * DARK — "graphite & signal red". Neither end is pure (#0D0F14 base, #E9E7E4
- * text, never #000/#FFF): full-contrast dark UI is what makes eyes ache after
- * three hours.
+ * The governing idea is **atmosphere with a floor of restraint**.
  *
- * LIGHT — cool slate office palette. Sharper hairlines and near-black cool ink
- * for legibility under daylight, with the same red accent carried across.
+ * The interface is built from a five-step neutral surface ramp, hairlines, a
+ * four-step text ramp and one accent — and then *lit*. Colour arrives from
+ * behind the surfaces rather than being painted onto them: a fixed field of
+ * very large, very slow radial gradients sits at the back of the document, the
+ * surfaces above it are semi-transparent, and what tints a panel is the
+ * atmosphere showing through it.
  *
- * In both: red is reserved for the accent, the active view and time-critical
- * state, so no status colour is allowed to compete with it.
+ * That distinction is the whole design. A gradient *on* a card is decoration
+ * and competes with the data in the card. A gradient *behind* a translucent
+ * card is depth, and the data sits on top of it untouched. Everything below —
+ * the ambient field, the layer ramp, the spotlights, the gradient accents — is
+ * an application of that one rule.
+ *
+ * Six layers, back to front:
+ *
+ *   1  atmosphere      the animated chromatic field (`body::before/::after`)
+ *   2  shell           sidebar and top bar — translucent, blurred
+ *   3  surfaces        panels, tables, cards
+ *   4  controls        buttons, fields, chips
+ *   5  selected        the focused/active/urgent state of any of the above
+ *   6  overlays        menus, dialogs, popovers — the only things with shadow
+ *
+ * Motion is slow where it is ambient (30–60s) and quick where it answers a
+ * pointer (120–260ms). Nothing loops in the foreground, and everything
+ * decorative stops under `prefers-reduced-motion`.
  */
 
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  /* Surfaces, from recessed to raised */
-  --c-base: #0d0f14;
-  --c-recessed: #0f1218;
-  --c-surface: #15181f;
-  --c-rail: #1a1e26;
-  /* Hover has to read as a distinct fifth layer above `rail`, or rows on the
-     tinted working panel show no response at all when the cursor is on them. */
-  --c-hover: #20262f;
-  --c-on-accent: #0d0f14;
+  /*
+   * SURFACES — five steps, each one job.
+   *
+   *   base      the page itself
+   *   recessed  something cut into the page (a filter rail, an input)
+   *   surface   the working plane: panels, tables, cards
+   *   rail      a header or footer strip *within* a surface
+   *   hover     the response to a cursor, and only that
+   *
+   * The steps are close together (2–5 points of lightness) on purpose. Wide
+   * steps produce the stripey, high-contrast look of a generic admin template;
+   * narrow ones read as one material catching light differently, which is what
+   * every product in this category actually does.
+   *
+   * Neither end is pure. #08090b rather than #000, #f4f5f7 rather than #fff:
+   * full-contrast dark UI is what makes eyes ache after three hours.
+   */
+  --c-base: #08090b;
+  --c-recessed: #0c0e11;
+  --c-surface: #101215;
+  --c-rail: #14171b;
+  --c-hover: #1a1e23;
 
-  /* Hairlines */
-  --c-line: #262b34;
-  --c-line-2: #333945;
+  /* Hairlines. `line` separates, `line-2` outlines something interactive. */
+  --c-line: #1d2027;
+  --c-line-2: #2a2e36;
 
   /*
-   * Text ramp — warm off-white down to dim.
+   * TEXT — four steps.
    *
-   * `fg-3` is the floor for anything read: it clears 4.5:1 on every surface in
-   * the set, including `rail` and `hover`, so muted text is safe wherever it
-   * lands. `fg-4` does NOT — it only clears AA on `surface`, and pushing it
-   * far enough to clear `hover` too would leave it indistinguishable from
-   * fg-3 and flatten the ramp. So fg-4 is deliberately **not a text step**:
-   * icons, separators and disabled marks only, where 3:1 is the bar.
+   * `fg-3` is the floor for anything *read*: it clears 4.5:1 on every surface
+   * in the set, including `hover`, so muted text is safe wherever it lands.
+   * `fg-4` does not, and is deliberately **not a text step** — icons,
+   * separators and disabled marks only, where 3:1 is the bar.
    */
-  --c-fg: #e9e7e4;
-  --c-fg-2: #b3b8c2;
-  --c-fg-3: #8b94a2;
-  --c-fg-4: #79818f;
+  --c-fg: #f2f3f5;
+  --c-fg-2: #b4b8c0;
+  --c-fg-3: #8b9199;
+  --c-fg-4: #6a7079;
 
-  /* Accent — signal red */
-  --c-accent: #e5484d;
-  --c-accent-2: #ff6b6f;
-  --c-accent-3: #a3282d;
-  /* Darkened from #2a1417: accent text on this tint measured 4.43:1, just
-     under AA, and it carries the Filters button and the ADMIN badge. */
-  --c-accent-soft: #231215;
+  /*
+   * ACCENT — SpiderHunts red.
+   *
+   * Used for exactly three things: the primary action, the active view, and
+   * time-critical state (a callback due or overdue). Everything else that
+   * wants attention gets weight or position instead. A red used four times is
+   * a brand; used forty times it is wallpaper.
+   */
+  /*
+   * Lifted two points from the #e5484d the brand uses as a fill. That exact
+   * red is 4.28:1 as *text* on the `hover` surface — so an overdue marker on
+   * the row your cursor happens to be on missed AA, which is precisely the row
+   * it most needs to be read on. #ea5a5f is the nearest step that clears 4.5
+   * on every surface in the set, and at this size the two are indistinguishable
+   * side by side. The brand red itself is unchanged wherever it is a *fill*
+   * (`--c-accent-solid`, the stripes, the dots), where this rule does not
+   * apply.
+   */
+  --c-accent: #ea5a5f;
+  --c-accent-2: #f28084;
+  --c-accent-3: #b3373b;
+  --c-accent-soft: #1f1315;
+  --c-accent-line: #4a2226;
 
-  /* Status hues — deliberately clear of the accent's red */
-  --c-st-neutral: #98a2b3;
-  --c-st-gold: #e3a93f;
-  --c-st-gold-bg: #251e10;
-  --c-st-gold-line: #4a3b18;
-  --c-st-sky: #58a9e6;
-  --c-st-sky-bg: #11212e;
-  --c-st-sky-line: #1f3c52;
-  --c-st-green: #46c48b;
-  --c-st-green-bg: #0f2620;
-  --c-st-green-line: #1d4234;
-  /* The seventh hue, and the tightest fit: it has green on one side and sky on
-     the other. Pulled well down in lightness from both, so a column of chips
-     still reads by brightness when the hue alone is doing too little work. */
-  --c-st-teal: #35a9c0;
-  --c-st-teal-bg: #0e2229;
-  --c-st-teal-line: #1c3d47;
-  --c-st-orchid: #b87be0;
-  --c-st-orchid-bg: #241a2e;
-  --c-st-orchid-line: #3d2b4d;
-  --c-st-steel: #8a94a3;
-  --c-st-steel-bg: #1b1f27;
-  --c-st-steel-line: #2f353f;
+  /*
+   * Two reds, and the reason is contrast.
+   *
+   * `--c-accent` (#e5484d) is tuned to be *read* against a dark surface — as a
+   * numeral, an icon, a stripe. White text on that same red measures 3.9:1,
+   * which is below AA for a 14px label, so a filled button cannot use it.
+   * `--c-accent-solid` is the same hue taken down until white clears 5:1, and
+   * it is the only red allowed behind white text.
+   *
+   * The alternative was dark ink on the brighter red, which is what this app
+   * used to do. It passes, but a near-black label on a red button reads as a
+   * warning sticker rather than as the primary action.
+   */
+  --c-accent-solid: #c9333a;
+  --c-accent-solid-hover: #d8434a;
+  --c-accent-solid-active: #ab2a30;
+  /* The ink that goes on any filled accent surface. */
+  --c-on-accent: #ffffff;
+  /* The ink that goes on a fully inverted surface (`bg-fg`) — the one hard
+     stop in the status set. */
+  --c-on-invert: #08090b;
+
+  /*
+   * SEMANTIC — meaning, not decoration. Each is a triple: `fg` for text and
+   * icons, `bg` for a tint behind them, `line` for the hairline around it.
+   */
+  --c-success: #3dd68c;
+  --c-success-bg: #0d2620;
+  --c-success-line: #1b4534;
+  --c-warning: #e5a23f;
+  --c-warning-bg: #241d10;
+  --c-warning-line: #4a3b18;
+  --c-danger: #e5484d;
+  --c-danger-bg: #1f1315;
+  --c-danger-line: #4a2226;
+  --c-info: #5aa2e8;
+  --c-info-bg: #0f1e2c;
+  --c-info-line: #1e3b53;
+  --c-muted: #8b9199;
+  --c-muted-bg: #16191e;
+  --c-muted-line: #2a2e36;
+
+  /*
+   * STATUS HUES — the six call outcomes.
+   *
+   * Deliberately clear of the accent's red, so no status can ever be mistaken
+   * for "this is urgent". They are the semantic hues above, plus one violet
+   * that has no semantic job, because six outcomes need six colours.
+   */
+  --c-st-neutral: #8b9199;
+  --c-st-gold: var(--c-warning);
+  --c-st-gold-bg: var(--c-warning-bg);
+  --c-st-gold-line: var(--c-warning-line);
+  --c-st-sky: var(--c-info);
+  --c-st-sky-bg: var(--c-info-bg);
+  --c-st-sky-line: var(--c-info-line);
+  --c-st-green: var(--c-success);
+  --c-st-green-bg: var(--c-success-bg);
+  --c-st-green-line: var(--c-success-line);
+  --c-st-orchid: #b78ae8;
+  --c-st-orchid-bg: #1d1729;
+  --c-st-orchid-line: #382b4d;
+  --c-st-steel: #8891a0;
+  --c-st-steel-bg: #16191e;
+  --c-st-steel-line: #2a2e36;
+  /* "Owner not available" — reached a human, but not the one who can say yes.
+     Teal sits between the sky of a voicemail and the green of interest, which
+     is exactly where the outcome sits. */
+  --c-st-teal: #3fb8ae;
+  --c-st-teal-bg: #0c2422;
+  --c-st-teal-line: #1a4340;
 
   /* Flags */
   --c-warn: #e0685f;
   --c-dup: #97a0e8;
-  --c-dup-bg: #181c2e;
+  --c-dup-bg: #161a2b;
   --c-dup-line: #2b3154;
 
   /* Save confirmation wash */
-  --c-saved-flash: color-mix(in srgb, var(--c-st-green) 11%, transparent);
-  --c-saved-flash-hold: color-mix(in srgb, var(--c-st-green) 9%, transparent);
+  --c-saved-flash: color-mix(in srgb, var(--c-success) 12%, transparent);
+  --c-saved-flash-hold: color-mix(in srgb, var(--c-success) 9%, transparent);
 
   /*
-   * Elevation.
+   * ELEVATION — three steps, and they are *quiet*.
    *
-   * Four steps, and the jump between them is deliberately large: on a dark UI a
-   * shadow is nearly invisible until it is generous, so a timid one reads as a
-   * rendering artefact rather than as height. Each step is a tight contact
-   * shadow plus a wide ambient one, which is what stops a raised surface from
-   * looking like it is painted onto the page.
+   * On a dark UI a shadow reads mostly as a smudge; separation comes from the
+   * hairline, and the shadow only says "this one is above the page". So these
+   * are used on menus, dialogs and popovers, and nowhere else. Panels that sit
+   * *in* the page get a border and no shadow at all.
    */
-  --c-shadow-1: 0 1px 2px -1px rgb(0 0 0 / 0.5);
-  --c-shadow-2:
-    0 1px 2px -1px rgb(0 0 0 / 0.5), 0 6px 16px -8px rgb(0 0 0 / 0.6);
-  --c-shadow-3:
-    0 2px 4px -2px rgb(0 0 0 / 0.55), 0 16px 40px -16px rgb(0 0 0 / 0.7);
-  --c-shadow-4:
-    0 4px 8px -4px rgb(0 0 0 / 0.6), 0 32px 64px -24px rgb(0 0 0 / 0.75);
+  --c-shadow-1: 0 1px 2px rgb(0 0 0 / 0.28);
+  --c-shadow-2: 0 4px 12px -4px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.3);
+  --c-shadow-3: 0 16px 40px -12px rgb(0 0 0 / 0.65), 0 2px 8px -4px rgb(0 0 0 / 0.4);
+  /* The lift a card takes under the cursor. Accent-tinted rather than black:
+     a surface raised towards a warm light source catches a warm shadow. */
+  --c-shadow-hover:
+    0 12px 32px -12px rgb(0 0 0 / 0.6),
+    0 0 24px -12px color-mix(in srgb, var(--c-accent) 40%, transparent);
+
+  /* The focus ring. One definition, every control. */
+  --c-focus: color-mix(in srgb, var(--c-accent) 55%, transparent);
+
+  /* The 1px of light along a surface's top edge, and the dark at the top of a
+     recessed one. Two halves of the same lighting model. */
+  --c-edge-light: rgb(255 255 255 / 0.055);
+  --c-edge-dark: rgb(0 0 0 / 0.35);
+
+  /* ---------------------------------------------------------------------
+   * ATMOSPHERE
+   * ---------------------------------------------------------------------
+   *
+   * The three light sources behind the whole document. Charcoal is the page;
+   * these are what stop it being one flat value across a 2560px screen.
+   *
+   *   warm   the SpiderHunts red, low and left
+   *   cool   a deep indigo, high and right — the complement, which is what
+   *          makes the warm read as warm rather than as "the page is red"
+   *   deep   a navy floor wash that pulls the bottom of the page towards blue
+   *
+   * All three are held between 6% and 14%. Above that they stop being light
+   * and start being paint, and the surfaces sitting on them go muddy.
+   */
+  --c-atmo-warm: color-mix(in srgb, #e5484d 14%, transparent);
+  --c-atmo-cool: color-mix(in srgb, #4a5bd8 11%, transparent);
+  --c-atmo-deep: color-mix(in srgb, #1b2a6b 13%, transparent);
+  /* How much of the atmosphere the surfaces let through. Dark can afford
+     more: tinting a near-black panel by 8% is visible and still reads as
+     neutral, where the same on white would read as a coloured card. */
+  --c-surface-alpha: 0.72;
+  --c-rail-alpha: 0.6;
+  --c-recessed-alpha: 0.55;
 
   /*
-   * The 1px of light along the top edge of a raised surface. It is the whole
-   * difference between a card and a rectangle of slightly different grey: real
-   * surfaces catch the light where they turn away from you.
+   * Gradient accents. Used on the primary action, the active nav item, the
+   * selected segment and the urgent KPI — never as a fill for a whole panel.
    */
-  --c-highlight: rgb(255 255 255 / 0.055);
-  --c-highlight-strong: rgb(255 255 255 / 0.1);
-
-  /*
-   * Panel fills. A surface with a vertical gradient of about 2% reads as lit
-   * from above; flat fills read as a diagram of a surface.
-   */
-  --c-surface-fill: linear-gradient(180deg, #171a22 0%, #14171d 100%);
-  --c-recessed-fill: linear-gradient(180deg, #111419 0%, #0e1116 100%);
-  --c-rail-fill: linear-gradient(180deg, #1c2029 0%, #181c23 100%);
-  --c-raise-fill: linear-gradient(180deg, #232833 0%, #1e222b 100%);
-
-  /* Accent gradient for the one primary button on any given screen. */
-  --c-accent-fill: linear-gradient(
-    180deg,
-    #f05a5f 0%,
-    var(--c-accent) 52%,
-    #c8383d 100%
+  --c-grad-accent: linear-gradient(
+    140deg,
+    #f0575c 0%,
+    var(--c-accent-solid) 55%,
+    #a82d33 100%
   );
-  --c-accent-glow: 0 6px 20px -8px color-mix(in srgb, var(--c-accent) 75%, transparent);
-  --c-accent-glow-strong:
-    0 8px 26px -8px color-mix(in srgb, var(--c-accent) 85%, transparent);
-  /* The soft ring a focused field grows. Wider and fainter than a border. */
-  --c-focus-ring: 0 0 0 3px color-mix(in srgb, var(--c-accent) 22%, transparent);
-
-  /* Ambient page light — two enormous, nearly invisible washes. */
-  --c-ambient-1: color-mix(in srgb, var(--c-accent) 8%, transparent);
-  --c-ambient-2: color-mix(in srgb, #4d6bd8 6%, transparent);
+  --c-grad-accent-hover: linear-gradient(
+    140deg,
+    #f4696e 0%,
+    #d43a41 55%,
+    #b8323a 100%
+  );
+  /* A hairline that fades from accent to nothing — the "gradient border" on a
+     selected or high-priority component, drawn as a background rather than a
+     border so it can fade along its length. */
+  --c-grad-edge: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--c-accent) 65%, transparent) 25%,
+    color-mix(in srgb, var(--c-accent) 65%, transparent) 75%,
+    transparent
+  );
+  /* The soft illumination a surface picks up under the cursor. */
+  --c-spotlight: color-mix(in srgb, var(--c-accent) 9%, transparent);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* Cool slate rather than flat white — easier on the eye over a full shift.
-     "Recessed" inverts its meaning here: on light, deeper means darker. */
-  --c-base: #eef1f6;
-  --c-recessed: #e7ebf2;
+  /*
+   * LIGHT — not the dark theme inverted.
+   *
+   * The ramp runs the other way and the *relationships* change with it. On
+   * dark, `surface` is lighter than the page; on light, `surface` is pure
+   * white and the page around it is the tint. That is how paper works: the
+   * card is the bright thing, and the desk it sits on is not.
+   *
+   * The page grey is a real grey (#f6f7f8), not a wash of the accent and not
+   * white — a white page under white cards has no hierarchy at all.
+   */
+  --c-base: #f6f7f8;
+  --c-recessed: #f1f2f4;
   --c-surface: #ffffff;
-  --c-rail: #e3e8f1;
-  --c-hover: #e9effa;
-  --c-on-accent: #ffffff;
+  --c-rail: #fafbfc;
+  --c-hover: #f3f4f6;
 
-  /* Sharper hairlines than the dark theme needs, for crisp column separation */
-  --c-line: #d5dce6;
-  --c-line-2: #b7c1d0;
-
-  /* Near-black cool ink, stepping down to a legible mid grey. Same rule as
-     dark: fg-3 is the floor for text (4.6:1 on the deepest surface), fg-4 is
-     for icons and separators only. */
-  --c-fg: #0f1724;
-  --c-fg-2: #384358;
-  --c-fg-3: #5c6878;
-  --c-fg-4: #6b7686;
-
-  /* Same signal red, darkened so it holds contrast on white */
-  --c-accent: #d1272d;
-  --c-accent-2: #ad1b21;
-  --c-accent-3: #f0b3b5;
-  --c-accent-soft: #fdecec;
-
-  /* Status hues re-picked for light: deep text on a pale tint of the same hue,
-     never the dark theme's colours dropped onto white. */
-  --c-st-neutral: #5c6878;
-  --c-st-gold: #855408;
-  --c-st-gold-bg: #fdf3dc;
-  --c-st-gold-line: #e3c684;
-  --c-st-sky: #14567d;
-  --c-st-sky-bg: #e3f0fb;
-  --c-st-sky-line: #9bc9ea;
-  --c-st-green: #12633c;
-  --c-st-green-bg: #e1f3e8;
-  --c-st-green-line: #8fd0ac;
-  --c-st-teal: #0f5468;
-  --c-st-teal-bg: #e0f0f5;
-  --c-st-teal-line: #93c8d8;
-  --c-st-orchid: #6a2a8b;
-  --c-st-orchid-bg: #f5e9fc;
-  --c-st-orchid-line: #cda6e4;
-  --c-st-steel: #4a5566;
-  --c-st-steel-bg: #eaeef4;
-  --c-st-steel-line: #b7c1d0;
-
-  /* Flags */
-  --c-warn: #b52d24;
-  --c-dup: #3f47ad;
-  --c-dup-bg: #e9ebfb;
-  --c-dup-line: #b3baef;
-
-  /* The wash needs more weight to register against white */
-  --c-saved-flash: color-mix(in srgb, var(--c-st-green) 20%, transparent);
-  --c-saved-flash-hold: color-mix(in srgb, var(--c-st-green) 16%, transparent);
+  /* Sharper than dark needs: on light, the hairline does most of the work of
+     separating, because the shadows are nearly nothing. */
+  --c-line: #e5e7ea;
+  --c-line-2: #d2d6db;
 
   /*
-   * Elevation, light theme.
+   * Near-black, very slightly cool. Same rule as dark: fg-3 is the floor for
+   * text, fg-4 is for icons and separators only.
    *
-   * Not the dark theme's shadows at lower opacity: those are black, and black
-   * on a cool off-white goes grey and muddy. These are tinted with the ink
-   * colour instead, which is how a shadow on paper actually looks, and they are
-   * far tighter — on light, a large soft shadow reads as smudge rather than
-   * height, and the hairline does most of the separating.
+   * Both are a step darker than the obvious choice, and the reason is the
+   * *recessed* surface rather than white. A segmented control's inactive label
+   * is fg-3 on `recessed`, which is the tightest text pairing in the light
+   * theme — at #6a7078 it measured 4.39:1 and missed AA. Picked against that
+   * pairing, they clear it everywhere: fg-3 is 4.7:1 on recessed and 5.3:1 on
+   * white, fg-4 (icons, 3:1 bar) is 3.4:1 on recessed.
    */
-  --c-shadow-1: 0 1px 2px -1px rgb(15 23 36 / 0.1);
-  --c-shadow-2:
-    0 1px 2px -1px rgb(15 23 36 / 0.08), 0 6px 16px -10px rgb(15 23 36 / 0.18);
-  --c-shadow-3:
-    0 2px 4px -2px rgb(15 23 36 / 0.08), 0 14px 32px -16px rgb(15 23 36 / 0.22);
-  --c-shadow-4:
-    0 4px 8px -4px rgb(15 23 36 / 0.1), 0 28px 56px -24px rgb(15 23 36 / 0.26);
+  --c-fg: #16181d;
+  --c-fg-2: #474d57;
+  --c-fg-3: #656b73;
+  --c-fg-4: #7d838b;
 
-  /* On light the top edge catches near-white, and it is nearly opaque. */
-  --c-highlight: rgb(255 255 255 / 0.9);
-  --c-highlight-strong: rgb(255 255 255 / 1);
+  /* The same signal red, darkened so it holds 4.5:1 on white. */
+  --c-accent: #cf2b31;
+  --c-accent-2: #ad1f25;
+  --c-accent-3: #f0b4b6;
+  --c-accent-soft: #fdf2f2;
+  --c-accent-line: #f3c9cb;
 
-  --c-surface-fill: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
-  --c-recessed-fill: linear-gradient(180deg, #e9edf4 0%, #e4e9f1 100%);
-  --c-rail-fill: linear-gradient(180deg, #eaeff7 0%, #e2e8f1 100%);
-  --c-raise-fill: linear-gradient(180deg, #ffffff 0%, #f2f5fa 100%);
+  /* On light the readable red is already dark enough to carry white text
+     (5.2:1), so the two reds converge and only the hover/active steps differ. */
+  --c-accent-solid: #cf2b31;
+  --c-accent-solid-hover: #b8242a;
+  --c-accent-solid-active: #9d1e23;
+  --c-on-accent: #ffffff;
+  --c-on-invert: #ffffff;
 
-  --c-accent-fill: linear-gradient(
-    180deg,
-    #e0393f 0%,
-    var(--c-accent) 52%,
-    #ab1e24 100%
+  /* Semantic, re-picked for light: deep text on a pale tint of the same hue,
+     never the dark theme's colours dropped onto white. */
+  --c-success: #10693f;
+  --c-success-bg: #eaf6ef;
+  --c-success-line: #b3ddc5;
+  --c-warning: #7d5106;
+  --c-warning-bg: #fdf5e3;
+  --c-warning-line: #e8d09a;
+  --c-danger: #c02a2f;
+  --c-danger-bg: #fdf2f2;
+  --c-danger-line: #f3c9cb;
+  --c-info: #145a83;
+  --c-info-bg: #ecf4fb;
+  --c-info-line: #b6d5ec;
+  --c-muted: #6a7078;
+  --c-muted-bg: #f3f4f6;
+  --c-muted-line: #d2d6db;
+
+  --c-st-neutral: #6a7078;
+  --c-st-gold: var(--c-warning);
+  --c-st-gold-bg: var(--c-warning-bg);
+  --c-st-gold-line: var(--c-warning-line);
+  --c-st-sky: var(--c-info);
+  --c-st-sky-bg: var(--c-info-bg);
+  --c-st-sky-line: var(--c-info-line);
+  --c-st-green: var(--c-success);
+  --c-st-green-bg: var(--c-success-bg);
+  --c-st-green-line: var(--c-success-line);
+  --c-st-orchid: #6b2f96;
+  --c-st-orchid-bg: #f6eefc;
+  --c-st-orchid-line: #d9bced;
+  --c-st-steel: #4c5663;
+  --c-st-steel-bg: #f1f3f5;
+  --c-st-steel-line: #d2d6db;
+  --c-st-teal: #0f5f59;
+  --c-st-teal-bg: #e7f5f3;
+  --c-st-teal-line: #a7d8d3;
+
+  --c-warn: #b02b23;
+  --c-dup: #3f47ad;
+  --c-dup-bg: #eef0fc;
+  --c-dup-line: #c0c5f0;
+
+  /* The wash needs more weight to register against white */
+  --c-saved-flash: color-mix(in srgb, var(--c-success) 16%, transparent);
+  --c-saved-flash-hold: color-mix(in srgb, var(--c-success) 12%, transparent);
+
+  /*
+   * Shadows tinted with the ink colour rather than black. Black over a cool
+   * off-white goes grey and muddy; a tinted shadow is what a shadow on paper
+   * actually looks like. Tighter than dark's, too — on light, a large soft
+   * shadow reads as a smudge rather than as height.
+   */
+  --c-shadow-1: 0 1px 2px rgb(16 24 40 / 0.05);
+  --c-shadow-2: 0 4px 12px -4px rgb(16 24 40 / 0.1), 0 1px 2px rgb(16 24 40 / 0.05);
+  --c-shadow-3: 0 16px 40px -12px rgb(16 24 40 / 0.16), 0 2px 8px -4px rgb(16 24 40 / 0.06);
+  --c-shadow-hover:
+    0 10px 28px -12px rgb(16 24 40 / 0.18),
+    0 0 20px -12px color-mix(in srgb, var(--c-accent) 30%, transparent);
+
+  --c-focus: color-mix(in srgb, var(--c-accent) 45%, transparent);
+
+  /* On light the top edge catches near-white and is nearly opaque; the
+     recessed shadow is ink-tinted rather than black, like every other shadow
+     in this theme. */
+  --c-edge-light: rgb(255 255 255 / 0.85);
+  --c-edge-dark: rgb(16 24 40 / 0.07);
+
+  /*
+   * ATMOSPHERE, light.
+   *
+   * Roughly a third of the dark theme's strength, and the base is warmed off
+   * pure white rather than cooled. The failure mode here is not "too subtle",
+   * it is "the page looks stained" — a 12% red wash that reads as ambient
+   * light over charcoal reads as a printing error over off-white. These sit
+   * at 4–7% and the eye reads them as warmth, not as colour.
+   */
+  --c-atmo-warm: color-mix(in srgb, #e5484d 7%, transparent);
+  --c-atmo-cool: color-mix(in srgb, #4a5bd8 5%, transparent);
+  --c-atmo-deep: color-mix(in srgb, #6478d8 4%, transparent);
+  /* Surfaces stay much more opaque on light. White is the brightest thing in
+     the theme and the hierarchy depends on it staying white; letting a red
+     wash through a card at 30% would cost more than the depth is worth. */
+  --c-surface-alpha: 0.88;
+  --c-rail-alpha: 0.8;
+  --c-recessed-alpha: 0.75;
+
+  --c-grad-accent: linear-gradient(
+    140deg,
+    #de3940 0%,
+    var(--c-accent-solid) 55%,
+    #a81f24 100%
   );
-  --c-accent-glow: 0 6px 18px -8px color-mix(in srgb, var(--c-accent) 55%, transparent);
-  --c-accent-glow-strong:
-    0 8px 22px -8px color-mix(in srgb, var(--c-accent) 65%, transparent);
-  --c-focus-ring: 0 0 0 3px color-mix(in srgb, var(--c-accent) 18%, transparent);
-
-  /* Weaker than dark's: a wash that reads as "lit" on graphite reads as
-     "printed on the wrong paper" over an off-white page. */
-  --c-ambient-1: color-mix(in srgb, var(--c-accent) 5%, transparent);
-  --c-ambient-2: color-mix(in srgb, #4d6bd8 4%, transparent);
+  --c-grad-accent-hover: linear-gradient(
+    140deg,
+    #e9464d 0%,
+    #c1252b 55%,
+    #9d1e23 100%
+  );
+  --c-grad-edge: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--c-accent) 45%, transparent) 25%,
+    color-mix(in srgb, var(--c-accent) 45%, transparent) 75%,
+    transparent
+  );
+  --c-spotlight: color-mix(in srgb, var(--c-accent) 6%, transparent);
 }
 
 @theme inline {
@@ -271,6 +454,26 @@
   --color-accent-2: var(--c-accent-2);
   --color-accent-3: var(--c-accent-3);
   --color-accent-soft: var(--c-accent-soft);
+  --color-accent-line: var(--c-accent-line);
+  --color-accent-solid: var(--c-accent-solid);
+  --color-on-invert: var(--c-on-invert);
+
+  /* Semantic, available in markup as `text-success`, `bg-warning-bg`, etc. */
+  --color-success: var(--c-success);
+  --color-success-bg: var(--c-success-bg);
+  --color-success-line: var(--c-success-line);
+  --color-warning: var(--c-warning);
+  --color-warning-bg: var(--c-warning-bg);
+  --color-warning-line: var(--c-warning-line);
+  --color-danger: var(--c-danger);
+  --color-danger-bg: var(--c-danger-bg);
+  --color-danger-line: var(--c-danger-line);
+  --color-info: var(--c-info);
+  --color-info-bg: var(--c-info-bg);
+  --color-info-line: var(--c-info-line);
+  --color-muted: var(--c-muted);
+  --color-muted-bg: var(--c-muted-bg);
+  --color-muted-line: var(--c-muted-line);
 
   --color-st-neutral: var(--c-st-neutral);
   --color-st-gold: var(--c-st-gold);
@@ -282,124 +485,172 @@
   --color-st-green: var(--c-st-green);
   --color-st-green-bg: var(--c-st-green-bg);
   --color-st-green-line: var(--c-st-green-line);
-  --color-st-teal: var(--c-st-teal);
-  --color-st-teal-bg: var(--c-st-teal-bg);
-  --color-st-teal-line: var(--c-st-teal-line);
   --color-st-orchid: var(--c-st-orchid);
   --color-st-orchid-bg: var(--c-st-orchid-bg);
   --color-st-orchid-line: var(--c-st-orchid-line);
   --color-st-steel: var(--c-st-steel);
   --color-st-steel-bg: var(--c-st-steel-bg);
   --color-st-steel-line: var(--c-st-steel-line);
+  --color-st-teal: var(--c-st-teal);
+  --color-st-teal-bg: var(--c-st-teal-bg);
+  --color-st-teal-line: var(--c-st-teal-line);
 
   --color-warn: var(--c-warn);
   --color-dup: var(--c-dup);
   --color-dup-bg: var(--c-dup-bg);
   --color-dup-line: var(--c-dup-line);
 
-  /*
-   * Elevation as utilities, so `shadow-e2` in markup and `var(--c-shadow-2)` in
-   * a component class are the same value — a card and the dropdown that opens
-   * from it cannot drift onto different heights.
-   */
-  --shadow-e1: var(--c-shadow-1);
-  --shadow-e2: var(--c-shadow-2);
-  --shadow-e3: var(--c-shadow-3);
-  --shadow-e4: var(--c-shadow-4);
-  --shadow-glow: var(--c-accent-glow);
-
-  /*
-   * Motion. Two durations and one easing curve for the whole app: `fast` for
-   * anything that follows the cursor (hover, focus) and `base` for anything
-   * that changes state (a panel opening, a chip committing). The curve is a
-   * gentle decelerate — things arrive and settle, they never bounce.
-   */
-  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --duration-fast: 140ms;
-  --duration-base: 220ms;
-
   /* Type */
-  --font-display: var(--font-fraunces);
-  --font-sans: var(--font-instrument);
-  --font-mono: var(--font-plex-mono);
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
 
   /*
-   * Type scale — five steps, each with one job, so a cell's size is chosen by
-   * asking what the text *is* rather than by picking a number. Components
-   * reference these instead of `text-[12.5px]`, which is what lets the whole
-   * table's density be retuned from this block.
+   * TYPE SCALE — five steps, each with one job, so a cell's size is chosen by
+   * asking what the text *is* rather than by picking a number.
    *
+   *   title    a page heading                     "Leads workspace"
    *   cell     the thing you are looking for      business name
    *   num      data you read digit by digit       phone, callback date
    *   ui       ordinary prose and controls        address, notes, buttons
    *   caption  supporting text                    hints, chips, counters
    *   meta     present but never competing        rating, owner, keycaps
    *
-   * `num` sits below `cell` on purpose: IBM Plex Mono's x-height runs large,
-   * so 14.5px mono reads about as tall as 15.5px Instrument Sans.
+   * `ui` is 14px, up from 13.5. This is the size most of the app is set in —
+   * every control, every label, most cells — and 13.5px was below what a tool
+   * somebody reads all day should ask of them. The table still fits: its
+   * columns are proportional and every long cell already truncates.
    */
-  --text-cell: 15.5px;
-  --text-cell--line-height: 1.25;
-  --text-num: 14.5px;
-  --text-num--line-height: 1.3;
-  --text-ui: 13.5px;
+  --text-title: 20px;
+  --text-title--line-height: 1.25;
+  --text-cell: 15px;
+  --text-cell--line-height: 1.3;
+  --text-num: 14px;
+  --text-num--line-height: 1.35;
+  --text-ui: 14px;
   --text-ui--line-height: 1.45;
-  --text-caption: 12.5px;
-  --text-caption--line-height: 1.4;
-  --text-meta: 11.5px;
-  --text-meta--line-height: 1.35;
+  --text-caption: 13px;
+  --text-caption--line-height: 1.45;
+  --text-meta: 12px;
+  --text-meta--line-height: 1.4;
+
+  /*
+   * RADIUS — four steps and a hard rule: controls are `md`, containers are
+   * `lg`, and floating things are `xl`. The old set ran to 16px on cards,
+   * which is a consumer-app radius; a workspace reads as more precise the
+   * tighter its corners are.
+   */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* Elevation, as utilities: `shadow-e1` and `var(--c-shadow-1)` are the same
+     value, so a menu and the class that positions it cannot drift apart. */
+  --shadow-e1: var(--c-shadow-1);
+  --shadow-e2: var(--c-shadow-2);
+  --shadow-e3: var(--c-shadow-3);
+
+  /*
+   * MOTION. One curve, three durations. `fast` is for anything that follows
+   * the cursor, `base` for a state change, `slow` for something entering the
+   * screen. Nothing in this app is allowed to take longer than `slow`.
+   */
+  --ease-out-soft: cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* For anything that travels and settles — a drifting light field, a panel
+     easing open. Symmetric, so it neither snaps in nor snaps out. */
+  --ease-in-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  /* One overshoot curve, for controls that should feel sprung rather than
+     eased. Kept to ~4% past the target: enough to read as physical, nowhere
+     near enough to read as a bounce. */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 260ms;
 }
+
+/* -----------------------------------------------------------------------------
+ * Document
+ * -------------------------------------------------------------------------- */
 
 body {
   background: var(--c-base);
   color: var(--c-fg);
-  font-family: var(--font-instrument), system-ui, sans-serif;
-  /* Instrument Sans sets a fraction wide by default for a UI at these sizes. */
-  letter-spacing: -0.003em;
+  font-family: var(--font-sans);
+  /* Geist is drawn a touch wide for UI text; this is the standard optical
+     correction and it is what makes 14px look composed rather than airy. */
+  letter-spacing: -0.011em;
 }
 
-/*
- * Ambient page light.
+/* -----------------------------------------------------------------------------
+ * Layer 1 — atmosphere
+ * -----------------------------------------------------------------------------
  *
- * Two enormous radial washes pinned behind everything — one accent-warm at the
- * top left, one cool at the top right. At 5–8% they are not seen as colour;
- * what they do is stop `--c-base` from being one flat value across a 1600px
- * screen, which is the single thing that separates a lit interface from a
- * painted one.
+ * Two fixed, pointer-transparent layers behind everything.
  *
- * A fixed pseudo-element on `<body>` rather than a background on `<html>`: it
- * must not scroll with the content, and it must not be repainted by anything.
- * `z-index: 0` with the app's own stacking left alone above it — the portal
- * shell paints its own surfaces, so this only ever shows through the gutters.
+ * `::before` is the static field: three enormous radial gradients that never
+ * move, which is what actually establishes the depth. `::after` is a second,
+ * dimmer copy of the same field on a 48-second drift — slow enough that it is
+ * never caught moving, present enough that the page is not a screenshot. The
+ * split matters: animating the bright layer would make the whole page pulse,
+ * while animating a faint one over a fixed one just makes the light breathe.
+ *
+ * Both are `position: fixed` so they cost one composite and never repaint on
+ * scroll, and both sit at `z-index: -1` — the body's background propagates to
+ * the canvas (html sets none), so a negative layer here paints above the page
+ * colour and below every scrap of content.
+ *
+ * Sized in `vmax` rather than `%`: a percentage radial on a 21:9 monitor
+ * stretches into a band, and these have to stay round to read as light.
  */
-body::before {
+body::before,
+body::after {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
+}
+
+body::before {
   background:
-    radial-gradient(
-      70rem 45rem at 8% -12%,
-      var(--c-ambient-1),
-      transparent 62%
-    ),
-    radial-gradient(
-      60rem 40rem at 100% -8%,
-      var(--c-ambient-2),
-      transparent 60%
-    );
+    radial-gradient(70vmax 55vmax at 8% 108%, var(--c-atmo-warm), transparent 60%),
+    radial-gradient(65vmax 50vmax at 96% -8%, var(--c-atmo-cool), transparent 58%),
+    radial-gradient(90vmax 60vmax at 50% 120%, var(--c-atmo-deep), transparent 62%);
+}
+
+body::after {
+  background:
+    radial-gradient(45vmax 40vmax at 22% 18%, var(--c-atmo-warm), transparent 55%),
+    radial-gradient(40vmax 38vmax at 78% 82%, var(--c-atmo-cool), transparent 55%);
+  opacity: 0.55;
+  animation: atmosphere-drift 48s var(--ease-in-out-soft) infinite alternate;
+  will-change: transform;
+}
+
+/*
+ * The drift. 6% of travel and 8% of scale over 48 seconds — about a pixel
+ * every two seconds, which is under the threshold at which peripheral vision
+ * registers movement. `translate3d` keeps it on the compositor.
+ */
+@keyframes atmosphere-drift {
+  from {
+    transform: translate3d(-3%, 2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(3%, -2%, 0) scale(1.08);
+  }
 }
 
 /* Native form controls need telling, or they render light-on-light. */
 select option {
-  background: var(--c-rail);
+  background: var(--c-surface);
   color: var(--c-fg);
 }
 
 /* The date picker indicator is black-on-dark by default; only dark needs it. */
-:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.7);
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.75);
 }
 
 /* Every number in this app is meant to be compared down a column. */
@@ -407,80 +658,88 @@ select option {
   font-variant-numeric: tabular-nums;
 }
 
-/* Headline numerals: Fraunces dialled soft and slightly wonky. */
+/*
+ * Headline numerals — the stat strip and the report cards.
+ *
+ * Set in the sans, not a display serif, and tightened rather than enlarged.
+ * The old treatment used a soft wonky Fraunces at 34px, which made three
+ * ordinary counts the loudest thing on a page whose actual subject is a table
+ * of six hundred leads.
+ */
 .display-num {
-  font-family: var(--font-fraunces), Georgia, serif;
-  font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 40;
   font-variant-numeric: tabular-nums lining-nums;
-  letter-spacing: -0.02em;
-}
-
-.eyebrow {
-  font-size: 10.5px;
-  line-height: 1;
   font-weight: 600;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--c-fg-3);
+  letter-spacing: -0.03em;
 }
 
 /*
- * Column headings. Related to `.eyebrow` but not the same job: a heading has to
- * stay legible while the eye is really on the rows, so it trades some of the
- * eyebrow's tracking for a little more size and weight.
+ * The smallest label in the system: a section's name, above or beside the
+ * thing it names. Uppercase and wide-tracked so it reads as a label at a
+ * glance and never competes with the content underneath.
  */
-.col-head {
+.eyebrow {
   font-size: 11px;
   line-height: 1;
   font-weight: 600;
-  letter-spacing: 0.085em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--c-fg-3);
 }
 
 /*
- * Anything interactive that does not draw its own ring gets one here. Written
- * with `:where()` so it carries zero specificity — a component that wants a
- * different focus treatment simply states it and wins.
+ * Column headings. Related to `.eyebrow` but not the same job: a heading has
+ * to stay legible while the eye is really on the rows, so it trades tracking
+ * for weight and drops the uppercase — sentence case at 12px is faster to read
+ * than caps at 11px, and a table has eight of these across the top.
  */
-:where(a, button, [role="tab"], summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--c-accent);
-  outline-offset: 2px;
+.col-head {
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--c-fg-3);
 }
 
 /*
- * ---------------------------------------------------------------------------
- * Control primitives
- * ---------------------------------------------------------------------------
+ * FOCUS.
  *
- * These existed already, but as a long Tailwind string copied between eight
- * panels — and copies drift. The same "secondary button" was variously
- * `disabled:opacity-50`, `disabled:opacity-60` and no disabled treatment at
- * all; some inputs had a focus ring and some had none. That is not a thing to
- * fix eight times, so the chassis lives here and the panels name it.
+ * One ring for the whole app, written with `:where()` so it carries zero
+ * specificity — a component that wants a different treatment simply states it
+ * and wins. Offset by 2px so it sits *around* a control rather than on it,
+ * which is what keeps it legible on a chip that already has a border.
+ */
+:where(a, button, input, select, textarea, [role="tab"], summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+
+/* -----------------------------------------------------------------------------
+ * Control primitives
+ * -----------------------------------------------------------------------------
  *
  * In `@layer components`, which Tailwind orders *below* `utilities` — so a
- * one-off `h-8` or `w-full` in markup still wins, and these stay a starting
+ * one-off `h-8` or `w-full` in markup still wins and these stay a starting
  * point rather than something to fight.
  */
 @layer components {
-  /* Text inputs, selects and date fields. */
+  /* ---- fields ---------------------------------------------------------- */
+
   .ui-field {
     height: 2.25rem;
-    border-radius: 0.5rem;
+    border-radius: var(--radius-md);
     border: 1px solid var(--c-line-2);
-    background: var(--c-recessed);
+    background: var(--c-surface);
     padding-inline: 0.625rem;
     font-size: var(--text-ui);
     color: var(--c-fg);
     outline: none;
     transition:
-      border-color 150ms,
-      box-shadow 150ms;
+      border-color var(--duration-fast) var(--ease-out-soft),
+      box-shadow var(--duration-fast) var(--ease-out-soft),
+      background-color var(--duration-fast) var(--ease-out-soft);
   }
 
   .ui-field::placeholder {
-    /* fg-4 was too faint against a recessed field to read as instructions. */
     color: var(--c-fg-3);
   }
 
@@ -489,20 +748,31 @@ select option {
   }
 
   /*
-   * Focus is a border *and* a soft ambient ring, not a hard 2px halo. The ring
-   * is wider and about a third the opacity it used to be, so a focused field
-   * reads as lit from within rather than outlined in red — which matters most
-   * on the login screen, where two of them sit side by side under nothing else.
+   * Focus is a solid accent border plus one tight ring. Not a wide soft halo:
+   * on a form with two fields a halo looks expensive, and on a toolbar sitting
+   * 8px above a table it bleeds over the rows underneath.
+   */
+  /*
+   * Focus: an accent border, a soft outer ring, and a faint inner glow along
+   * the top inside edge — the field lighting up from within rather than being
+   * outlined. The inner half is what separates this from a browser default.
    */
   .ui-field:focus {
     border-color: var(--c-accent);
-    box-shadow: var(--c-focus-ring);
+    background: color-mix(in srgb, var(--c-surface) 92%, var(--c-accent) 8%);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--c-accent) 16%, transparent),
+      inset 0 1px 6px -3px color-mix(in srgb, var(--c-accent) 55%, transparent);
   }
 
   /* Paired with `aria-invalid`, so the ring and the screen-reader state can
      never disagree about whether a field is in error. */
   .ui-field[aria-invalid="true"] {
-    border-color: var(--c-accent);
+    border-color: var(--c-danger);
+  }
+
+  .ui-field[aria-invalid="true"]:focus {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-danger) 16%, transparent);
   }
 
   .ui-field:disabled {
@@ -510,33 +780,30 @@ select option {
     cursor: not-allowed;
   }
 
-  /* Shared button chassis. Focus comes from the global rule above. */
+  /* ---- buttons --------------------------------------------------------- */
+
   .ui-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: 0.4375rem;
     height: 2.25rem;
-    padding-inline: 0.875rem;
-    border-radius: 0.5rem;
+    padding-inline: 0.75rem;
+    border-radius: var(--radius-md);
     font-size: var(--text-ui);
     font-weight: 500;
+    line-height: 1;
     white-space: nowrap;
     cursor: pointer;
-    /* `transform` and `box-shadow` join the list so the raised variants below
-       can lift on hover and sit back down on press. Both are compositor
-       properties, so this is free even on a screen full of buttons. */
     transition:
       background-color var(--duration-fast) var(--ease-out-soft),
       border-color var(--duration-fast) var(--ease-out-soft),
       color var(--duration-fast) var(--ease-out-soft),
-      box-shadow var(--duration-fast) var(--ease-out-soft),
-      transform var(--duration-fast) var(--ease-out-soft),
-      filter var(--duration-fast) var(--ease-out-soft);
+      opacity var(--duration-fast) var(--ease-out-soft);
   }
 
   .ui-btn:disabled {
-    opacity: 0.55;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 
@@ -547,127 +814,214 @@ select option {
   }
 
   /*
-   * The primary button is the one saturated, raised object on a screen, so it
-   * is the one place the app spends a gradient: a lighter red at the top, the
-   * brand red through the middle, a darker red at the foot, with a hairline of
-   * white along the top edge. That is a lit cylinder rather than a red
-   * rectangle, and it costs nothing to paint.
+   * The primary action. A flat accent fill and a single darker hairline —
+   * that hairline is the whole trick, and it is what a gradient was doing
+   * badly: it defines the button's edge against a dark page without the fill
+   * having to be lighter at the top than it is at the bottom.
+   */
+  /*
+   * The primary action — the one place a full gradient is spent.
    *
-   * Hover brightens and lifts 1px; press drops it back to 0 and dims slightly,
-   * so the click has a physical answer. The glow underneath is accent-tinted
-   * rather than black — a red button casts red light.
+   * Three things stack to make it feel like an object rather than a rectangle:
+   * a diagonal accent gradient, a hairline of white along the top edge (light
+   * catching the bevel), and an accent-tinted glow beneath it (a red object
+   * casts red light). Hover brightens the gradient and lifts 1px; press drops
+   * it back to 0, swaps the outer glow for an inner shadow and scales to
+   * 0.985 — which is the whole vocabulary of a physical key being pushed.
    */
   .ui-btn-primary {
-    background-image: var(--c-accent-fill);
+    background-image: var(--c-grad-accent);
+    border: 1px solid var(--c-accent-solid-active);
     color: var(--c-on-accent);
+    font-weight: 500;
     box-shadow:
-      inset 0 1px 0 0 var(--c-highlight-strong),
-      var(--c-accent-glow);
+      inset 0 1px 0 0 rgb(255 255 255 / 0.22),
+      0 2px 10px -4px color-mix(in srgb, var(--c-accent) 60%, transparent);
   }
 
   .ui-btn-primary:hover:not(:disabled) {
-    filter: brightness(1.07);
+    background-image: var(--c-grad-accent-hover);
     transform: translateY(-1px);
     box-shadow:
-      inset 0 1px 0 0 var(--c-highlight-strong),
-      var(--c-accent-glow-strong);
+      inset 0 1px 0 0 rgb(255 255 255 / 0.28),
+      0 6px 18px -6px color-mix(in srgb, var(--c-accent) 70%, transparent);
   }
 
   .ui-btn-primary:active:not(:disabled) {
-    transform: translateY(0);
-    filter: brightness(0.95);
+    transform: translateY(0) scale(0.985);
     box-shadow:
-      inset 0 1px 2px 0 rgb(0 0 0 / 0.25),
-      var(--c-shadow-1);
+      inset 0 2px 5px -2px rgb(0 0 0 / 0.35),
+      0 1px 2px -1px rgb(0 0 0 / 0.3);
   }
 
   .ui-btn-secondary {
     border: 1px solid var(--c-line-2);
+    background: color-mix(in srgb, var(--c-surface) 70%, transparent);
     color: var(--c-fg-2);
-    background-image: var(--c-raise-fill);
-    box-shadow: var(--c-shadow-1);
+    box-shadow: inset 0 1px 0 0 var(--c-edge-light);
   }
 
   .ui-btn-secondary:hover:not(:disabled) {
+    background: var(--c-hover);
     border-color: var(--c-fg-4);
     color: var(--c-fg);
-    box-shadow: var(--c-shadow-2);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-edge-light),
+      var(--c-shadow-2);
   }
 
   .ui-btn-secondary:active:not(:disabled) {
-    box-shadow: inset 0 1px 2px 0 rgb(0 0 0 / 0.16);
+    transform: translateY(0) scale(0.985);
+    box-shadow: inset 0 2px 4px -2px var(--c-edge-dark);
   }
 
-  /* ---- surfaces ----------------------------------------------------------
+  /* The third weight: no border, no fill until hovered. For anything that
+     would be noise as an outlined button — Cancel, Reopen, Replace. */
+  .ui-btn-ghost {
+    color: var(--c-fg-3);
+  }
+
+  .ui-btn-ghost:hover:not(:disabled) {
+    background: var(--c-hover);
+    color: var(--c-fg);
+  }
+
+  .ui-btn-ghost:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  /* ---- surfaces --------------------------------------------------------- */
+
+  /*
+   * Layer 3 — surfaces.
    *
-   * Every card, panel and table wrapper in the app was independently written
-   * as `rounded-xl border border-line bg-surface`, which is a flat rectangle
-   * and reads as one. `.panel` is that same chassis plus the two things that
-   * make a surface look raised: a gradient fill and a contact shadow, with the
-   * 1px top highlight that stands in for the edge catching the light.
+   * A panel is a border, a radius, and a *translucent* fill over a blur. That
+   * translucency is the point: the atmosphere behind the document shows
+   * through at `--c-surface-alpha`, so a panel at the bottom-left of the page
+   * is fractionally warmer than the same panel at the top-right, and neither
+   * has a gradient painted on it. The colour is genuinely behind the glass.
+   *
+   * The top-edge highlight is a 1px inset of near-white at 4–6%: the edge of
+   * a real sheet catching the light from the field above it.
+   *
+   * Still no drop shadow. A panel sits *in* the page; only `.panel-float`
+   * leaves it.
    */
   .panel {
+    position: relative;
     border: 1px solid var(--c-line);
-    border-radius: 0.75rem;
-    background-image: var(--c-surface-fill);
-    background-color: var(--c-surface);
-    box-shadow:
-      inset 0 1px 0 0 var(--c-highlight),
-      var(--c-shadow-2);
-  }
-
-  /* The same material one step higher — for menus, dialogs and anything that
-     floats over the page rather than sitting in it. */
-  .panel-float {
-    border: 1px solid var(--c-line-2);
-    border-radius: 0.75rem;
-    background-image: var(--c-raise-fill);
-    background-color: var(--c-surface);
-    box-shadow:
-      inset 0 1px 0 0 var(--c-highlight),
-      var(--c-shadow-4);
-  }
-
-  /* A recessed working area — the filter rail, a breakdown drawer. Reads as cut
-     into the page rather than laid on it, so the inner shadow points the other
-     way and there is no highlight along the top. */
-  .panel-inset {
-    border: 1px solid var(--c-line);
-    border-radius: 0.75rem;
-    background-image: var(--c-rail-fill);
-    background-color: var(--c-rail);
-    box-shadow: inset 0 1px 2px -1px rgb(0 0 0 / 0.18);
+    border-radius: var(--radius-lg);
+    background: color-mix(
+      in srgb,
+      var(--c-surface) calc(var(--c-surface-alpha) * 100%),
+      transparent
+    );
+    box-shadow: inset 0 1px 0 0 var(--c-edge-light);
+    /*
+     * Translucent but deliberately *not* blurred, unlike the shell and the
+     * overlays. Two reasons, and the first is a bug:
+     *
+     *   `backdrop-filter` establishes a containing block for fixed-position
+     *   descendants. The booking dialog is `position: fixed` and lives inside
+     *   a table cell inside this panel — blurring here re-anchors it to the
+     *   panel and then clips it against the panel's `overflow: hidden`, so the
+     *   dialog opens half off-screen or not at all.
+     *
+     *   And it buys nothing. What is behind a panel is the atmosphere: three
+     *   enormous soft radial gradients. Blurring a smooth gradient returns the
+     *   same smooth gradient, at the cost of a re-sampled backdrop on every
+     *   repaint of a panel that contains a scrolling table.
+     *
+     * `.panel-float`, the sidebar and the top bar keep their blur, because
+     * those genuinely sit over content that needs separating.
+     */
   }
 
   /*
-   * The sticky top bar. Translucent with a real blur, so the page tinting
-   * through it is what says "this is above the content" — one hairline and no
-   * shadow at rest, gaining a shadow only once the page has scrolled under it
-   * (see `[data-scrolled]` below).
+   * Layer 6 — overlays. Genuinely floating: a deeper blur, a stronger fill so
+   * the content underneath cannot be read through it, and the only real drop
+   * shadow in the system.
    */
-  .glass-bar {
-    background-color: color-mix(in srgb, var(--c-surface) 78%, transparent);
-    backdrop-filter: blur(16px) saturate(1.6);
-    -webkit-backdrop-filter: blur(16px) saturate(1.6);
-    border-bottom: 1px solid var(--c-line);
-    box-shadow: inset 0 -1px 0 0 var(--c-highlight);
-    transition: box-shadow var(--duration-base) var(--ease-out-soft);
-  }
-
-  .glass-bar[data-scrolled="true"] {
+  .panel-float {
+    border: 1px solid var(--c-line-2);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--c-surface) 94%, transparent);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
     box-shadow:
-      inset 0 -1px 0 0 var(--c-highlight),
-      var(--c-shadow-2);
+      inset 0 1px 0 0 var(--c-edge-light),
+      var(--c-shadow-3);
   }
 
-  /* ---- page furniture, shared by every non-worklist screen ---- */
+  /* A strip *within* a panel — a toolbar above a table, a footer under it.
+     Slightly off the surface so the panel reads as having sections. */
+  .panel-rail {
+    background: color-mix(
+      in srgb,
+      var(--c-rail) calc(var(--c-rail-alpha) * 100%),
+      transparent
+    );
+  }
+
+  /* Cut into the page rather than laid on it. The inner shadow at the top is
+     what sells "recessed" — light does not reach the bottom of a groove. */
+  .panel-inset {
+    border: 1px solid var(--c-line);
+    border-radius: var(--radius-lg);
+    background: color-mix(
+      in srgb,
+      var(--c-recessed) calc(var(--c-recessed-alpha) * 100%),
+      transparent
+    );
+    box-shadow: inset 0 1px 3px -1px var(--c-edge-dark);
+  }
+
+  /*
+   * A panel that lifts under the cursor. Opt-in, because most panels in this
+   * app are structural and should not move — this is for the things that are
+   * genuinely a single object you might act on: a KPI segment, a format card.
+   */
+  .panel-lift {
+    transition:
+      transform var(--duration-base) var(--ease-out-soft),
+      box-shadow var(--duration-base) var(--ease-out-soft),
+      border-color var(--duration-base) var(--ease-out-soft);
+  }
+
+  .panel-lift:hover {
+    transform: translateY(-2px);
+    border-color: var(--c-line-2);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-edge-light),
+      var(--c-shadow-hover);
+  }
+
+  /*
+   * Layer 5 — the gradient edge that marks something selected or urgent.
+   *
+   * Drawn as a 1px absolutely-positioned bar rather than a border, so it can
+   * fade out at both ends. A solid accent border around a whole component is
+   * a box; a hairline that is bright in the middle and gone at the corners is
+   * a highlight, and it does not fight the panel's own outline.
+   */
+  .edge-accent::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: -1px;
+    height: 1px;
+    pointer-events: none;
+    background: var(--c-grad-edge);
+  }
+
+  /* ---- page furniture --------------------------------------------------- */
 
   .page-title {
-    font-family: var(--font-fraunces), Georgia, serif;
-    font-variation-settings: "SOFT" 30, "WONK" 1, "opsz" 40;
-    font-size: 27px;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
+    font-size: var(--text-title);
+    line-height: 1.25;
+    font-weight: 600;
+    letter-spacing: -0.022em;
     color: var(--c-fg);
   }
 
@@ -677,7 +1031,8 @@ select option {
   .page-intro {
     font-size: var(--text-ui);
     line-height: 1.6;
-    color: var(--c-fg-2);
+    color: var(--c-fg-3);
+    max-width: 68ch;
   }
 
   .field-label {
@@ -686,102 +1041,315 @@ select option {
     color: var(--c-fg-2);
   }
 
-  /* ---- headline metrics --------------------------------------------------
-   *
-   * A card, but a restrained one: the numeral is still the element and the
-   * card is only what holds it apart from its neighbours. Contextual tone is
-   * opt-in via `data-tone`, because if all three cards glow red then none of
-   * them is telling you anything.
-   */
-  .metric {
-    position: relative;
-    overflow: hidden;
-    border: 1px solid var(--c-line);
-    border-radius: 0.75rem;
-    background-image: var(--c-surface-fill);
-    background-color: var(--c-surface);
-    box-shadow:
-      inset 0 1px 0 0 var(--c-highlight),
-      var(--c-shadow-1);
-    transition:
-      border-color var(--duration-base) var(--ease-out-soft),
-      box-shadow var(--duration-base) var(--ease-out-soft);
-  }
+  /* ---- chips ------------------------------------------------------------ */
 
-  .metric:hover {
-    border-color: var(--c-line-2);
-    box-shadow:
-      inset 0 1px 0 0 var(--c-highlight),
-      var(--c-shadow-2);
+  /*
+   * One chip definition, worn by every small labelled thing in the app: a
+   * status, a role badge, a "Done" marker, an availability flag. Colour comes
+   * from a `--chip-*` triple the caller sets, so a chip is always the same
+   * shape and only ever differs in hue.
+   */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: var(--radius-md);
+    padding: 0.125rem 0.4375rem;
+    font-size: var(--text-caption);
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
   }
 
   /*
-   * The live state. A corner wash and a warmed border — no fill, because a
-   * solid red card at the top of the page is a klaxon, and this number is read
-   * once a minute all day.
+   * A status pill gets a vertical gradient of its own hue — brighter at the
+   * top, settling into its tint at the bottom. It is a 4% shift, invisible as
+   * colour, and it is the difference between a chip that looks printed on the
+   * row and one that looks like a small physical tag lying on it.
    */
-  .metric[data-tone="live"] {
-    border-color: color-mix(in srgb, var(--c-accent) 32%, var(--c-line));
-  }
-
-  .metric[data-tone="live"]::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background: radial-gradient(
-      14rem 8rem at 100% 0%,
-      color-mix(in srgb, var(--c-accent) 13%, transparent),
+  .chip-gradient {
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, currentColor 12%, transparent),
       transparent 70%
     );
   }
 
-  .metric[data-tone="live"]:hover {
+  /* The dot that opens a chip. 6px, with a ring of its own colour at low
+     alpha — a halo tight enough to read as a lit indicator rather than as a
+     blurred dot. */
+  .chip-dot {
+    width: 0.375rem;
+    height: 0.375rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: currentColor;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 22%, transparent);
+  }
+
+  /* ---- cursor lighting -------------------------------------------------- */
+
+  /*
+   * Layer 4/5 — a soft radial highlight that follows the pointer across a
+   * surface.
+   *
+   * `--mx`/`--my` are written by `useSpotlight` as percentages, and the
+   * gradient is painted on a pseudo-element that fades in on hover, so a
+   * surface nobody is pointing at costs nothing and the effect can never sit
+   * on top of text (`z-index: 0` under content, `pointer-events: none`).
+   *
+   * Deliberately weak — 6–9% accent. The test is that you should notice the
+   * card looks lit, not notice that a light is following your mouse.
+   */
+  .spotlight {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .spotlight::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    opacity: 0;
+    transition: opacity var(--duration-slow) var(--ease-out-soft);
+    background: radial-gradient(
+      22rem 22rem at var(--mx, 50%) var(--my, 50%),
+      var(--c-spotlight),
+      transparent 70%
+    );
+  }
+
+  .spotlight:hover::after {
+    opacity: 1;
+  }
+
+  /* Anything that must sit above the light. */
+  .spotlight > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ---- nav -------------------------------------------------------------- */
+
+  /*
+   * A sidebar item.
+   *
+   * The active state is a filled rounded rect, not an underline or a coloured
+   * bar: it reads as "you are inside this" rather than "this one is
+   * decorated", which is the difference between a workspace and a website
+   * menu. The accent appears once, on the icon — a single point of colour
+   * rather than a red-tinted row.
+   */
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    height: 2rem;
+    padding-inline: 0.5rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--c-fg-3);
+    transition:
+      background-color var(--duration-fast) var(--ease-out-soft),
+      color var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .nav-item:hover {
+    background: var(--c-hover);
+    color: var(--c-fg);
+  }
+
+  .nav-item:active {
+    transform: scale(0.98);
+  }
+
+  /*
+   * The active item. A left-to-right accent wash that is strong at the leading
+   * edge and gone by 60% — so the row is lit from the side rather than filled,
+   * and the label sits on plain surface where it is most read. The 2px bar
+   * down the left is what the eye actually locks onto when scanning the rail.
+   */
+  .nav-item[data-active="true"] {
+    background-image: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--c-accent) 16%, transparent),
+      transparent 62%
+    );
+    background-color: var(--c-hover);
+    color: var(--c-fg);
+    font-weight: 550;
+    box-shadow: inset 2px 0 0 0 var(--c-accent);
+  }
+
+  .nav-item[data-active="true"] .nav-icon {
+    color: var(--c-accent);
+  }
+
+  .nav-icon {
+    flex-shrink: 0;
+    color: var(--c-fg-4);
+    transition: color var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .nav-item:hover .nav-icon {
+    color: var(--c-fg-2);
+  }
+
+  /* ---- segmented control ------------------------------------------------ */
+
+  /*
+   * The worklist's view switcher, and the Meetings agenda's.
+   *
+   * A segmented control rather than a tab strip with an underline. The
+   * difference matters: an underline says "these are pages", a segment says
+   * "these are four ways of looking at the same list", which is exactly what
+   * these four are. The active segment is a raised surface inside a recessed
+   * track — a physical metaphor everybody already knows from OS toolbars.
+   */
+  .segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--c-line);
+    background: var(--c-recessed);
+  }
+
+  .segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    height: 1.75rem;
+    padding-inline: 0.625rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--c-fg-3);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color var(--duration-fast) var(--ease-out-soft),
+      color var(--duration-fast) var(--ease-out-soft),
+      box-shadow var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .segment:hover:not([data-active="true"]) {
+    color: var(--c-fg-2);
+  }
+
+  .segment:active {
+    transform: scale(0.97);
+  }
+
+  /*
+   * The active segment.
+   *
+   * The raised pill itself is drawn by Framer Motion as a shared `layoutId`
+   * element behind the labels, so it *slides* between segments rather than
+   * blinking off one and on the next — see `ViewTabs`. What stays here is
+   * only the text treatment, because the moving part is no longer a
+   * background this rule could own.
+   */
+  .segment[data-active="true"] {
+    color: var(--c-fg);
+  }
+
+  /* The pill that travels. A lit surface with a warm top edge and a hairline
+     of accent along the very top, so the selected view carries a trace of the
+     brand without becoming a red button. */
+  .segment-pill {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: var(--radius-md);
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--c-accent) 10%, var(--c-surface)),
+      var(--c-surface)
+    );
     box-shadow:
-      inset 0 1px 0 0 var(--c-highlight),
-      var(--c-accent-glow);
+      inset 0 1px 0 0 var(--c-edge-light),
+      0 1px 2px -1px var(--c-edge-dark),
+      0 0 12px -6px color-mix(in srgb, var(--c-accent) 55%, transparent);
+  }
+
+  /* The count inside a segment. Subtle by default — it is a number you glance
+     at, not the label — and it takes the accent only on the active segment,
+     which is the one place the count is actually being acted on. */
+  .segment-count {
+    font-family: var(--font-mono);
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+    color: var(--c-fg-4);
+    transition: color var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .segment[data-active="true"] .segment-count {
+    color: var(--c-fg-3);
   }
 }
 
+/* -----------------------------------------------------------------------------
+ * The lead table
+ * -------------------------------------------------------------------------- */
+
 /*
- * Sticky table header sits above row content while scrolling.
- *
- * It also has to *look* like it is above them, or a header scrolled over rows
- * of identical weight simply merges into the list. The gradient fill and the
- * shadow under the bottom edge are what separate the two — drawn as a shadow
- * rather than a border because the header cells are sticky, and several
- * browsers drop borders on sticky `border-collapse` cells.
+ * Sticky header. It is a `rail` strip with one hairline under it, drawn as a
+ * box-shadow because several browsers drop borders on sticky cells in a
+ * `border-collapse` table.
  */
 .lead-table thead th {
   position: sticky;
   top: 0;
   z-index: 10;
-  background-image: var(--c-rail-fill);
-  box-shadow: 0 1px 0 0 var(--c-line-2);
+  /* A vertical gradient rather than a flat fill, and an opaque base under it:
+     the rows scroll *beneath* this strip, so it cannot be translucent the way
+     the panel around it is. */
+  background-color: var(--c-rail);
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--c-fg) 4%, var(--c-rail)),
+    var(--c-rail)
+  );
+  box-shadow: 0 1px 0 0 var(--c-line);
 }
 
 /*
- * The working columns keep their tint. It is a *recessed* one — the editable
- * cells beneath them sit on `bg-recessed`, and a heading lighter than the
- * column it names would break the group it exists to draw.
+ * Row hover as illumination rather than a fill.
+ *
+ * A left-to-right wash that is strongest at the leading edge and gone by
+ * two-thirds across, plus the flat `hover` step underneath it. The eye enters
+ * a row from the left, so lighting it from the left is what makes the
+ * highlight feel like it is tracking the reader rather than switching on.
  */
-.lead-table thead th.is-working {
-  background-image: var(--c-recessed-fill);
+.lead-table tbody tr {
+  transition:
+    background-color var(--duration-fast) var(--ease-out-soft),
+    box-shadow var(--duration-fast) var(--ease-out-soft);
+}
+
+.lead-table tbody tr:hover,
+.lead-table tbody tr:focus-within {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--c-accent) 5%, transparent),
+    transparent 60%
+  );
 }
 
 /*
  * The worklist's business column is frozen. Eight columns need ~1460px, so on
- * anything under a 1440px screen the table scrolls sideways — and scrolling
- * the *name* of the lead off the left edge is what makes a wide CRM table
- * unusable, because no other cell means anything without it.
+ * anything narrower the table scrolls sideways — and scrolling the *name* of
+ * the lead off the left edge is what makes a wide CRM table unusable, because
+ * no other cell means anything without it.
  *
  * Opt-in via its own class rather than `.lead-table`, which the export table
- * also wears: freezing a column of checkboxes would be pointless there, and
- * that table has no minimum width to scroll past in the first place.
- *
- * The divider is a box-shadow, not a border: `border-collapse` drops borders
- * on sticky cells in several browsers, and a shadow also survives the save
- * confirmation, which animates `background-color` alone.
+ * also wears: freezing a column of checkboxes would be pointless there.
  */
 .lead-table-frozen th:first-child,
 .lead-table-frozen td:first-child:not([colspan]) {
@@ -792,46 +1360,49 @@ select option {
   box-shadow: 1px 0 0 0 var(--c-line);
 }
 
-/*
- * The frozen *header* cell needs restating, and the order matters: the rule
- * above sets `background` (the shorthand, which clears `background-image`) so
- * that a scrolling row never shows through the frozen column. That shorthand
- * would also wipe the gradient `.lead-table thead th` paints, leaving the
- * Business heading flat while the seven beside it are lit. So the header's fill
- * is applied again here, on the more specific selector.
- */
+/* The header's frozen cell has to restate the rail fill, because the rule
+   above sets `background` and would otherwise leave one heading on `surface`
+   while the seven beside it are on `rail`. */
 .lead-table-frozen thead th:first-child {
   z-index: 15;
-  background-color: var(--c-rail);
-  background-image: var(--c-rail-fill);
+  background: var(--c-rail);
   box-shadow:
     1px 0 0 0 var(--c-line),
-    0 1px 0 0 var(--c-line-2);
+    0 1px 0 0 var(--c-line);
 }
 
 /*
  * Callback urgency, as an inset stripe down the frozen cell.
  *
- * This was a 3px left border, which is the obvious way to draw it — but a
- * left border on a `border-collapse` cell that is also `position: sticky` is
+ * A left border on a `border-collapse` cell that is also `position: sticky` is
  * dropped by Chrome and Safari, and the marker for "call this one today" is
  * not something that can quietly stop rendering. A shadow is immune to that,
  * and stacks with the column divider above in one declaration.
  *
  * `td:first-child[data-urgency]` rather than plain `td[data-urgency]`: the
- * rule above it is `td:first-child:not([colspan])`, which is one step more
- * specific, so the shorter selector would lose and the stripe would silently
- * never paint. Matching its shape lets source order decide instead.
+ * rule above it is one step more specific, so the shorter selector would lose
+ * and the stripe would silently never paint.
+ */
+/*
+ * Two intensities of the same mark. `today` is a solid 2px bar; `overdue` adds
+ * a short accent wash bleeding right off it, so a late row is lit from its own
+ * left edge and reads as more urgent than a merely-due one without needing a
+ * second colour.
  */
 .lead-table-frozen td:first-child[data-urgency="today"] {
   box-shadow:
-    inset 3px 0 0 0 var(--c-accent),
+    inset 2px 0 0 0 var(--c-accent),
     1px 0 0 0 var(--c-line);
 }
 
 .lead-table-frozen td:first-child[data-urgency="overdue"] {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--c-accent) 13%, transparent),
+    transparent 68%
+  );
   box-shadow:
-    inset 3px 0 0 0 color-mix(in srgb, var(--c-accent) 45%, transparent),
+    inset 2px 0 0 0 var(--c-accent),
     1px 0 0 0 var(--c-line);
 }
 
@@ -844,8 +1415,8 @@ select option {
 
 /*
  * Save confirmation: a green wash that fades off the row. Applied to the cells
- * rather than the <tr>, because the working columns paint their own recessed
- * background over anything set on the row itself.
+ * rather than the `<tr>`, because a background set on a row is painted under
+ * the cells' own backgrounds and would not be seen.
  */
 @keyframes saved-flash {
   0% {
@@ -860,13 +1431,7 @@ select option {
 }
 
 .row-saved > td {
-  animation: saved-flash 1.8s ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .row-saved > td {
-    animation-duration: 0.01ms;
-  }
+  animation: saved-flash 1.6s ease-out;
 }
 
 /* Warning flags are annotations, not chips: no fill, dashed underline. */
@@ -877,10 +1442,14 @@ select option {
   text-decoration-thickness: 1px;
 }
 
+/* -----------------------------------------------------------------------------
+ * Theme toggle
+ * -------------------------------------------------------------------------- */
+
 /*
- * Theme-toggle icons swap in CSS rather than from React state — no mounted
- * guard, no hydration mismatch, and the hidden label is genuinely hidden from
- * screen readers too.
+ * Which icon shows is decided in CSS from `:root[data-theme]` rather than from
+ * React state — no `mounted` guard, no hydration mismatch, and the hidden
+ * label is genuinely hidden from screen readers too.
  */
 .theme-when-light {
   display: none;
@@ -894,277 +1463,308 @@ select option {
   display: revert;
 }
 
-* {
-  scrollbar-color: var(--c-line-2) transparent;
-}
+/* -----------------------------------------------------------------------------
+ * The sign-in screen
+ * -------------------------------------------------------------------------- */
 
 /*
- * ---------------------------------------------------------------------------
- * The sign-in stage
- * ---------------------------------------------------------------------------
+ * A split composition: a brand panel on the left, the form on the right, each
+ * taking roughly half the viewport above `lg` and the form alone below it.
  *
- * The one screen in the app with no data on it, and the first thing anyone
- * sees — so it is the one screen allowed to spend pixels on depth rather than
- * on density. Everything here is built from the same tokens as the portal; it
- * is the *amount* of light that differs, not the palette.
+ * The brand side is where this design spends its atmosphere budget. Four
+ * layers, and the order is what keeps it from becoming a screensaver:
  *
- * Three layers, back to front:
+ *   base      a deep chromatic wash — charcoal into burgundy at the foot,
+ *             charcoal into navy at the head. This is static.
+ *   ::before  the hairline grid, masked to fade out diagonally, giving the
+ *             light something with structure to fall on. Also static.
+ *   ::after   two counter-rotating blooms on a 34s drift. This is the only
+ *             thing moving, it is 8% opacity, and it is behind the grid.
+ *   content   the wordmark and the statement, above all of it.
  *
- *   `.auth-stage`         four vast radial gradients — a warm accent bloom low
- *                         and left, a cool one high and right, and two dimmer
- *                         fills that keep the corners from going flat.
- *   `.auth-stage::before` the same field again, rotated and animated, drifting
- *                         over ~40s. Slow enough that it is never seen moving;
- *                         what it does is stop a static screen from looking
- *                         like a screenshot.
- *   `.auth-stage::after`  a fine grain. Two tenths of a percent of noise is
- *                         what keeps a large soft gradient from banding on an
- *                         8-bit panel, and it reads as texture rather than as
- *                         dirt because it is fixed and never moves.
- *
- * All of it is behind `z-index: 0` on a `position: fixed` element with
- * `pointer-events: none`, so it cannot intercept a click or shift the form.
+ * A moving gradient with nothing in front of it looks like a screensaver; the
+ * same gradient behind a fixed structural grid reads as light moving through a
+ * room. The grid is what makes the motion legible as depth.
  */
-.auth-stage {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
+.auth-brand {
+  position: relative;
   overflow: hidden;
+  border-right: 1px solid var(--c-line);
+  background-color: var(--c-recessed);
+  background-image:
+    radial-gradient(
+      90% 70% at 5% 100%,
+      color-mix(in srgb, var(--c-accent) 20%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      80% 65% at 95% 0%,
+      color-mix(in srgb, #4a5bd8 17%, transparent),
+      transparent 60%
+    ),
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, #1b2a6b 12%, transparent),
+      transparent 55%
+    );
+}
+
+.auth-brand::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--c-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--c-line) 1px, transparent 1px);
+  background-size: 64px 64px;
+  /* Faded out towards the bottom right so the grid frames the wordmark rather
+     than running underneath the whole panel like graph paper. */
+  mask-image: radial-gradient(115% 90% at 0% 0%, #000 20%, transparent 72%);
+  opacity: 0.55;
+}
+
+.auth-brand::after {
+  content: "";
+  position: absolute;
+  /* Oversized so the drift never brings an edge into frame. */
+  inset: -25%;
+  z-index: 0;
   pointer-events: none;
   background:
     radial-gradient(
-      55rem 40rem at 18% 88%,
-      color-mix(in srgb, var(--c-accent) 12%, transparent),
+      38% 38% at 30% 70%,
+      color-mix(in srgb, var(--c-accent) 22%, transparent),
       transparent 60%
     ),
     radial-gradient(
-      50rem 38rem at 82% 8%,
-      color-mix(in srgb, #4d6bd8 9%, transparent),
-      transparent 62%
-    ),
-    radial-gradient(
-      40rem 30rem at 50% 50%,
-      color-mix(in srgb, var(--c-rail) 70%, transparent),
-      transparent 70%
-    );
-}
-
-.auth-stage::before {
-  content: "";
-  position: absolute;
-  /* Oversized and off-centre so the drift never brings an edge into frame. */
-  inset: -30%;
-  background:
-    radial-gradient(
-      32rem 24rem at 30% 30%,
-      color-mix(in srgb, var(--c-accent) 9%, transparent),
-      transparent 60%
-    ),
-    radial-gradient(
-      28rem 22rem at 70% 70%,
-      color-mix(in srgb, #5a7ae8 7%, transparent),
+      34% 34% at 72% 28%,
+      color-mix(in srgb, #5a6ce8 18%, transparent),
       transparent 60%
     );
-  animation: auth-drift 40s ease-in-out infinite alternate;
+  animation: auth-bloom 34s var(--ease-in-out-soft) infinite alternate;
+  will-change: transform;
 }
 
-.auth-stage::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  opacity: 0.5;
-  /* An inline feTurbulence, so the grain costs one small data URI and no
-     network request. Fixed, un-animated, and composited once. */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-}
-
-/* Light theme wants a fraction of that: the same washes over an off-white page
-   read as a stain rather than as light, and the grain has to nearly vanish. */
-:root[data-theme="light"] .auth-stage {
-  background:
-    radial-gradient(
-      55rem 40rem at 18% 88%,
-      color-mix(in srgb, var(--c-accent) 7%, transparent),
-      transparent 60%
-    ),
-    radial-gradient(
-      50rem 38rem at 82% 8%,
-      color-mix(in srgb, #4d6bd8 6%, transparent),
-      transparent 62%
-    ),
-    radial-gradient(
-      45rem 34rem at 50% 40%,
-      rgb(255 255 255 / 0.7),
-      transparent 70%
-    );
-}
-
-:root[data-theme="light"] .auth-stage::after {
-  opacity: 0.22;
-}
-
-@keyframes auth-drift {
+@keyframes auth-bloom {
   from {
-    transform: translate3d(-2%, -1.5%, 0) scale(1);
+    transform: translate3d(-4%, 3%, 0) scale(1) rotate(0deg);
   }
   to {
-    transform: translate3d(2%, 1.5%, 0) scale(1.06);
+    transform: translate3d(4%, -3%, 0) scale(1.12) rotate(8deg);
   }
 }
 
-/*
- * The card itself: a physical surface floating above that field.
- *
- * Semi-transparent over a real blur, so the ambient light behind it tints the
- * card instead of being hidden by it — that is what makes it read as glass
- * rather than as a lighter rectangle. Held to 82%: past about 70% the text
- * starts competing with whatever is behind it, which is where glassmorphism
- * stops being a material and starts being a legibility problem.
- *
- * The shadow stack is doing three separate jobs: a hairline of light along the
- * top edge, a faint red halo that ties the card to the brand without drawing a
- * red border, and a deep ambient shadow that lifts it off the page.
- */
-.auth-card {
-  position: relative;
-  border: 1px solid color-mix(in srgb, var(--c-line-2) 80%, transparent);
-  border-radius: 1rem;
-  background-color: color-mix(in srgb, var(--c-surface) 82%, transparent);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  box-shadow:
-    inset 0 1px 0 0 var(--c-highlight-strong),
-    0 0 0 1px color-mix(in srgb, var(--c-accent) 7%, transparent),
-    0 0 40px -12px color-mix(in srgb, var(--c-accent) 20%, transparent),
-    var(--c-shadow-4);
+/* Light theme: the same composition at a third of the strength, over warm
+   white rather than charcoal. */
+:root[data-theme="light"] .auth-brand {
+  background-image:
+    radial-gradient(
+      90% 70% at 5% 100%,
+      color-mix(in srgb, var(--c-accent) 9%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      80% 65% at 95% 0%,
+      color-mix(in srgb, #4a5bd8 7%, transparent),
+      transparent 60%
+    );
+}
+
+:root[data-theme="light"] .auth-brand::after {
+  opacity: 0.5;
 }
 
 /*
- * A single accent hairline across the top of the card, fading out at both
- * ends. One deliberate stroke of brand colour, on the edge where the light
- * would catch it — cheaper and calmer than an animated border.
+ * The halo behind the mark. Two rings — a tight bright one and a wide soft one
+ * — on a slow 6-second breath. It is the one looping animation in the
+ * foreground of this app, and it exists because a logo on a login screen is
+ * the single element that is *allowed* to be purely presentational.
  */
-.auth-card::before {
+.auth-halo {
+  position: relative;
+}
+
+.auth-halo::before {
   content: "";
   position: absolute;
-  inset-inline: 15%;
-  top: -1px;
-  height: 1px;
-  pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in srgb, var(--c-accent) 55%, transparent),
-    transparent
-  );
-}
-
-/*
- * The mark, in a ring of its own light. The logo is untouched — this is a halo
- * behind it and a rim around it, so the artwork stays exactly the artwork.
- */
-.auth-logo {
-  position: relative;
-  display: grid;
-  place-items: center;
-  border-radius: 1rem;
-  background-image: var(--c-raise-fill);
-  border: 1px solid var(--c-line-2);
-  box-shadow:
-    inset 0 1px 0 0 var(--c-highlight-strong),
-    0 0 28px -6px color-mix(in srgb, var(--c-accent) 32%, transparent),
-    var(--c-shadow-3);
-}
-
-/* The soft bloom the mark sits in. Sized past the tile so it reads as light
-   coming off it rather than as a second, larger tile. */
-.auth-logo::after {
-  content: "";
-  position: absolute;
-  inset: -45%;
+  inset: -60%;
   z-index: -1;
   pointer-events: none;
   border-radius: 9999px;
   background: radial-gradient(
     closest-side,
-    color-mix(in srgb, var(--c-accent) 22%, transparent),
-    transparent 75%
+    color-mix(in srgb, var(--c-accent) 30%, transparent),
+    transparent 72%
   );
+  animation: halo-breathe 6s var(--ease-in-out-soft) infinite alternate;
 }
 
-/* The wordmark on the sign-in screen carries the faintest glow — enough to
-   separate it from the background wash, nowhere near enough to read as neon. */
-.auth-wordmark {
-  text-shadow: 0 0 28px color-mix(in srgb, var(--c-accent) 22%, transparent);
+@keyframes halo-breathe {
+  from {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1.06);
+  }
 }
 
 /*
- * ---------------------------------------------------------------------------
- * Shared interaction polish
- * ---------------------------------------------------------------------------
- */
-
-/*
- * Status chips press.
+ * The staggered entrance, in CSS rather than in Framer — and the reason is a
+ * failure mode, not a preference.
  *
- * A control that says "you can change me" with a chevron should answer the
- * mouse with more than a colour change — half a pixel is the smallest movement
- * that registers as a response and the largest that never distracts.
+ * Framer's `initial` is emitted into the server-rendered HTML as an inline
+ * `opacity: 0`, and it is JavaScript that clears it. On the sign-in page that
+ * means a blocked chunk, a slow network or a broken extension renders an
+ * invisible form: the one screen in the product where "nothing is on screen"
+ * means "you cannot get in". A CSS animation has the opposite failure mode —
+ * if the stylesheet does not load the content is simply unstyled and fully
+ * visible, and if it does load the animation runs with no JavaScript at all.
  *
- * Keyed off `.chip-host` rather than Tailwind's `.group`, deliberately: the
- * chip sits inside a table row that is *also* a `group`, so `.group:active`
- * would nudge the chip whenever anything anywhere in the row was clicked — a
- * note, a date, the Save button. The host is the chip's own wrapper, so the
- * only thing that presses it is pressing it.
+ * Framer keeps the work it is genuinely better at on this page: the error
+ * banner's height transition, which only ever runs after a JS-driven submit,
+ * so JavaScript is proven to be working before it is needed.
+ *
+ * The stagger is one `--delay` per element. `both` holds the from-state during
+ * the delay, which is what makes the sequence read as one composition
+ * settling rather than four elements each deciding to appear.
  */
-.chip-press {
-  transition:
-    box-shadow var(--duration-fast) var(--ease-out-soft),
-    transform var(--duration-fast) var(--ease-out-soft),
-    filter var(--duration-fast) var(--ease-out-soft);
-}
-
-.chip-host:hover .chip-press {
-  filter: brightness(1.08);
-}
-
-.chip-host:active .chip-press {
-  transform: translateY(0.5px);
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise, 10px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /*
- * Nav tabs and view tabs share an underline that grows from the centre rather
- * than appearing. `transform` on a compositor property, so a tab strip can
- * animate on a page that is also fetching without dropping a frame.
+ * The general one-shot entrance, used by the sign-in composition, the KPI
+ * strip and the page template. `--delay` staggers it, `--rise` sets how far
+ * it travels — 10px for a full-page composition, 6px for a card in a row,
+ * 4px for a whole screen arriving.
  */
-.tab-rule {
-  transform: scaleX(0);
-  transform-origin: center;
-  transition: transform var(--duration-base) var(--ease-out-soft);
+.rise-in {
+  animation: rise-in 450ms var(--ease-out-soft) both;
+  animation-delay: var(--delay, 0ms);
 }
 
-.tab-rule[data-active="true"] {
-  transform: scaleX(1);
+/* The sign-in page's alias, kept so the intent reads at the call site. */
+.auth-enter {
+  animation: rise-in 450ms var(--ease-out-soft) both;
+  animation-delay: var(--delay, 0ms);
+}
+
+/* A whole screen arriving after a navigation. Shorter and shallower than a
+   card: this runs on every click in the sidebar, so it has to be under the
+   threshold where it becomes something to wait for. */
+.page-enter {
+  animation: rise-in 180ms var(--ease-out-soft) both;
+  --rise: 4px;
+}
+
+/* -----------------------------------------------------------------------------
+ * Shared interaction
+ * -------------------------------------------------------------------------- */
+
+/*
+ * A new set of rows arriving — a page turn, a tab, a sort, a search.
+ *
+ * Opacity and 3px of travel, once, on the whole `<tbody>`. Deliberately not a
+ * per-row stagger: twenty rows cascading in is a demo, and by the fourth page
+ * turn it is twenty rows of latency between an agent and the number they are
+ * about to dial. One quiet fade says "these are different rows" and gets out
+ * of the way.
+ */
+@keyframes table-body-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.table-body-enter {
+  animation: table-body-enter 160ms var(--ease-out-soft);
+}
+
+/* Menus and popovers. The same 6px arrival as the login form, faster. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.pop-in {
+  animation: pop-in var(--duration-base) var(--ease-out-soft);
+  transform-origin: var(--pop-origin, top right);
+}
+
+/* Scrollbars, everywhere. Thin, and only visible against what they scroll. */
+* {
+  scrollbar-color: var(--c-line-2) transparent;
+  scrollbar-width: thin;
 }
 
 /*
- * The one global promise about motion: anything decorative stops. The drift on
- * the sign-in stage, the underline, the button lift and the save wash all wind
- * down to nothing here — none of them carries information that is not also
- * carried by colour, weight or text.
+ * The one global promise about motion: everything decorative stops.
+ *
+ * None of it carries information that is not also carried by colour, weight or
+ * text, so removing all of it costs a reduced-motion user nothing at all.
  */
 @media (prefers-reduced-motion: reduce) {
-  .auth-stage::before {
-    animation: none;
+  /*
+   * Everything decorative stops — the ambient drift, the login blooms, the
+   * halo breath, the entrance stagger, the popovers, the save wash.
+   *
+   * The *layers* all stay: the atmosphere is still painted, the halo is still
+   * there, the panels are still lit. Only the movement is removed, so a
+   * reduced-motion user gets the same design rather than a stripped-back one.
+   * `!important` on the wildcard because these override component rules that
+   * legitimately set their own durations.
+   */
+  body::after,
+  .auth-brand::after,
+  .auth-halo::before,
+  .rise-in,
+  .auth-enter,
+  .page-enter,
+  .pop-in,
+  .table-body-enter,
+  .row-saved > td {
+    animation: none !important;
   }
 
-  .tab-rule {
-    transition: none;
-  }
-
+  /* The tactile lifts and compressions. The colour change on hover stays —
+     that is state, not decoration. */
   .ui-btn-primary:hover:not(:disabled),
   .ui-btn-primary:active:not(:disabled),
-  .chip-host:active .chip-press {
-    transform: none;
+  .ui-btn-secondary:hover:not(:disabled),
+  .ui-btn-secondary:active:not(:disabled),
+  .ui-btn-ghost:active:not(:disabled),
+  .panel-lift:hover,
+  .nav-item:active,
+  .segment:active {
+    transform: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

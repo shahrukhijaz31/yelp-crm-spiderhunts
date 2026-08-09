@@ -27,7 +27,7 @@ export default async function SettingsPage() {
   ];
 
   return (
-    <main className="mx-auto w-full max-w-[1760px] flex-1 px-4 py-8 sm:px-7">
+    <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
         <header>
           <h1 className="page-title">Settings</h1>

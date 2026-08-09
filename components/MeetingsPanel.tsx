@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
+import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
+import { CalendarDays } from "lucide-react";
 
 import MeetingCard from "./MeetingCard";
 import { useLeads } from "./LeadsProvider";
@@ -44,6 +46,7 @@ export default function MeetingsPanel({
   /** Keyed by lead id. Admins get every recording; agents get their own. */
   initialRecordings: Record<string, RecordingSummary>;
 }) {
+  const reduced = useReducedMotion();
   const { leads, today, updateLead } = useLeads();
   const [bucket, setBucket] = useState<MeetingBucket>("today");
   const [recordings, setRecordings] =
@@ -76,10 +79,10 @@ export default function MeetingsPanel({
   ).length;
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">
       <header>
         <h1 className="page-title">Meetings</h1>
-        <p className="mt-3 page-intro">
+        <p className="mt-2 page-intro">
           Every interested lead and everything with a date in the diary. Leads
           arrive here on their own — mark one{" "}
           <span className="text-fg-2">Called - Interested</span> on the{" "}
@@ -93,93 +96,105 @@ export default function MeetingsPanel({
         </p>
       </header>
 
-      {counts.today > 0 && (
-        <p className="flex items-center gap-2.5 rounded-xl border border-accent/40 bg-accent-soft px-4 py-2.5 text-ui text-fg shadow-e1">
-          <span
-            aria-hidden="true"
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent shadow-[0_0_7px_0_var(--c-accent)]"
-          />
-          <span>
-          <span className="tnum font-mono font-medium text-accent">{openToday}</span>{" "}
-          still to run today
-          {doneToday > 0 && (
-            <span className="text-fg-3">
-              {" "}
-              · <span className="tnum font-mono">{doneToday}</span> already done
+      {/* The two facts about today, on one line. Text on the page rather than
+          a tinted callout box: a banner every single morning stops being read
+          by the second week, and neither of these is a warning. */}
+      {(counts.today > 0 || withRecordings > 0) && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-fg-3">
+          {counts.today > 0 && (
+            <span className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${openToday > 0 ? "bg-accent" : "bg-success"}`}
+              />
+              <span>
+                <span
+                  className={`tnum font-mono font-medium ${openToday > 0 ? "text-accent" : "text-fg-2"}`}
+                >
+                  {openToday}
+                </span>{" "}
+                still to run today
+                {doneToday > 0 && (
+                  <>
+                    {" · "}
+                    <span className="tnum font-mono">{doneToday}</span> already done
+                  </>
+                )}
+              </span>
             </span>
           )}
-          </span>
+
+          {/* How many meetings have audio to listen to. For an admin that is
+              the point of the screen — it is where you find the calls to hear
+              before walking into the next one. */}
+          {counts.today > 0 && withRecordings > 0 && (
+            <span aria-hidden="true" className="text-fg-4">·</span>
+          )}
+          {withRecordings > 0 && (
+            <span>
+              <span className="tnum font-mono font-medium text-fg-2">
+                {withRecordings}
+              </span>{" "}
+              with a recording
+              {role === "ADMIN" ? "" : " you uploaded"}
+            </span>
+          )}
         </p>
       )}
 
-      {/* How many of the meetings on the agenda have audio to listen to. For an
-          admin that is the whole point of the screen — it is where you find the
-          calls to hear before walking into the meeting — so it is stated once
-          here rather than left to be discovered by scrolling. */}
-      {withRecordings > 0 && (
-        <p className="text-caption text-fg-3">
-          <span className="tnum font-mono font-medium text-fg-2">{withRecordings}</span>{" "}
-          {withRecordings === 1 ? "meeting has" : "meetings have"} a call recording
-          attached
-          {role === "ADMIN" ? "" : " that you uploaded"}.
-        </p>
-      )}
-
-      <div>
-        <div
-          role="tablist"
-          aria-label="Meeting timeframes"
-          className="flex items-end gap-1 border-b border-line"
-        >
-          {MEETING_BUCKETS.map((candidate) => {
-            const active = candidate === bucket;
-            return (
-              <button
-                key={candidate}
-                role="tab"
-                type="button"
-                aria-selected={active}
-                onClick={() => setBucket(candidate)}
-                className={`group relative flex items-center gap-2 rounded-t-lg px-3.5 pb-2.5 pt-2 text-ui transition-colors ${
-                  // Matches the worklist tabs exactly: weight and ink shift
-                  // together with the accent rule, so the active tab is
-                  // obvious from three signals rather than one.
-                  active
-                    ? "bg-gradient-to-b from-transparent to-[var(--c-surface)] font-semibold text-fg"
-                    : "font-medium text-fg-3 hover:bg-hover hover:text-fg-2"
-                }`}
-              >
-                {MEETING_BUCKET_LABELS[candidate]}
-                <span
-                  className={`tnum rounded-md px-1.5 py-0.5 font-mono text-meta font-medium transition-colors ${
-                    active
-                      ? "bg-accent text-on-accent shadow-[0_2px_8px_-3px_var(--c-accent)]"
-                      : "bg-rail text-fg-3 group-hover:text-fg-2"
-                  }`}
-                >
-                  {counts[candidate]}
-                </span>
-                <span
-                  aria-hidden="true"
+      <div className="flex flex-wrap items-center gap-3">
+        {/* The same segmented control as the worklist, travelling pill and
+            all. Two screens switching scope the same way is most of what
+            makes an app feel like one product. `LayoutGroup` scopes the id so
+            this control and the worklist's never try to animate into each
+            other across a navigation. */}
+        <LayoutGroup id="meeting-buckets">
+          <div role="tablist" aria-label="Meeting timeframes" className="segmented">
+            {MEETING_BUCKETS.map((candidate) => {
+              const active = candidate === bucket;
+              return (
+                <button
+                  key={candidate}
+                  role="tab"
+                  type="button"
+                  aria-selected={active}
                   data-active={active}
-                  className="tab-rule absolute inset-x-0 -bottom-px h-[2px] bg-accent"
-                />
-              </button>
-            );
-          })}
-        </div>
-        <p className="mt-3 text-caption text-fg-3">
-          {MEETING_BUCKET_HINTS[bucket]}
-        </p>
+                  onClick={() => setBucket(candidate)}
+                  className="segment relative"
+                >
+                  {active && (
+                    <motion.span
+                      aria-hidden="true"
+                      layoutId="meeting-bucket-pill"
+                      className="segment-pill"
+                      transition={
+                        reduced
+                          ? { duration: 0 }
+                          : { type: "spring", stiffness: 420, damping: 34, mass: 0.7 }
+                      }
+                    />
+                  )}
+                  <span className="relative z-10">
+                    {MEETING_BUCKET_LABELS[candidate]}
+                  </span>
+                  <span className="segment-count tnum relative z-10">
+                    {counts[candidate]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </LayoutGroup>
+        <p className="text-caption text-fg-4">{MEETING_BUCKET_HINTS[bucket]}</p>
       </div>
 
       {shown.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-line-2 bg-surface/60 px-4 py-12 text-center">
+        <div className="panel px-4 py-14 text-center">
           <span
             aria-hidden="true"
-            className="mx-auto mb-3.5 flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-recessed text-fg-4 shadow-e1"
+            className="mx-auto mb-3.5 flex h-11 w-11 items-center justify-center rounded-lg border border-line bg-recessed text-fg-4"
           >
-            <CalendarIcon />
+            <CalendarDays className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
           </span>
           <p className="text-ui text-fg-3">
             {bucket === "unscheduled"
@@ -188,13 +203,17 @@ export default function MeetingsPanel({
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-5">
           {days.map((day) => (
             <section key={day.date ?? "unscheduled"}>
-              <h2 className="eyebrow mb-2.5 border-b border-line pb-1.5">
+              {/* The date is a heading *above* the panel, not a row inside it,
+                  so a long agenda reads as a stack of days rather than as one
+                  undifferentiated list with occasional labels in it. */}
+              <h2 className="mb-2 px-1 text-caption font-medium text-fg-2">
                 {day.date ? formatMeetingDay(day.date, today) : "No date booked"}
               </h2>
-              <div className="flex flex-col gap-2">
+              {/* One panel per day, rows divided by hairlines. */}
+              <div className="panel divide-y divide-line overflow-hidden">
                 {day.meetings.map((meeting) => (
                   <MeetingCard
                     key={meeting.lead.id}
@@ -212,28 +231,5 @@ export default function MeetingsPanel({
         </div>
       )}
     </div>
-  );
-}
-
-function CalendarIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
-      <rect
-        x="3.4"
-        y="4.8"
-        width="17.2"
-        height="15"
-        rx="2.4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-      <path
-        d="M3.4 9.6h17.2M8.4 2.8v3.6M15.6 2.8v3.6"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

@@ -2,15 +2,13 @@
 
 import { useState } from "react";
 
+import { Check, Users } from "lucide-react";
+
 import RecordingCell from "./RecordingCell";
+import { StatusChip } from "./StatusSelect";
 import { formatMeetingTime, type Meeting } from "@/lib/meetings";
 import type { RecordingSummary } from "@/lib/recordingRules";
-import {
-  CALL_STATUS_DOTS,
-  CALL_STATUS_SHORT_LABELS,
-  CALL_STATUS_STYLES,
-  type LeadEditableFields,
-} from "@/lib/types";
+import type { LeadEditableFields } from "@/lib/types";
 
 /**
  * One booked call. Reschedule and complete are single deliberate clicks; the
@@ -68,39 +66,40 @@ export default function MeetingCard({
 
   return (
     <article
-      // Three states, three weights of surface. A completed meeting recedes
-      // (no shadow, dimmed fill — it is history); an open one sits on the page
-      // at normal elevation; one that has run past its time keeps the same
-      // elevation but warms its border and catches a little accent light down
-      // the left edge, which is where the eye enters the card.
-      // The hover shadow restates the inset highlight rather than using
-      // `shadow-e3` alone: a utility replaces the whole `box-shadow`, and
-      // `.panel`'s 1px of light along the top edge is part of that stack, so
-      // the card would go flat at exactly the moment it should look raised.
-      className={`panel px-4 py-3 transition-[box-shadow,border-color] duration-200 hover:shadow-[inset_0_1px_0_0_var(--c-highlight),var(--c-shadow-3)] ${
-        completed
-          ? "opacity-75 shadow-none"
-          : overdue
-            ? "border-accent/40 shadow-[inset_3px_0_0_0_var(--c-accent),inset_0_1px_0_0_var(--c-highlight),var(--c-shadow-2)] hover:shadow-[inset_3px_0_0_0_var(--c-accent),inset_0_1px_0_0_var(--c-highlight),var(--c-shadow-3)]"
-            : ""
-      }`}
+      /*
+       * A row in an agenda, not a floating card.
+       *
+       * These live in a day group with a hairline between each, so the article
+       * itself draws no border and no shadow — six bordered cards under a date
+       * heading is six objects; six hairline-separated rows is one agenda. The
+       * three states are carried by ink and one stripe:
+       *
+       *   completed  dimmed. It is history, and it should recede.
+       *   overdue    a 2px accent stripe down the left edge, which is where
+       *              the eye enters the row.
+       *   open       nothing. Most rows are this, and most rows should be
+       *              quiet.
+       */
+      className={`group/meeting relative px-4 py-3 transition-colors hover:bg-hover ${
+        completed ? "opacity-60" : ""
+      } ${overdue ? "before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-accent" : ""}`}
     >
       <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
         {/* Time rail — the first thing scanned down a day's list. */}
-        <div className="w-20 shrink-0">
+        <div className="w-[68px] shrink-0 pt-0.5">
           {meeting.time ? (
             <span
-              className={`tnum block font-mono text-[17px] font-semibold leading-tight tracking-[-0.01em] ${
+              className={`tnum block font-mono text-num font-medium tracking-[-0.02em] ${
                 completed ? "text-fg-3" : "text-fg"
               }`}
             >
               {formatMeetingTime(meeting.time)}
             </span>
           ) : (
-            <span className="block text-caption text-fg-3">No time</span>
+            <span className="block text-caption text-fg-4">No time</span>
           )}
           {overdue && (
-            <span className="mt-1 inline-flex items-center gap-1 rounded border border-accent/40 bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-2">
+            <span className="mt-1 block text-meta font-medium text-accent">
               Not done
             </span>
           )}
@@ -109,44 +108,43 @@ export default function MeetingCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3
-              className={`text-cell font-semibold ${completed ? "text-fg-3" : "text-fg"}`}
+              className={`text-cell font-medium tracking-[-0.012em] ${completed ? "text-fg-3" : "text-fg"}`}
             >
               {lead.name}
             </h3>
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-caption font-medium ring-1 ring-inset ${CALL_STATUS_STYLES[lead.status]}`}
-            >
-              <span
-                aria-hidden="true"
-                className={`h-1.5 w-1.5 rounded-full shadow-[0_0_5px_-0.5px_currentColor] ${
-                  lead.status === "do_not_call" ? "bg-surface" : CALL_STATUS_DOTS[lead.status]
-                }`}
-              />
-              {CALL_STATUS_SHORT_LABELS[lead.status]}
-            </span>
+            <StatusChip status={lead.status} />
             {completed && (
-              <span className="inline-flex items-center gap-1 rounded-md bg-st-green-bg px-2 py-0.5 text-caption font-medium text-st-green ring-1 ring-inset ring-st-green-line">
-                <CheckIcon />
+              <span className="chip border border-success-line bg-success-bg text-success">
+                <Check className="h-3 w-3 shrink-0" strokeWidth={2.5} aria-hidden="true" />
                 Done
               </span>
             )}
           </div>
 
-          <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-ui text-fg-3">
-            <span className="tnum font-mono text-num font-medium text-fg">{lead.phone}</span>
-            {lead.address && <span className="truncate">{lead.address}</span>}
+          <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-caption text-fg-3">
+            <span className="tnum font-mono text-fg-2">{lead.phone}</span>
+            {lead.address && (
+              <>
+                <span aria-hidden="true" className="text-fg-4">·</span>
+                <span className="truncate">{lead.address}</span>
+              </>
+            )}
           </p>
 
           {!editing && (
             <>
               {lead.meetingAttendees && (
-                <p className="mt-1.5 text-ui text-fg-2">
-                  <span className="text-fg-3">With </span>
+                <p className="mt-2 flex items-start gap-1.5 text-caption text-fg-2">
+                  <Users
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-4"
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  />
                   {lead.meetingAttendees}
                 </p>
               )}
               {lead.meetingNotes && (
-                <p className="mt-1 whitespace-pre-line text-ui leading-relaxed text-fg-2">
+                <p className="mt-1.5 whitespace-pre-line text-caption leading-relaxed text-fg-3">
                   {lead.meetingNotes}
                 </p>
               )}
@@ -154,11 +152,19 @@ export default function MeetingCard({
           )}
         </div>
 
+        {/*
+         * Actions.
+         *
+         * `Complete` is the one thing anybody comes to this row to do, so it is
+         * the only filled button — and it is filled in the accent, which this
+         * screen otherwise spends nowhere. Reschedule and Details are quiet
+         * beside it, and the whole cluster only reaches full contrast when the
+         * row is hovered or something inside it has focus: at rest an agenda
+         * should read as a list of meetings, not as a wall of buttons.
+         */}
         {!editing && (
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {/* Reschedule: a date picker is already a deliberate action, so it
-                commits on change like the worklist's callback cell. */}
-            <label className="flex items-center gap-1.5">
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 opacity-90 transition-opacity group-hover/meeting:opacity-100">
+            <label className="flex items-center">
               <span className="sr-only">Reschedule {lead.name}</span>
               <input
                 type="date"
@@ -167,17 +173,14 @@ export default function MeetingCard({
                 onChange={(event) =>
                   onUpdate(lead.id, { callbackDate: event.target.value || null })
                 }
-                className="h-9 rounded-lg border border-transparent bg-transparent px-2 text-ui text-fg-2 outline-none transition-colors hover:border-line-2 hover:bg-recessed hover:text-fg focus:border-accent focus:bg-recessed focus:text-fg focus:ring-2 focus:ring-accent/25"
+                className="ui-field h-8 !border-transparent !bg-transparent px-1.5 text-caption text-fg-3 hover:!border-line-2 hover:!bg-surface hover:text-fg focus:!border-accent focus:!bg-surface focus:text-fg"
               />
             </label>
 
             <button
               type="button"
               onClick={openEditor}
-              // No `bg-surface` here: a background utility sits in Tailwind's
-              // utilities layer and would outrank `.ui-btn-secondary:hover`,
-              // killing the hover. The card is already on surface anyway.
-              className="ui-btn ui-btn-secondary h-9"
+              className="ui-btn ui-btn-ghost h-8 px-2.5 text-caption"
             >
               Details
             </button>
@@ -186,7 +189,7 @@ export default function MeetingCard({
               <button
                 type="button"
                 onClick={() => onUpdate(lead.id, { meetingCompletedAt: null })}
-                className="ui-btn h-9 font-normal text-fg-3 underline decoration-line-2 underline-offset-4 hover:text-fg"
+                className="ui-btn ui-btn-ghost h-8 px-2.5 text-caption"
               >
                 Reopen
               </button>
@@ -194,9 +197,9 @@ export default function MeetingCard({
               <button
                 type="button"
                 onClick={() => onUpdate(lead.id, { meetingCompletedAt: today })}
-                className="ui-btn h-9 border border-accent/50 text-accent hover:bg-accent hover:text-on-accent"
+                className="ui-btn ui-btn-primary h-8 px-2.5 text-caption"
               >
-                <CheckIcon />
+                <Check className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden="true" />
                 Complete
               </button>
             )}
@@ -216,7 +219,7 @@ export default function MeetingCard({
         <div className="mt-3 border-t border-line pt-3">
           <div className="grid gap-3 sm:grid-cols-[130px_minmax(0,1fr)]">
             <label className="flex flex-col gap-1">
-              <span className="eyebrow">Time</span>
+              <span className="field-label">Time</span>
               <input
                 type="time"
                 value={draft.meetingTime}
@@ -228,7 +231,7 @@ export default function MeetingCard({
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="eyebrow">Attendees</span>
+              <span className="field-label">Attendees</span>
               <input
                 type="text"
                 value={draft.meetingAttendees}
@@ -242,7 +245,7 @@ export default function MeetingCard({
           </div>
 
           <label className="mt-3 flex flex-col gap-1">
-            <span className="eyebrow">Meeting notes</span>
+            <span className="field-label">Meeting notes</span>
             <textarea
               value={draft.meetingNotes}
               onChange={(event) =>
@@ -268,7 +271,7 @@ export default function MeetingCard({
             <button
               type="button"
               onClick={() => setEditing(false)}
-              className="ui-btn h-9 text-fg-3 hover:bg-hover hover:text-fg"
+              className="ui-btn ui-btn-ghost h-9"
             >
               Cancel
             </button>
@@ -276,20 +279,5 @@ export default function MeetingCard({
         </div>
       )}
     </article>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" className="h-3 w-3 shrink-0">
-      <path
-        d="M2.5 6.3 4.8 8.6 9.5 3.9"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

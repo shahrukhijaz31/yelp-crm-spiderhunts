@@ -116,7 +116,7 @@ function QualityRow({
   full: boolean;
 }) {
   const dot =
-    tone === "warn" ? "bg-warn" : tone === "dup" ? "bg-dup" : "bg-accent";
+    tone === "warn" ? "bg-warning" : tone === "dup" ? "bg-dup" : "bg-accent";
 
   return (
     <div className="flex items-center gap-2.5">

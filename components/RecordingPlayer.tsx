@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Pause, Play } from "lucide-react";
 
 /**
  * The inline player for a call recording.
@@ -103,25 +104,32 @@ export default function RecordingPlayer({
   const progress = total > 0 ? Math.min(current / total, 1) : 0;
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-line bg-[image:var(--c-rail-fill)] px-2.5 py-1.5 shadow-[inset_0_1px_0_0_var(--c-highlight)]">
+    <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md border border-line bg-recessed px-2 py-1.5">
       <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
 
-      {/* The transport button is the one filled thing in the player. It is
-          accent-filled while playing and outlined while stopped, so the state
-          is readable from the shape alone — not only from which glyph is in
-          it, which is a 12px difference. */}
+      {/* The transport is the one filled control in the player, and it stays
+          filled whether stopped or playing — a button that changes shape as
+          well as glyph makes the player twitch every time you press it. The
+          glyph alone carries the state, which is what every media transport
+          on the machine already does. */}
       <button
         type="button"
         onClick={toggle}
         disabled={failed}
         aria-label={`${playing ? "Pause" : "Play"} the call recording for ${label}`}
-        className={`ui-btn h-7 w-7 shrink-0 rounded-full border !px-0 ${
-          playing
-            ? "border-transparent bg-accent text-on-accent shadow-[0_2px_10px_-3px_var(--c-accent)]"
-            : "border-accent/50 text-accent hover:bg-accent hover:text-on-accent"
-        }`}
+        className="ui-btn ui-btn-primary h-7 w-7 shrink-0 rounded-full !px-0"
       >
-        {playing ? <PauseIcon /> : <PlayIcon />}
+        {playing ? (
+          <Pause className="h-3 w-3 fill-current" strokeWidth={0} aria-hidden="true" />
+        ) : (
+          // Nudged right by half a pixel: a triangle centred on its bounding
+          // box always looks left of centre inside a circle.
+          <Play
+            className="h-3 w-3 translate-x-[0.5px] fill-current"
+            strokeWidth={0}
+            aria-hidden="true"
+          />
+        )}
       </button>
 
       <label className="min-w-0 flex-1">
@@ -140,14 +148,14 @@ export default function RecordingPlayer({
           style={{
             background: `linear-gradient(to right, var(--c-accent) ${progress * 100}%, var(--c-line-2) ${progress * 100}%)`,
           }}
-          // The thumb carries a ring of the rail behind it and a soft accent
-          // glow, so the playhead is findable on a 6px track without making
-          // the track itself any taller.
-          className="h-1.5 w-full cursor-pointer appearance-none rounded-full outline-none transition-opacity disabled:cursor-not-allowed disabled:opacity-50 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:shadow-[0_0_0_2px_var(--c-rail),0_2px_8px_-2px_var(--c-accent)] [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_0_2px_var(--c-rail),0_2px_8px_-2px_var(--c-accent)] [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-110"
+          // The thumb is ringed in the track's own background colour, which is
+          // what separates it from the elapsed fill it sits on without making
+          // the 4px track any taller.
+          className="h-1 w-full cursor-pointer appearance-none rounded-full outline-none disabled:cursor-not-allowed disabled:opacity-50 [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-2.5 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:shadow-[0_0_0_2px_var(--c-recessed)] [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:shadow-[0_0_0_2px_var(--c-recessed)] [&::-webkit-slider-thumb]:transition-transform hover:[&::-webkit-slider-thumb]:scale-125"
         />
       </label>
 
-      <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+      <span className="tnum shrink-0 font-mono text-meta text-fg-4">
         {failed ? "Unavailable" : `${formatClock(current)} / ${formatClock(total)}`}
       </span>
     </div>
@@ -164,20 +172,4 @@ export function formatClock(seconds: number): string {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
     : `${minutes}:${String(secs).padStart(2, "0")}`;
-}
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" className="h-3 w-3">
-      <path d="M4 2.6 9 6l-5 3.4z" fill="currentColor" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" className="h-3 w-3">
-      <path d="M4 2.5h1.6v7H4zM6.9 2.5h1.6v7H6.9z" fill="currentColor" />
-    </svg>
-  );
 }

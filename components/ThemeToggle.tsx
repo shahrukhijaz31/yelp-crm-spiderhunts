@@ -1,9 +1,10 @@
 "use client";
 
+import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 /**
- * Sun/Moon toggle for the nav bar.
+ * Sun/Moon toggle.
  *
  * Which icon shows is decided in CSS from `:root[data-theme]`, not from React
  * state — so there is no `mounted` guard, no hydration mismatch, and no
@@ -27,48 +28,18 @@ export default function ThemeToggle() {
       type="button"
       onClick={toggle}
       title="Switch between the dark and light theme"
-      // h-9 to match the profile control beside it in the nav bar — a 32px
-      // button next to a 36px one reads as a mistake rather than a hierarchy.
-      className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-fg-3 transition-colors hover:border-line-2 hover:bg-hover hover:text-fg"
+      className="ui-btn ui-btn-ghost h-8 w-8 !px-0"
     >
       {/* Dark theme is on: offer the sun. */}
-      <span className="theme-when-dark">
-        <SunIcon />
+      <span className="theme-when-dark flex">
+        <Sun className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
         <span className="sr-only">Switch to light theme</span>
       </span>
       {/* Light theme is on: offer the moon. */}
-      <span className="theme-when-light">
-        <MoonIcon />
+      <span className="theme-when-light flex">
+        <Moon className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
         <span className="sr-only">Switch to dark theme</span>
       </span>
     </button>
-  );
-}
-
-function SunIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-[15px] w-[15px]">
-      <circle cx="8" cy="8" r="3.1" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path
-        d="M8 1.2v1.6M8 13.2v1.6M14.8 8h-1.6M2.8 8H1.2M12.8 3.2l-1.1 1.1M4.3 11.7l-1.1 1.1M12.8 12.8l-1.1-1.1M4.3 4.3 3.2 3.2"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-[15px] w-[15px]">
-      <path
-        d="M13.4 9.9A5.8 5.8 0 0 1 6.1 2.6a5.9 5.9 0 1 0 7.3 7.3Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

@@ -33,7 +33,7 @@ export default async function MeetingsPage() {
 
   return (
     <LeadsProvider initialLeads={leads} serverToday={today}>
-      <main className="mx-auto w-full max-w-[1760px] flex-1 px-4 py-8 sm:px-7">
+      <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
         <MeetingsPanel role={user.role} initialRecordings={recordings} />
       </main>
     </LeadsProvider>

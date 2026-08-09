@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, ArrowUpRight, Check, Star } from "lucide-react";
 
 import CallbackCell from "./CallbackCell";
 import NotesCell from "./NotesCell";
@@ -122,10 +123,14 @@ export default function LeadRow({
         }
       }}
     >
-      {/* pl-[19px] matches the header: 3px of stripe plus 16px of gutter. */}
-      <td data-urgency={urgency} className="py-2.5 pl-[19px] pr-3">
+      {/* pl-[18px] matches the header: 2px of urgency stripe plus 16px. */}
+      <td data-urgency={urgency} className="py-2 pl-[18px] pr-3">
+        {/* The strongest text in the table, and the only `cell` step used in a
+            row. Medium rather than semibold: at 15px on a 14px page, weight
+            *and* size together makes the name shout, and one of the two is
+            enough to make it the thing the eye lands on. */}
         <span
-          className="block truncate text-cell font-semibold tracking-[-0.006em] text-fg"
+          className="block truncate text-cell font-medium tracking-[-0.012em] text-fg"
           title={lead.name}
         >
           {lead.name}
@@ -133,11 +138,15 @@ export default function LeadRow({
         {/* Only drawn when there is something to say — an always-present empty
             line under every name would cost 16px a row across the whole list. */}
         {(lead.rating !== null || lead.owner) && (
-          <div className="mt-0.5 flex items-center gap-2 text-meta text-fg-3">
+          <div className="mt-0.5 flex items-center gap-1.5 text-meta text-fg-4">
             {lead.rating !== null && (
-              <span className="tnum shrink-0 font-mono">
-                {lead.rating.toFixed(1)}★
+              <span className="tnum flex shrink-0 items-center gap-0.5 font-mono">
+                <Star className="h-2.5 w-2.5 fill-current" strokeWidth={0} aria-hidden="true" />
+                {lead.rating.toFixed(1)}
               </span>
+            )}
+            {lead.rating !== null && lead.owner && (
+              <span aria-hidden="true">·</span>
             )}
             {lead.owner && (
               <span className="truncate" title={lead.owner}>
@@ -148,10 +157,13 @@ export default function LeadRow({
         )}
       </td>
 
-      {/* Always present: `cleanLeads` drops rows without a dialable number. */}
-      <td className="whitespace-nowrap px-2.5 py-2.5">
-        <span className="flex items-center gap-2">
-          <span className="tnum font-mono text-num font-medium tracking-[-0.01em] text-fg">
+      {/* Always present: `cleanLeads` drops rows without a dialable number.
+          The number is set in the mono face at full contrast — after the
+          business name it is the single most-read thing in the row, because it
+          is the thing an agent is about to dial. */}
+      <td className="whitespace-nowrap px-3 py-2">
+        <span className="flex items-center gap-1.5">
+          <span className="tnum font-mono text-num tracking-[-0.02em] text-fg">
             {lead.phone}
           </span>
           <WhatsAppLink phone={lead.phone} leadName={lead.name} />
@@ -159,37 +171,47 @@ export default function LeadRow({
       </td>
 
       <td
-        className="truncate px-3 py-2.5 text-ui text-fg-2"
+        className="truncate px-3 py-2 text-ui text-fg-2"
         title={lead.address}
       >
         {lead.address || <Flag>No address</Flag>}
       </td>
 
-      <td className="truncate px-3 py-2.5 text-ui text-fg-3">
+      <td className="truncate px-3 py-2 text-ui text-fg-3">
         {lead.categories.length > 0 ? (
           <span title={lead.categories.join(", ")}>
             {lead.categories.slice(0, 2).join(", ")}
             {lead.categories.length > 2 && (
-              <span className="text-fg-3"> +{lead.categories.length - 2}</span>
+              <span className="text-fg-4"> +{lead.categories.length - 2}</span>
             )}
           </span>
         ) : (
-          <span className="text-fg-3">—</span>
+          <span className="text-fg-4">—</span>
         )}
       </td>
 
-      <td className="px-3 py-2.5">
+      <td className="px-3 py-2">
         {!lead.website ? (
           <Flag>No website</Flag>
         ) : websiteUrl ? (
+          // An external link, and marked as one. The arrow appears on hover
+          // rather than always: a glyph on every row of a column is chrome,
+          // and the underline already says "link".
           <a
             href={websiteUrl}
             target="_blank"
             rel="noopener noreferrer"
             title={websiteUrl}
-            className="block truncate rounded-sm text-ui text-fg-2 underline decoration-fg-4/40 underline-offset-[3px] transition-colors hover:text-fg hover:decoration-accent"
+            className="group/link inline-flex max-w-full items-center gap-1 rounded-sm text-ui text-fg-2 transition-colors hover:text-fg"
           >
-            {displayWebsite(lead.website)}
+            <span className="truncate underline decoration-line-2 underline-offset-[3px] transition-colors group-hover/link:decoration-fg-4">
+              {displayWebsite(lead.website)}
+            </span>
+            <ArrowUpRight
+              className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/link:opacity-100"
+              strokeWidth={2}
+              aria-hidden="true"
+            />
           </a>
         ) : (
           // Scraped text that is not a usable address. Still shown — an agent
@@ -200,12 +222,19 @@ export default function LeadRow({
         )}
       </td>
 
-      {/* --- working columns: tinted panel behind the interactive cells ---
-          All three are middle-aligned so the status chip, the callback date
+      {/* --- working columns -----------------------------------------------
+          The three an agent edits. They used to sit on a tinted `recessed`
+          panel; that tint is gone. A block of differently-coloured cells
+          running down a table is the loudest "admin template" signal there is,
+          and the one vertical hairline before Status says the same thing —
+          scraper on the left, agent on the right — without repainting a third
+          of every row.
+
+          All three are middle-aligned so the status pill, the callback date
           and the first line of a note sit on one optical line across the row,
-          and the notes cell simply grows about its centre when a pending bar
-          appears under it. */}
-      <td className="border-l border-line bg-recessed px-2 py-2 align-middle group-hover:bg-hover group-focus-within:bg-hover">
+          and the notes cell grows about its centre when a pending bar appears
+          under it. */}
+      <td className="border-l border-line px-2 py-2 align-middle">
         <StatusSelect
           value={shownStatus}
           pending={draft?.status !== undefined}
@@ -216,7 +245,7 @@ export default function LeadRow({
       {/* Booking stays immediate — it happens behind an explicit Book button in
           a dialog, which is already the deliberate confirmation that the staged
           Save/Cancel bar provides for the dropdown and the notes box. */}
-      <td className="bg-recessed px-2 py-2 align-middle group-hover:bg-hover group-focus-within:bg-hover">
+      <td className="px-2 py-2 align-middle">
         <CallbackCell
           lead={lead}
           today={today}
@@ -224,7 +253,7 @@ export default function LeadRow({
         />
       </td>
 
-      <td className="bg-recessed py-2 pl-2 pr-4 align-middle group-hover:bg-hover group-focus-within:bg-hover">
+      <td className="py-2 pl-2 pr-4 align-middle">
         <NotesCell
           value={shownNotes}
           leadName={lead.name}
@@ -247,9 +276,9 @@ export default function LeadRow({
         {justSaved && (
           <p
             role="status"
-            className="mt-1.5 flex items-center gap-1.5 px-2 text-meta font-medium text-st-green"
+            className="mt-1.5 flex items-center gap-1.5 px-2 text-meta font-medium text-success"
           >
-            <CheckIcon />
+            <Check className="h-3 w-3 shrink-0" strokeWidth={2.5} aria-hidden="true" />
             Saved
           </p>
         )}
@@ -280,11 +309,11 @@ function PendingBar({
           live in the tooltip rather than wrapping the bar onto two lines. */}
       <span
         title={`Unsaved changes: ${fields.join(", ").toLowerCase()}`}
-        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-meta font-medium text-st-gold"
+        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-meta font-medium text-warning"
       >
         <span
           aria-hidden="true"
-          className="h-1.5 w-1.5 shrink-0 rounded-full bg-st-gold"
+          className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
         />
         <span aria-hidden="true">Unsaved</span>
         {/* Screen readers get the full sentence; the eye gets one short word. */}
@@ -298,7 +327,7 @@ function PendingBar({
           type="button"
           onClick={onCancel}
           aria-label={`Discard changes to ${leadName}`}
-          className="rounded px-2 py-1 text-caption font-medium text-fg-3 transition-colors hover:bg-line hover:text-fg"
+          className="rounded-md px-2 py-1 text-caption font-medium text-fg-3 transition-colors hover:bg-hover hover:text-fg"
         >
           Cancel
         </button>
@@ -306,9 +335,9 @@ function PendingBar({
           type="button"
           onClick={onSave}
           aria-label={`Save changes to ${leadName}`}
-          className="inline-flex items-center gap-1 rounded bg-accent px-2.5 py-1 text-caption font-medium text-on-accent transition-colors hover:bg-accent-2"
+          className="inline-flex items-center gap-1 rounded-md bg-accent-solid px-2 py-1 text-caption font-medium text-on-accent transition-colors hover:brightness-110"
         >
-          <CheckIcon />
+          <Check className="h-3 w-3 shrink-0" strokeWidth={2.5} aria-hidden="true" />
           Save
         </button>
       </div>
@@ -316,41 +345,25 @@ function PendingBar({
   );
 }
 
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" className="h-3 w-3 shrink-0">
-      <path
-        d="M2.5 6.3 4.8 8.6 9.5 3.9"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 /**
- * Visual language: **an annotation, not a chip.** No fill, no ring — rust text
- * with a dashed underline and a warning glyph, so it reads like something
- * pencilled in the margin rather than another coloured pill.
+ * Visual language: **an annotation, not a chip.**
+ *
+ * "No website" is a gap in the scraped data, not an alarm — so it gets no
+ * fill, no border and no red. A small outline triangle and muted text with a
+ * dashed underline: something pencilled in the margin where a value should
+ * have been. A filled warning pill here would give an absent field the same
+ * weight as a deliberate "Do not call", which is a lie about its importance,
+ * and a column of them would turn the table into a hazard sign.
  */
 function Flag({ children }: { children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-ui font-medium text-warn">
-      <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0" aria-hidden="true">
-        <path
-          d="M6 1.6 11.2 10.6H0.8z"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.1"
-          strokeLinejoin="round"
-        />
-        <path d="M6 5.1v2.3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
-        <circle cx="6" cy="9" r="0.55" fill="currentColor" />
-      </svg>
-      <span className="flag-underline decoration-warn/50">{children}</span>
+    <span className="inline-flex items-center gap-1.5 text-ui text-fg-3">
+      <AlertTriangle
+        className="h-3.5 w-3.5 shrink-0 text-warning"
+        strokeWidth={1.75}
+        aria-hidden="true"
+      />
+      <span className="flag-underline decoration-line-2">{children}</span>
     </span>
   );
 }

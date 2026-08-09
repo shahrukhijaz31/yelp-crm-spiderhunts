@@ -49,20 +49,28 @@ export const CALL_STATUS_SHORT_LABELS: Record<CallStatus, string> = {
 /**
  * Status colour lives here and nowhere else.
  *
- * Tuned for a dark surface: seven hues that stay apart from each other *and*
- * from the app's red accent, which is reserved for the UI and for anything
- * time-critical. `do_not_call` is the odd one out on purpose — the only
- * light-filled chip in the app, because it is the only hard stop.
+ * Seven hues that stay apart from each other *and* from the app's red accent,
+ * which is reserved for the primary action, the active view and anything
+ * time-critical. A status is never red, so a status can never be mistaken for
+ * "this one is urgent".
+ *
+ * Each entry is a border/background/text triple worn by `.chip` (see
+ * `globals.css`), and the chip's dot inherits `currentColor` — so a status is
+ * one colour decision made here, not four scattered across the components that
+ * draw it.
+ *
+ * `do_not_call` is the odd one out on purpose: the only fully inverted chip in
+ * the app, because it is the only hard stop.
  */
 export const CALL_STATUS_STYLES: Record<CallStatus, string> = {
-  not_called: "bg-transparent text-st-neutral ring-line-2",
-  no_answer: "bg-st-gold-bg text-st-gold ring-st-gold-line",
-  voicemail: "bg-st-sky-bg text-st-sky ring-st-sky-line",
-  owner_not_available: "bg-st-teal-bg text-st-teal ring-st-teal-line",
-  interested: "bg-st-green-bg text-st-green ring-st-green-line",
-  not_interested: "bg-st-orchid-bg text-st-orchid ring-st-orchid-line",
-  do_not_call: "bg-fg text-on-accent ring-fg",
-  bad_number: "bg-st-steel-bg text-st-steel ring-st-steel-line",
+  not_called: "border-line-2 bg-transparent text-st-neutral",
+  no_answer: "border-st-gold-line bg-st-gold-bg text-st-gold",
+  voicemail: "border-st-sky-line bg-st-sky-bg text-st-sky",
+  owner_not_available: "border-st-teal-line bg-st-teal-bg text-st-teal",
+  interested: "border-st-green-line bg-st-green-bg text-st-green",
+  not_interested: "border-st-orchid-line bg-st-orchid-bg text-st-orchid",
+  do_not_call: "border-fg bg-fg text-on-invert",
+  bad_number: "border-st-steel-line bg-st-steel-bg text-st-steel",
 };
 
 /** Solid dot colour used in chips, the stacked bar and the stat legend. */

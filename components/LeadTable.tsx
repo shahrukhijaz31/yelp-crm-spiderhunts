@@ -1,5 +1,7 @@
 "use client";
 
+import { ArrowDown, ArrowUp, ChevronsUpDown, SearchX } from "lucide-react";
+
 import LeadRow from "./LeadRow";
 import type { LeadSort, LeadSortKey } from "@/lib/leadQuery";
 import type { Lead, LeadEditableFields } from "@/lib/types";
@@ -59,15 +61,26 @@ export default function LeadTable({
   sort,
   onSort,
   onUpdate,
+  datasetKey,
 }: {
   leads: Lead[];
   today: string;
   sort: LeadSort;
   onSort: (key: LeadSortKey) => void;
   onUpdate: (id: string, changes: Partial<LeadEditableFields>) => void;
+  /**
+   * Identifies *which* set of rows is on screen — the page, tab, sort and
+   * filters. Changing it fades the new rows in; editing a row does not change
+   * it, so an inline save never re-animates the table.
+   */
+  datasetKey: string;
 }) {
   return (
-    <div className="panel flex-1 overflow-auto">
+    // No panel of its own: the table is the body of the workspace surface,
+    // between the toolbar strip above it and the pager strip below. Only the
+    // rows scroll — the toolbar and the pager stay put, which is what makes a
+    // long list feel like a window onto data rather than a long page.
+    <div className="min-h-0 flex-1 overflow-auto">
       <table className="lead-table lead-table-frozen w-full min-w-[1460px] table-fixed border-collapse">
         <colgroup>
           {COLUMNS.map((column) => (
@@ -89,17 +102,20 @@ export default function LeadTable({
                 aria-sort={
                   active ? (sort.direction === "asc" ? "ascending" : "descending") : undefined
                 }
-                className={`col-head py-3.5 text-left ${
-                  index === 0 ? "pl-[19px] pr-3" : "px-3"
-                } ${
-                  // The editable columns are announced as a group: their
-                  // headings sit on the same tinted panel as the controls
-                  // below them, one shade up from the scraped columns. The
-                  // gradient fill and the rule under the whole header row come
-                  // from `.lead-table thead th` — see `globals.css`, where they
-                  // are drawn as a shadow because a sticky `border-collapse`
-                  // cell drops its borders in several browsers.
-                  column.working ? "is-working text-fg-2" : "bg-surface"
+                // The header is one continuous `rail` strip — see
+                // `.lead-table thead th` in `globals.css`, where the fill and
+                // the rule under it are set, the latter as a shadow because a
+                // sticky `border-collapse` cell drops its borders in several
+                // browsers.
+                //
+                // The working columns are no longer tinted. A block of
+                // differently-coloured cells running down a table is the
+                // clearest "admin template" tell there is, and it was doing a
+                // job that one vertical hairline before Status does more
+                // quietly: separating what the scraper knows from what the
+                // agent decides.
+                className={`col-head py-2.5 text-left ${
+                  index === 0 ? "pl-[18px] pr-3" : "px-3"
                 } ${column.label === "Status" ? "border-l border-line" : ""}`}
               >
                 {column.sortKey ? (
@@ -125,7 +141,21 @@ export default function LeadTable({
             })}
           </tr>
         </thead>
-        <tbody>
+        {/*
+         * `key` on the tbody, not on the rows.
+         *
+         * When the page, tab, sort or filters change, this key changes with
+         * them, React throws the whole body away and the replacement fades in
+         * — one 160ms transition for the new set of rows. Keying the rows
+         * individually instead would animate every row that happened to move,
+         * which on a sort is all of them, and on an inline edit would flash
+         * the row an agent just saved.
+         *
+         * Deliberately not tied to `leads` itself: editing a status in place
+         * produces a new array, and that must not re-animate the table
+         * underneath the person who just clicked it.
+         */}
+        <tbody key={datasetKey} className="table-body-enter">
           {leads.map((lead) => (
             <LeadRow
               key={lead.id}
@@ -141,12 +171,12 @@ export default function LeadTable({
                     figure. It is drawn from the same hairline and fg-4 the
                     rest of the chrome uses, so it reads as the table's own
                     empty state rather than as an illustration dropped in. */}
-                <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-line bg-recessed text-fg-4 shadow-e1">
-                  <EmptyIcon />
+                <span className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-lg border border-line bg-recessed text-fg-4">
+                  <SearchX className="h-5 w-5" strokeWidth={1.5} aria-hidden="true" />
                 </span>
-                <p className="display-num text-[22px] text-fg-2">Nothing here</p>
-                <p className="mx-auto mt-2 max-w-[38ch] text-ui leading-relaxed text-fg-3">
-                  No leads match the current view. Try clearing a filter, or
+                <p className="text-cell font-medium text-fg">No leads here</p>
+                <p className="mx-auto mt-1.5 max-w-[40ch] text-ui leading-relaxed text-fg-3">
+                  Nothing matches the current view. Try clearing a filter, or
                   widening the search.
                 </p>
               </td>
@@ -169,51 +199,19 @@ export default function LeadTable({
  * sideways as the pointer crosses it.
  */
 function SortArrow({ active, direction }: { active: boolean; direction: "asc" | "desc" }) {
-  return (
-    <svg
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-      className={`ml-auto h-3 w-3 shrink-0 transition-opacity ${
-        active ? "opacity-100" : "opacity-0 group-hover:opacity-45 group-focus-visible:opacity-45"
-      }`}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {active ? (
-        direction === "asc" ? (
-          <path d="M6 9.5V2.5M3 5.5 6 2.5l3 3" />
-        ) : (
-          <path d="M6 2.5v7M3 6.5 6 9.5l3-3" />
-        )
-      ) : (
-        <path d="M3.25 4.75 6 2 8.75 4.75M3.25 7.25 6 10l2.75-2.75" />
-      )}
-    </svg>
-  );
-}
+  const className = `ml-auto h-3 w-3 shrink-0 transition-opacity ${
+    active
+      ? "opacity-100 text-fg-2"
+      : "opacity-0 group-hover:opacity-40 group-focus-visible:opacity-40"
+  }`;
 
-function EmptyIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-6 w-6">
-      <rect
-        x="3.2"
-        y="4.2"
-        width="17.6"
-        height="15.6"
-        rx="2.4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-      <path
-        d="M3.2 9.2h17.6M9 9.2v10.6"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
+  if (!active) {
+    return <ChevronsUpDown className={className} strokeWidth={2} aria-hidden="true" />;
+  }
+
+  return direction === "asc" ? (
+    <ArrowUp className={className} strokeWidth={2} aria-hidden="true" />
+  ) : (
+    <ArrowDown className={className} strokeWidth={2} aria-hidden="true" />
   );
 }

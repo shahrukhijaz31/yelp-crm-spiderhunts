@@ -45,32 +45,41 @@ export default function Pagination({
   return (
     <nav
       aria-label="Lead list pages"
-      className="panel mt-3 flex flex-col gap-3 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+      // No panel and no margin: this is the footer strip of the workspace
+      // surface, joined to the table above it by one hairline. A pager in its
+      // own floating card is a pager that has been detached from the thing it
+      // pages.
+      className="panel-rail flex flex-col gap-3 border-t border-line px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
     >
       {/* --- left: what you are looking at --------------------------------- */}
       {/* `aria-live` so a screen reader hears the new range after a page turn;
           the buttons themselves say nothing about where they landed. */}
-      <p aria-live="polite" className="text-ui text-fg-3">
+      <p aria-live="polite" className="text-caption text-fg-3">
         {total === 0 ? (
           "No leads match the current view"
         ) : (
           <>
-            Showing{" "}
-            <span className="tnum font-mono text-num font-semibold text-fg">
+            <span className="tnum font-mono font-medium text-fg-2">
               {first.toLocaleString()}–{last.toLocaleString()}
             </span>{" "}
             of{" "}
-            <span className="tnum font-mono text-num text-fg-2">
-              {total.toLocaleString()}
-            </span>{" "}
+            <span className="tnum font-mono text-fg-2">{total.toLocaleString()}</span>{" "}
             leads
+            {/* The page position, stated in words as well as drawn as buttons.
+                On a narrow screen the numbers collapse to a gap and this is
+                the only thing left saying where you are. */}
+            <span className="text-fg-4">
+              {" "}
+              · page <span className="tnum font-mono">{page}</span> of{" "}
+              <span className="tnum font-mono">{Math.max(totalPages, 1)}</span>
+            </span>
           </>
         )}
       </p>
 
       {/* --- right: how many, and which ------------------------------------ */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <label className="flex shrink-0 items-center gap-2 text-ui text-fg-3">
+        <label className="flex shrink-0 items-center gap-2 text-caption text-fg-3">
           <span className="whitespace-nowrap">Rows per page</span>
           <select
             value={pageSize}
@@ -103,7 +112,7 @@ export default function Pagination({
               <span
                 key={`gap-${index}`}
                 aria-hidden="true"
-                className="px-1 text-ui text-fg-4"
+                className="px-0.5 text-caption text-fg-4"
               >
                 …
               </span>
@@ -115,12 +124,15 @@ export default function Pagination({
                 aria-label={`Page ${item}`}
                 aria-current={item === page ? "page" : undefined}
                 onClick={() => onPageChange(item)}
-                className={`tnum h-8 min-w-8 rounded-lg px-2 font-mono text-caption font-medium transition-colors disabled:cursor-not-allowed ${
+                // The current page is a filled surface, not a filled *accent*.
+                // A red button in a row of page numbers reads as an action —
+                // "press me" — when it is actually a statement of where you
+                // already are. Red is spent on the primary action and on
+                // overdue work, and a pager is neither.
+                className={`tnum h-7 min-w-7 rounded-md px-1.5 font-mono text-caption transition-colors disabled:cursor-not-allowed ${
                   item === page
-                    ? // The one saturated thing in the pager, and the only
-                      // thing here that has to be findable at a glance.
-                      "bg-accent text-on-accent shadow-[0_2px_10px_-3px_var(--c-accent)]"
-                    : "border border-line text-fg-2 hover:border-line-2 hover:bg-hover hover:text-fg disabled:opacity-50"
+                    ? "border border-line-2 bg-surface font-medium text-fg"
+                    : "text-fg-3 hover:bg-hover hover:text-fg disabled:opacity-50"
                 }`}
               >
                 {item}
@@ -155,7 +167,7 @@ function StepButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex h-8 items-center gap-1 rounded-lg border border-line px-2.5 text-caption font-medium text-fg-2 transition-colors hover:border-line-2 hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:border-line disabled:bg-transparent disabled:text-fg-4 disabled:hover:bg-transparent"
+      className="ui-btn ui-btn-secondary h-7 gap-1 px-2 text-caption"
     >
       {direction === "previous" && <Chevron pointing="left" />}
       {/* The word is the label on a wide screen; below `sm` the glyph carries

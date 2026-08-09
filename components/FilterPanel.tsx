@@ -206,7 +206,7 @@ export default function FilterPanel({
         {/* Stacked, not side by side: two native date inputs need ~290px and
             this column is 230px, so a row would overflow the panel. */}
         {filters.callback === "custom" && (
-          <div className="mt-2.5 flex flex-col gap-1.5 border-l-2 border-accent/40 pl-2.5">
+          <div className="mt-2.5 flex flex-col gap-1.5 border-l-2 border-accent-line pl-2.5">
             <DateBound
               label="From"
               value={filters.callbackFrom}

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown, ListFilter, Search, X } from "lucide-react";
 
 import FilterPanel from "./FilterPanel";
 import {
@@ -12,12 +14,18 @@ import {
 import type { LeadStats } from "@/lib/leadUtils";
 
 /**
- * The control rail: instant search, the filter expander, the active-filter
- * chips and the result counter.
+ * The command bar: instant search, the filter expander, the active-filter chips
+ * and the result counter.
  *
- * An inline expander rather than an overlay drawer — an overlay would cover
- * the table you are filtering, and this is a desktop tool where watching the
- * row count move as you tick boxes is the point.
+ * It no longer draws a panel of its own. It is a *strip inside* the workspace
+ * surface, sitting directly on top of the table it narrows, separated by one
+ * hairline — so the toolbar and the rows read as one object with a control
+ * surface, rather than as two cards that happen to be stacked. That is the
+ * single biggest structural difference between this and a generic admin table.
+ *
+ * An inline expander rather than an overlay drawer: an overlay would cover the
+ * table you are filtering, and this is a desktop tool where watching the row
+ * count move as you tick boxes is the point.
  */
 export default function FilterToolbar({
   filters,
@@ -73,10 +81,15 @@ export default function FilterToolbar({
   }, []);
 
   return (
-    <section className="panel-inset">
-      <div className="flex flex-wrap items-center gap-3 px-3 py-3">
+    <div>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+        {/* --- search --- */}
         <div className="group relative w-full sm:w-auto">
-          <SearchIcon />
+          <Search
+            className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-4 transition-colors group-focus-within:text-fg-3"
+            strokeWidth={1.75}
+            aria-hidden="true"
+          />
           <input
             ref={searchRef}
             type="search"
@@ -84,98 +97,136 @@ export default function FilterToolbar({
             aria-keyshortcuts="/"
             value={filters.query}
             onChange={(event) => onChange({ ...filters, query: event.target.value })}
-            placeholder="Search name, address, phone, notes…"
-            // The one field on the worklist worth widening on focus: it grows
-            // by 2rem when you commit to it, which is room for a longer query
-            // and, more usefully, an unmistakable answer that the `/` shortcut
-            // landed. `transition-[width]` only — nothing else moves.
-            className="h-10 w-full rounded-lg border border-line-2 bg-recessed pl-9 pr-9 text-ui text-fg shadow-[inset_0_1px_2px_-1px_rgb(0_0_0/0.2)] outline-none transition-[width,border-color,box-shadow] duration-200 placeholder:text-fg-3 hover:border-fg-4 focus:border-accent focus:shadow-[var(--c-focus-ring)] sm:w-[22rem] sm:focus:w-[24rem]"
+            placeholder="Search leads…"
+            // `bg-recessed` rather than the field default: this control sits on
+            // a `rail` strip, and a surface-coloured input on a rail strip has
+            // no edge at all until you find its border.
+            className="ui-field h-8 w-full !bg-recessed pl-8 pr-9 sm:w-[280px] lg:w-[340px]"
           />
           {/* Hidden once there is a query: a keycap sitting on top of the text
               an agent is reading back is worse than no hint at all. */}
           {!filters.query && <SearchKeyHint />}
         </div>
 
+        {/* --- filters --- */}
         <button
           type="button"
           onClick={onToggleOpen}
           aria-expanded={open}
           aria-controls="filter-panel"
-          // Three states, and they are deliberately distinguishable from each
-          // other rather than just from "off": filters applied glows faintly
-          // (something is narrowing the list, even with the panel shut), the
-          // panel merely being open does not.
-          className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3.5 text-ui font-medium transition-[background-color,border-color,color,box-shadow] duration-150 ${
+          // Filters *applied* is the state worth marking, and it is marked
+          // whether or not the panel is open — the panel merely being open is
+          // not information about the list.
+          className={`ui-btn h-8 px-2.5 text-caption ${
             isFiltered
-              ? "border-accent/60 bg-accent-soft text-accent shadow-[0_0_16px_-6px_var(--c-accent)]"
+              ? "border border-accent-line bg-accent-soft text-accent hover:bg-accent-soft"
               : open
-                ? "border-line-2 bg-hover text-fg"
-                : "border-line-2 bg-recessed text-fg-2 hover:border-fg-4 hover:bg-hover hover:text-fg"
+                ? "ui-btn-secondary"
+                : "ui-btn-ghost"
           }`}
         >
-          <SlidersIcon />
+          <ListFilter className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
           Filters
           {chips.length > 0 && (
-            <span className="tnum rounded bg-accent px-1.5 py-0.5 font-mono text-meta font-medium text-on-accent">
-              {chips.length}
-            </span>
+            <span className="tnum font-mono text-meta font-medium">{chips.length}</span>
           )}
-          <ChevronIcon open={open} />
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+            strokeWidth={2}
+            aria-hidden="true"
+          />
         </button>
 
-        <p className="ml-auto text-ui text-fg-3">
-          Showing{" "}
-          <span className="tnum font-mono text-num font-semibold text-fg">
-            {shown}
-          </span>{" "}
-          of <span className="tnum font-mono text-num text-fg-2">{stats.total}</span>{" "}
-          total leads
+        {/* --- count --- */}
+        <p className="ml-auto shrink-0 text-caption text-fg-3">
+          <span className="tnum font-mono font-medium text-fg-2">
+            {shown.toLocaleString()}
+          </span>
+          <span className="text-fg-4"> / </span>
+          <span className="tnum font-mono">{stats.total.toLocaleString()}</span>
         </p>
       </div>
 
-      {/* Active filters, one chip each, removable individually. */}
+      {/* --- active filters --- */}
+      {/* Each chip scales in from 92% and out again when removed, so adding
+          and clearing a filter are visibly the same action reversed. Keyed by
+          the chip's own id, which is what lets `AnimatePresence` animate the
+          removal of one chip from the middle of the row without disturbing
+          the others. */}
       {isFiltered && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-2">
-          <span className="eyebrow mr-1">Active</span>
-          {chips.map((chip) => (
-            <button
-              key={chip.id}
-              type="button"
-              onClick={() => onChange(chip.next)}
-              title={`Remove filter: ${chip.label}`}
-              className="group inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-line-2 bg-surface py-1 pl-2.5 pr-1.5 text-caption text-fg-2 shadow-e1 transition-colors hover:border-accent/60 hover:text-fg"
-            >
-              <span className="truncate">{chip.label}</span>
-              <span
-                aria-hidden="true"
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-fg-3 transition-colors group-hover:bg-accent group-hover:text-on-accent"
+          <AnimatePresence initial={false} mode="popLayout">
+            {chips.map((chip) => (
+              <motion.button
+                key={chip.id}
+                layout
+                initial={{ opacity: 0, scale: 0.92 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.92 }}
+                transition={{ duration: 0.16, ease: [0.22, 0.61, 0.36, 1] }}
+                type="button"
+                onClick={() => onChange(chip.next)}
+                title={`Remove filter: ${chip.label}`}
+                className="group inline-flex max-w-[240px] items-center gap-1 rounded-md border border-line-2 bg-surface py-0.5 pl-2 pr-1 text-caption text-fg-2 transition-colors hover:border-fg-4 hover:text-fg"
               >
-                <CrossIcon />
-              </span>
-            </button>
-          ))}
+                <span className="truncate">{chip.label}</span>
+                <X
+                  className="h-3 w-3 shrink-0 text-fg-4 transition-colors group-hover:text-accent"
+                  strokeWidth={2.25}
+                  aria-hidden="true"
+                />
+              </motion.button>
+            ))}
+          </AnimatePresence>
 
           <button
             type="button"
             onClick={() => onChange({ ...EMPTY_FILTERS })}
-            className="ml-1 rounded px-2 py-1 text-caption font-medium text-accent underline decoration-accent/40 underline-offset-4 transition-colors hover:decoration-accent"
+            className="ml-1 rounded px-1.5 py-0.5 text-caption font-medium text-fg-3 transition-colors hover:text-accent"
           >
             Clear all
           </button>
         </div>
       )}
 
-      {open && (
-        <div id="filter-panel" className="border-t border-line px-4 py-4">
-          <FilterPanel
-            filters={filters}
-            onChange={onChange}
-            categories={categories}
-            stats={stats}
-          />
-        </div>
-      )}
-    </section>
+      {/* --- expanded panel --- */}
+      {/*
+       * Height *and* opacity, so the table below is pushed down rather than
+       * covered — this is an inline expander, and the whole reason it is not
+       * an overlay is that watching the row count move while you tick boxes is
+       * the point. `AnimatePresence` is what gives it an exit: without it the
+       * panel would slide open and then vanish instantly on close, which reads
+       * as a glitch rather than as the same drawer shutting.
+       *
+       * `height: auto` is measured by Framer, so the panel can contain a
+       * category list of any length without a hard-coded height here.
+       */}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            id="filter-panel"
+            key="filter-panel"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{
+              height: { duration: 0.26, ease: [0.22, 0.61, 0.36, 1] },
+              opacity: { duration: 0.18 },
+            }}
+            className="overflow-hidden border-t border-line bg-recessed"
+          >
+            <div className="px-4 py-4">
+              <FilterPanel
+                filters={filters}
+                onChange={onChange}
+                categories={categories}
+                stats={stats}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -188,69 +239,9 @@ function SearchKeyHint() {
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none absolute right-2.5 top-1/2 flex h-5 min-w-5 -translate-y-1/2 items-center justify-center rounded border border-line-2 bg-surface px-1 font-mono text-[11px] leading-none text-fg-3 transition-opacity group-focus-within:opacity-0"
+      className="pointer-events-none absolute right-2 top-1/2 flex h-[18px] min-w-[18px] -translate-y-1/2 items-center justify-center rounded border border-line-2 bg-surface px-1 font-mono text-[11px] leading-none text-fg-4 transition-opacity group-focus-within:opacity-0"
     >
       /
     </span>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-3 transition-colors group-focus-within:text-accent"
-    >
-      <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SlidersIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5">
-      <path
-        d="M2 4.5h5M11 4.5h3M2 11.5h3M9 11.5h5"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-      <circle cx="9" cy="4.5" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <circle cx="7" cy="11.5" r="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-      className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`}
-    >
-      <path
-        d="M2.5 4.5 6 8 9.5 4.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function CrossIcon() {
-  return (
-    <svg viewBox="0 0 10 10" aria-hidden="true" className="h-2.5 w-2.5">
-      <path
-        d="m2.5 2.5 5 5m0-5-5 5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
   );
 }

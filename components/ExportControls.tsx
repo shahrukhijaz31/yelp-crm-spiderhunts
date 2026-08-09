@@ -105,7 +105,7 @@ export default function ExportControls() {
         />
 
         {hiddenTicked > 0 && (
-          <p className="mt-2 text-ui text-st-gold">
+          <p className="mt-2 text-caption text-warning">
             <span className="tnum font-mono">{hiddenTicked}</span> ticked row
             {hiddenTicked === 1 ? " is" : "s are"} hidden by the filters above —
             still included in the file.
@@ -130,10 +130,10 @@ export default function ExportControls() {
                 // fill, accent label — plus a soft halo, because this choice
                 // decides what lands in the download and is worth being
                 // unmistakable about.
-                className={`rounded-xl border px-3.5 py-3 text-left transition-[border-color,background-color,box-shadow] duration-150 ${
+                className={`panel-lift spotlight rounded-lg border px-3.5 py-3 text-left ${
                   active
-                    ? "border-accent bg-accent-soft shadow-[0_0_20px_-8px_var(--c-accent)]"
-                    : "border-line bg-[image:var(--c-surface-fill)] shadow-e1 hover:border-line-2 hover:shadow-e2"
+                    ? "edge-accent relative border-accent-line bg-accent-soft"
+                    : "border-line bg-surface hover:border-line-2 hover:bg-hover"
                 }`}
               >
                 <span
@@ -206,7 +206,7 @@ export default function ExportControls() {
         {status.state === "done" && (
           <p
             role="status"
-            className="mt-3 rounded-lg border border-st-green-line bg-st-green-bg px-3 py-2 text-ui text-st-green"
+            className="mt-3 rounded-md border border-success-line bg-success-bg px-3 py-2 text-caption text-success"
           >
             Downloaded <span className="font-mono">{status.filename}</span>.
           </p>
@@ -214,7 +214,7 @@ export default function ExportControls() {
         {status.state === "error" && (
           <p
             role="alert"
-            className="mt-3 rounded-lg border border-accent-3 bg-accent-soft px-3 py-2 text-ui text-accent-2"
+            className="mt-3 rounded-md border border-danger-line bg-danger-bg px-3 py-2 text-caption text-danger"
           >
             {status.message}
           </p>

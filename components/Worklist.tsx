@@ -344,55 +344,77 @@ export default function Worklist({
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[1760px] flex-1 flex-col px-4 pb-7 sm:px-7">
+    /*
+     * The page is a column: a summary strip, then one workspace surface that
+     * fills whatever height is left.
+     *
+     * That surface is the structural change. It used to be four separately
+     * bordered cards stacked with margins between them — tabs, toolbar, table,
+     * pager — which is the shape of a dashboard rather than of a tool. They are
+     * now sections *of one object*, joined by hairlines: the controls sit on
+     * the thing they control, and only the rows scroll, so the toolbar and the
+     * pager stay on screen however long the list is.
+     */
+    <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4 px-4 py-5 sm:px-6">
       <HeadlineStrip stats={stats} />
 
-      <ViewTabs
-        view={view}
-        counts={counts}
-        onChange={setView}
-        breakdownOpen={breakdownOpen}
-        onToggleBreakdown={() => setBreakdownOpen((open) => !open)}
-      />
+      <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* --- view switcher ------------------------------------------- */}
+        <div className="panel-rail flex flex-wrap items-center justify-between gap-3 border-b border-line px-3 py-2.5">
+          <ViewTabs
+            view={view}
+            counts={counts}
+            onChange={setView}
+            breakdownOpen={breakdownOpen}
+            onToggleBreakdown={() => setBreakdownOpen((open) => !open)}
+          />
 
-      {breakdownOpen && (
-        <div className="panel mt-4 px-5 py-4">
-          <Breakdown stats={stats} />
+          {/* What the current tab means, in one line. Beside the control
+              rather than under it: it is a caption for the segment that is
+              selected, and putting it on its own row cost a whole band of
+              vertical space to say six words. */}
+          <p className="hidden text-caption text-fg-4 xl:block">
+            {WORKLIST_VIEW_HINTS[view]}
+          </p>
         </div>
-      )}
 
-      <p className="mt-3 text-caption text-fg-3">{WORKLIST_VIEW_HINTS[view]}</p>
+        {breakdownOpen && (
+          <div className="border-b border-line bg-recessed px-4 py-4">
+            <Breakdown stats={stats} />
+          </div>
+        )}
 
-      <div className="mt-2.5">
-        <FilterToolbar
-          filters={filters}
-          onChange={setFilters}
-          categories={initialCategories}
-          stats={stats}
-          shown={meta.total}
-          open={filtersOpen}
-          onToggleOpen={() => setFiltersOpen((open) => !open)}
-        />
-      </div>
+        {/* --- command bar --------------------------------------------- */}
+        <div className="panel-rail border-b border-line">
+          <FilterToolbar
+            filters={filters}
+            onChange={setFilters}
+            categories={initialCategories}
+            stats={stats}
+            shown={meta.total}
+            open={filtersOpen}
+            onToggleOpen={() => setFiltersOpen((open) => !open)}
+          />
+        </div>
 
-      {error && (
-        <p
-          role="alert"
-          className="mt-3 flex items-start gap-2.5 rounded-xl border border-accent/50 bg-accent-soft px-4 py-2.5 text-ui text-accent shadow-e1"
-        >
-          {error}
-        </p>
-      )}
+        {error && (
+          <p
+            role="alert"
+            className="flex items-start gap-2.5 border-b border-danger-line bg-danger-bg px-4 py-2.5 text-caption text-danger"
+          >
+            {error}
+          </p>
+        )}
 
-      <div className="mt-4 flex min-h-0 flex-1 flex-col">
+        {/* --- rows ----------------------------------------------------- */}
         {/* Dimmed rather than emptied while a request is in flight: the rows
             underneath are the ones the agent was just reading, and replacing
             them with a spinner for 80ms makes the whole table flicker on every
             page turn. `aria-busy` says the same thing to a screen reader. */}
         <div
           aria-busy={busy}
-          className={`flex min-h-0 flex-1 flex-col transition-opacity ${
-            busy ? "pointer-events-none opacity-60" : ""
+          className={`flex min-h-0 flex-1 flex-col transition-opacity duration-150 ${
+            busy ? "pointer-events-none opacity-55" : ""
           }`}
         >
           <LeadTable
@@ -401,9 +423,14 @@ export default function Worklist({
             sort={sort}
             onSort={cycleSort}
             onUpdate={updateLead}
+            // What the rows *are*, not what they contain: the page, the size
+            // and the criteria. `lastCriteria` already encodes the tab, the
+            // applied filters, the sort and the date.
+            datasetKey={`${lastCriteria}|${meta.page}|${meta.pageSize}`}
           />
         </div>
 
+        {/* --- pager ---------------------------------------------------- */}
         <Pagination
           page={meta.page}
           pageSize={meta.pageSize}
@@ -413,7 +440,7 @@ export default function Worklist({
           onPageChange={setPage}
           onPageSizeChange={changePageSize}
         />
-      </div>
+      </section>
     </main>
   );
 }

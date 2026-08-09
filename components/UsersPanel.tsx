@@ -88,10 +88,10 @@ export default function UsersPanel({
       {notice && (
         <p
           role={notice.tone === "error" ? "alert" : "status"}
-          className={`rounded-xl border px-4 py-3 text-ui ${
+          className={`rounded-lg border px-4 py-3 text-ui ${
             notice.tone === "ok"
-              ? "border-st-green-line bg-st-green-bg text-st-green"
-              : "border-accent-3 bg-accent-soft text-accent-2"
+              ? "border-success-line bg-success-bg text-success"
+              : "border-danger-line bg-danger-bg text-danger"
           }`}
         >
           {notice.message}

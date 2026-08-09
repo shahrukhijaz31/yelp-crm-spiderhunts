@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Headphones, Plus } from "lucide-react";
 
 import RecordingPlayer, { formatClock } from "./RecordingPlayer";
 import {
@@ -140,14 +141,14 @@ export default function RecordingCell({
   }
 
   return (
-    <div className="mt-2.5 border-t border-line pt-2.5">
+    <div className="mt-3 border-t border-line pt-2.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="eyebrow shrink-0">Call recording</span>
 
         {recording ? (
           <>
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-st-sky-bg px-2 py-0.5 text-caption font-medium text-st-sky ring-1 ring-inset ring-st-sky-line">
-              <HeadphonesIcon />
+            <span className="chip shrink-0 border border-info-line bg-info-bg text-info">
+              <Headphones className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
               Available
             </span>
 
@@ -170,7 +171,7 @@ export default function RecordingCell({
                     setOpen(true);
                   }}
                   disabled={busy}
-                  className="ui-btn h-8 px-2.5 text-fg-3 underline decoration-line-2 underline-offset-4 hover:text-fg"
+                  className="ui-btn ui-btn-ghost h-8 px-2 text-caption"
                 >
                   Replace
                 </button>
@@ -179,7 +180,7 @@ export default function RecordingCell({
                   onClick={() => void remove()}
                   disabled={busy}
                   aria-busy={busy}
-                  className="ui-btn h-8 px-2.5 text-fg-3 underline decoration-line-2 underline-offset-4 hover:text-accent"
+                  className="ui-btn ui-btn-ghost h-8 px-2 text-caption hover:text-danger"
                 >
                   Delete
                 </button>
@@ -193,7 +194,7 @@ export default function RecordingCell({
               onClick={() => setOpen(true)}
               className="ui-btn ui-btn-secondary h-8 px-2.5"
             >
-              <PlusIcon />
+              <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden="true" />
               Upload call recording
             </button>
           )
@@ -220,7 +221,7 @@ export default function RecordingCell({
       )}
 
       {open && (
-        <div className="panel-inset mt-2.5 rounded-lg p-3">
+        <div className="mt-2.5 rounded-md border border-line bg-recessed p-3">
           {/* The compliance reminder sits on the action itself rather than in a
               tooltip or a page footer: it is the sentence the agent should read
               at the moment they pick a file, and it is deliberately a reminder
@@ -264,12 +265,12 @@ export default function RecordingCell({
                 aria-valuemax={100}
                 aria-valuenow={Math.round(progress * 100)}
                 aria-label="Upload progress"
-                className="h-1.5 w-full overflow-hidden rounded-full bg-line-2 shadow-[inset_0_1px_2px_-1px_rgb(0_0_0/0.3)]"
+                className="h-1 w-full overflow-hidden rounded-full bg-line-2"
               >
                 <div
                   // Lighter at the leading edge, so the bar reads as filling
                   // rather than as a rectangle being resized.
-                  className="h-full bg-gradient-to-r from-accent to-accent-2 transition-[width] duration-150"
+                  className="h-full bg-accent transition-[width] duration-150"
                   style={{ width: `${Math.round(progress * 100)}%` }}
                 />
               </div>
@@ -295,7 +296,7 @@ export default function RecordingCell({
               type="button"
               onClick={closePanel}
               disabled={busy}
-              className="ui-btn h-8 px-2.5 text-fg-3 hover:bg-hover hover:text-fg"
+              className="ui-btn ui-btn-ghost h-8 px-2 text-caption"
             >
               Cancel
             </button>
@@ -308,7 +309,7 @@ export default function RecordingCell({
 
       {notice && (
         <p
-          className={`mt-2 text-caption ${notice.tone === "error" ? "text-warn" : "text-st-green"}`}
+          className={`mt-2 text-caption ${notice.tone === "error" ? "text-danger" : "text-success"}`}
           role={notice.tone === "error" ? "alert" : "status"}
         >
           {notice.message}
@@ -405,34 +406,4 @@ function formatUploadedAt(iso: string): string {
       hour12: true,
     })
     .replace(",", " ·");
-}
-
-function HeadphonesIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" className="h-3 w-3 shrink-0">
-      <path
-        d="M2 8V6a4 4 0 0 1 8 0v2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-      <rect x="1.2" y="7.2" width="2.4" height="3.2" rx="1.1" fill="currentColor" />
-      <rect x="8.4" y="7.2" width="2.4" height="3.2" rx="1.1" fill="currentColor" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg viewBox="0 0 12 12" aria-hidden="true" className="h-3 w-3 shrink-0">
-      <path
-        d="M6 2.5v7M2.5 6h7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
 }

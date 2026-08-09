@@ -17,11 +17,11 @@ import Link from "next/link";
  */
 export default function AccessDenied() {
   return (
-    <main className="mx-auto w-full max-w-[1760px] flex-1 px-4 py-8 sm:px-7">
-      <div className="panel mx-auto flex max-w-md flex-col items-center gap-5 rounded-2xl px-6 py-10 text-center">
+    <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
+      <div className="panel mx-auto flex max-w-md flex-col items-center gap-5 px-6 py-12 text-center">
         <span
           aria-hidden="true"
-          className="flex h-12 w-12 items-center justify-center rounded-full border border-accent/40 bg-accent-soft text-accent shadow-[0_0_24px_-8px_var(--c-accent)]"
+          className="flex h-11 w-11 items-center justify-center rounded-lg border border-line bg-recessed text-fg-4"
         >
           <LockIcon />
         </span>

@@ -151,14 +151,14 @@ export default function ImportPanel() {
         // the drag state on its own: accent border, a warmed fill and an
         // accent halo the moment a file is over it. Anything subtler and an
         // agent cannot tell whether the browser has taken the drag.
-        className={`flex flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-[border-color,background-color,box-shadow] duration-200 ${
+        className={`flex flex-col items-center gap-4 rounded-lg border-2 border-dashed px-6 py-14 text-center transition-colors duration-150 ${
           dragging
-            ? "border-accent bg-accent-soft/40 shadow-[0_0_36px_-10px_var(--c-accent)]"
-            : "border-line-2 bg-surface/70 hover:border-fg-4"
+            ? "border-accent bg-accent-soft"
+            : "border-line-2 hover:border-fg-4 hover:bg-hover"
         }`}
       >
         {/* The icon tile, matching the empty states elsewhere in the app. */}
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-recessed shadow-e1">
+        <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-line bg-recessed">
           <UploadIcon />
         </span>
         <div>
@@ -181,16 +181,16 @@ export default function ImportPanel() {
 
       {notice && (
         <div
-          className={`rounded-xl border px-4 py-3 ${
+          className={`rounded-lg border px-4 py-3 ${
             notice.tone === "ok"
-              ? "border-st-green-line bg-st-green-bg"
-              : "border-accent-3 bg-accent-soft"
+              ? "border-success-line bg-success-bg"
+              : "border-danger-line bg-danger-bg"
           }`}
         >
           <div className="flex items-start justify-between gap-4">
             <p
               className={`text-ui ${
-                notice.tone === "ok" ? "text-st-green" : "text-accent-2"
+                notice.tone === "ok" ? "text-success" : "text-danger"
               }`}
             >
               {notice.message}

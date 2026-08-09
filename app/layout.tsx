@@ -1,30 +1,37 @@
 import type { Metadata } from "next";
-import { Fraunces, IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
 
 /**
- * Three faces, three jobs:
- *   Fraunces        — display: the wordmark and the headline stat numerals.
- *   Instrument Sans — everything read as language.
- *   IBM Plex Mono   — everything read as data (phones, dates, counts).
+ * Two faces, two jobs.
+ *
+ *   Geist      — everything read as language, and the numerals in the stat
+ *                strip. A neutral grotesque with a large x-height and very
+ *                even colour, which is what a screen of 14px UI text needs.
+ *   Geist Mono — everything read as data: phone numbers, dates, counts, page
+ *                numbers, file sizes. Tabular by construction, so a column of
+ *                figures lines up without `font-variant-numeric` doing the
+ *                work on its own.
+ *
+ * This replaces a three-family stack (Fraunces / Instrument Sans / IBM Plex
+ * Mono). Fraunces was the reason the old portal read as an editorial product
+ * rather than a workspace: a soft, wonky display serif carrying the wordmark,
+ * the page titles and every headline numeral. Two neutral faces from one
+ * family is both a smaller download and a much quieter page, which is what
+ * lets the data be the only thing with any personality on screen.
  */
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
+const geistSans = Geist({
+  variable: "--font-sans",
   subsets: ["latin"],
-  axes: ["SOFT", "WONK", "opsz"],
+  display: "swap",
 });
 
-const instrumentSans = Instrument_Sans({
-  variable: "--font-instrument",
+const geistMono = Geist_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
-});
-
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -53,7 +60,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${fraunces.variable} ${instrumentSans.variable} ${plexMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col bg-base text-fg">
         <ThemeProvider>{children}</ThemeProvider>

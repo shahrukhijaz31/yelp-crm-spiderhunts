@@ -1,8 +1,9 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
+
 import {
   CALL_STATUSES,
-  CALL_STATUS_DOTS,
   CALL_STATUS_LABELS,
   CALL_STATUS_SHORT_LABELS,
   CALL_STATUS_STYLES,
@@ -10,16 +11,22 @@ import {
 } from "@/lib/types";
 
 /**
- * Visual language: **a control.** Filled chip, small radius, leading status dot
- * and a trailing chevron — it is meant to read as something you press, which is
- * what separates it at a glance from a warning flag (unfilled annotation) and a
- * callback date (mono text on a stripe).
+ * Visual language: **a control**. A tinted pill with a leading status dot and a
+ * trailing chevron — meant to read as something you press, which is what
+ * separates it at a glance from a warning flag (unfilled annotation) and a
+ * callback date (mono text behind a stripe).
  *
  * A native `<select>` sits transparently on top, so changing status stays one
- * click with no custom keyboard handling to get wrong.
+ * click, keyboard support is the platform's, and there is no custom listbox to
+ * get wrong. The visible pill is `pointer-events: none` and purely a costume.
  *
- * Choosing a value *stages* it — `pending` marks the chip with a gold outline
- * until the row's Save button commits it.
+ * The chevron only appears on hover and focus. Six of these down a column, each
+ * permanently wearing a dropdown arrow, is six pieces of chrome competing with
+ * six pieces of information; the pill shape already says it is interactive, and
+ * the arrow is there the moment anyone reaches for it.
+ *
+ * Choosing a value *stages* it — `pending` marks the chip until the row's Save
+ * button commits it.
  */
 export default function StatusSelect({
   value,
@@ -31,44 +38,24 @@ export default function StatusSelect({
   onChange: (status: CallStatus) => void;
 }) {
   return (
-    // Full width of the cell, not shrink-to-fit: a column of chips that all
+    // Full width of the cell, not shrink-to-fit: a column of pills that all
     // start and end in the same place can be read straight down, where ragged
     // ones have to be read one at a time.
-    <div className="group chip-host relative flex w-full">
-      {/* `group-focus-within` on the chip: the real <select> is transparent and
+    <div className="group relative flex w-full">
+      {/* `group-focus-within` on the pill: the real <select> is transparent and
           stacked on top, so a focus ring drawn on it would be invisible. */}
       <span
-        // `chip-press` adds the two things that separate a control from a
-        // label: it brightens under the cursor and gives 0.5px on click. Both
-        // live in `globals.css` so every chip in the app presses the same way.
-        className={`chip-press pointer-events-none inline-flex w-full items-center gap-2 rounded-lg py-1.5 pl-2.5 pr-2 text-ui font-medium shadow-e1 ring-1 ring-inset group-hover:ring-2 group-focus-within:ring-2 group-focus-within:ring-accent ${
+        className={`chip pointer-events-none w-full justify-start border py-1 pl-2 pr-1.5 transition-colors group-hover:brightness-[1.08] group-focus-within:outline group-focus-within:outline-2 group-focus-within:outline-offset-2 group-focus-within:outline-[var(--c-focus)] ${
           CALL_STATUS_STYLES[value]
-        } ${pending ? "outline outline-1 outline-offset-2 outline-st-gold" : ""}`}
+        } ${pending ? "ring-1 ring-warning ring-offset-1 ring-offset-surface" : ""}`}
       >
-        {/* The dot carries a halo of its own colour. At 8px a flat dot is just
-            a coloured pixel; the bloom is what makes the statuses tellable
-            apart from the far side of a desk. */}
-        <span
-          aria-hidden="true"
-          className={`h-2 w-2 shrink-0 rounded-full shadow-[0_0_5px_-0.5px_currentColor] ${
-            value === "do_not_call" ? "bg-surface" : CALL_STATUS_DOTS[value]
-          }`}
-        />
+        <span aria-hidden="true" className="chip-dot" />
         <span className="truncate">{CALL_STATUS_SHORT_LABELS[value]}</span>
-        <svg
-          viewBox="0 0 12 12"
+        <ChevronDown
+          className="ml-auto h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60 group-focus-within:opacity-60"
+          strokeWidth={2}
           aria-hidden="true"
-          className="ml-auto h-3.5 w-3.5 shrink-0 opacity-60 transition-opacity group-hover:opacity-100"
-        >
-          <path
-            d="M2.5 4.75 6 8.25 9.5 4.75"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        />
       </span>
       <select
         value={value}
@@ -83,5 +70,19 @@ export default function StatusSelect({
         ))}
       </select>
     </div>
+  );
+}
+
+/**
+ * Re-exported so `MeetingCard` and anything else showing a *static* status can
+ * draw the identical pill without the select machinery underneath it. One
+ * definition, so a status can never look like two different things.
+ */
+export function StatusChip({ status }: { status: CallStatus }) {
+  return (
+    <span className={`chip border ${CALL_STATUS_STYLES[status]}`}>
+      <span aria-hidden="true" className="chip-dot" />
+      {CALL_STATUS_SHORT_LABELS[status]}
+    </span>
   );
 }

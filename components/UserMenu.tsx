@@ -2,28 +2,33 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown, LogOut } from "lucide-react";
 
 import { LOGIN_PATH, type SessionUser } from "@/lib/access";
 
 /**
- * The signed-in user, at the right-hand end of the nav bar.
- *
- * Built from the bar's own parts — the 8×8 bordered square of `ThemeToggle`,
- * the recessed pill of `QuickStats`, the same 13px/12.5px type ramp — so it
- * reads as another utility control rather than a component from somewhere
- * else. It sits last because it is the least-used thing up there.
+ * The signed-in user, at the right-hand end of the top bar.
  *
  * The user object is rendered by the server from the session row in Postgres
  * and passed down as a prop. Nothing here reads localStorage, and the role
  * shown is a label: no code anywhere decides what is permitted from this
  * value, so a user who edits it in devtools sees a different word and gains
  * exactly nothing.
+ *
+ * Keyboard behaviour is hand-rolled rather than borrowed from a primitives
+ * library, because there is exactly one menu in this application and it has
+ * one item. Down-arrow from the trigger opens it and lands on that item, Up
+ * and Down wrap within the menu, Escape closes and returns focus to the
+ * trigger, and Tab out closes it. That is the whole `menu` pattern for a menu
+ * this size.
  */
 export default function UserMenu({ user }: { user: SessionUser }) {
   const router = useRouter();
   const menuId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const itemRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -41,13 +46,26 @@ export default function UserMenu({ user }: { user: SessionUser }) {
         buttonRef.current?.focus();
       }
     }
+    function onFocusIn(event: FocusEvent) {
+      // Tabbing past the last item leaves the menu; it should not stay open
+      // behind whatever now has focus.
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    }
 
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
     };
+  }, [open]);
+
+  // Opening with the keyboard should land on the first item, the way every
+  // other menu on the machine does.
+  useEffect(() => {
+    if (open) itemRef.current?.focus();
   }, [open]);
 
   async function signOut() {
@@ -63,7 +81,7 @@ export default function UserMenu({ user }: { user: SessionUser }) {
     }
     // `replace`, so Back does not return to a portal page as the first entry
     // in history. `refresh` throws away the cached server render of the
-    // authenticated shell — without it, going Back can paint the old nav bar
+    // authenticated shell — without it, going Back can paint the old shell
     // (with no data behind it) before the redirect happens.
     router.replace(LOGIN_PATH);
     router.refresh();
@@ -75,55 +93,83 @@ export default function UserMenu({ user }: { user: SessionUser }) {
         ref={buttonRef}
         type="button"
         onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
         aria-expanded={open}
         aria-haspopup="menu"
         aria-controls={open ? menuId : undefined}
         title={`${user.name} — ${ROLE_LABELS[user.role]}`}
-        className={`flex h-9 items-center gap-2 rounded-lg border pl-1 pr-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
-          open
-            ? "border-line-2 bg-hover text-fg"
-            : "border-line text-fg-2 hover:border-line-2 hover:bg-hover hover:text-fg"
+        className={`flex h-8 items-center gap-1.5 rounded-md pl-1 pr-1.5 transition-colors ${
+          open ? "bg-hover text-fg" : "text-fg-2 hover:bg-hover hover:text-fg"
         }`}
       >
         <Initials name={user.name} />
-        <span className="hidden max-w-[130px] truncate text-ui font-medium lg:block">
+        <span className="hidden max-w-[120px] truncate text-caption font-medium xl:block">
           {user.name}
         </span>
-        <ChevronIcon open={open} />
+        <ChevronDown
+          className={`h-3.5 w-3.5 shrink-0 text-fg-4 transition-transform duration-150 ${
+            open ? "rotate-180" : ""
+          }`}
+          strokeWidth={2}
+          aria-hidden="true"
+        />
       </button>
 
-      {open && (
-        <div
-          id={menuId}
-          role="menu"
-          aria-label="Account"
-          className="panel-float absolute right-0 top-[calc(100%+8px)] z-40 w-60 overflow-hidden"
-        >
-          <div className="flex items-start gap-2.5 border-b border-line px-3 py-3">
+      {/*
+       * Opens on a spring from its own top-right corner, so the menu appears
+       * to grow out of the button rather than fade in over it, and closes on a
+       * short ease — an exit that springs reads as indecision.
+       *
+       * `AnimatePresence` is what makes the close animate at all: React would
+       * otherwise unmount the node the instant `open` flips.
+       */}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            id={menuId}
+            role="menu"
+            aria-label="Account"
+            initial={{ opacity: 0, scale: 0.94, y: -6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.97, y: -4, transition: { duration: 0.12 } }}
+            transition={{ type: "spring", stiffness: 520, damping: 34, mass: 0.6 }}
+            style={{ transformOrigin: "top right" }}
+            className="panel-float absolute right-0 top-[calc(100%+6px)] z-40 w-64 overflow-hidden p-1"
+          >
+          <div className="flex items-start gap-2.5 px-2 py-2">
             <Initials name={user.name} size="lg" />
-            <div className="min-w-0">
-              <p className="truncate text-ui font-semibold leading-tight text-fg">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-ui font-medium leading-tight text-fg">
                 {user.name}
               </p>
               <p className="mt-0.5 truncate text-caption leading-tight text-fg-3">
                 {user.email}
               </p>
-              <RoleBadge role={user.role} />
             </div>
+            <RoleBadge role={user.role} />
           </div>
 
+          <div aria-hidden="true" className="my-1 h-px bg-line" />
+
           <button
+            ref={itemRef}
             type="button"
             role="menuitem"
             disabled={signingOut}
             onClick={() => void signOut()}
-            className="flex w-full items-center gap-2 px-3 py-3 text-left text-ui font-medium text-fg-2 transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-ui text-fg-2 transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <SignOutIcon />
-            {signingOut ? "Signing out…" : "Logout"}
-          </button>
-        </div>
-      )}
+            <LogOut className="h-4 w-4 shrink-0 text-fg-4" strokeWidth={1.75} aria-hidden="true" />
+              {signingOut ? "Signing out…" : "Sign out"}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -131,19 +177,16 @@ export default function UserMenu({ user }: { user: SessionUser }) {
 const ROLE_LABELS = { ADMIN: "Administrator", AGENT: "Agent" } as const;
 
 /**
- * Admin is marked in the accent red — the bar's one signal colour, already
- * spent on the active tab and overdue callbacks. It is the rarer, sharper
- * state, and this is the one place in the nav where knowing which you are
- * matters.
+ * Admin is marked in the accent — the app's one signal colour. It is the rarer,
+ * sharper state, and this is the one place in the shell where knowing which you
+ * are matters.
  */
 function RoleBadge({ role }: { role: SessionUser["role"] }) {
   return (
     <span
-      // 10.5px and fg-3, matching the "You"/"Disabled"/"Planned" tag chips on
-      // the Users and Settings screens — one size for this kind of marker.
-      className={`mt-2 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider ${
+      className={`chip shrink-0 border text-[10px] uppercase tracking-wider ${
         role === "ADMIN"
-          ? "border-accent/50 bg-accent-soft text-accent"
+          ? "border-accent-line bg-accent-soft text-accent"
           : "border-line-2 text-fg-3"
       }`}
     >
@@ -165,47 +208,11 @@ function Initials({ name, size = "sm" }: { name: string; size?: "sm" | "lg" }) {
   return (
     <span
       aria-hidden="true"
-      // A bordered tile with the raised fill, not a flat square of `rail`:
-      // this is the one avatar in the app, and it should look like an object.
-      className={`flex shrink-0 items-center justify-center rounded-md border border-line-2 bg-[image:var(--c-raise-fill)] font-semibold text-fg-2 shadow-e1 ${
-        size === "lg" ? "h-9 w-9 text-ui" : "h-7 w-7 text-meta"
+      className={`flex shrink-0 items-center justify-center rounded-md border border-line-2 bg-surface font-medium text-fg-2 ${
+        size === "lg" ? "h-8 w-8 text-caption" : "h-6 w-6 text-meta"
       }`}
     >
       {initials}
     </span>
-  );
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 12 12"
-      aria-hidden="true"
-      className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
-    >
-      <path
-        d="M2.5 4.5 6 8 9.5 4.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function SignOutIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5">
-      <path
-        d="M6 2.5H3.5A1.5 1.5 0 0 0 2 4v8a1.5 1.5 0 0 0 1.5 1.5H6M10 11l3-3-3-3M13 8H6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

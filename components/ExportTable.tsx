@@ -47,7 +47,7 @@ export default function ExportTable({
 
   if (leads.length === 0) {
     return (
-      <p className="rounded-xl border border-dashed border-line-2 bg-surface px-4 py-8 text-center text-ui text-fg-3">
+      <p className="rounded-lg border border-dashed border-line-2 px-4 py-10 text-center text-ui text-fg-3">
         {emptyMessage}
       </p>
     );
@@ -100,7 +100,7 @@ export default function ExportTable({
               <tr
                 key={lead.id}
                 className={`group border-b border-line/70 last:border-0 transition-colors ${
-                  selected ? "bg-accent-soft/40" : "hover:bg-hover"
+                  selected ? "bg-accent-soft" : "hover:bg-hover"
                 }`}
               >
                 <td className="py-1.5 pl-4 pr-1">
