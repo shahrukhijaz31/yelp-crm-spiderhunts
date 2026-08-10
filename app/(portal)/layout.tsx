@@ -1,9 +1,10 @@
 import { connection } from "next/server";
 
 import AppShell from "@/components/AppShell";
+import { LeadQueueProvider } from "@/components/LeadQueueProvider";
 import { PortalStatsProvider } from "@/components/PortalStatsProvider";
 import { requireUser } from "@/lib/authz";
-import { leadStats } from "@/lib/leadDb";
+import { leadStats, leadWorkCounts } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 
 /**
@@ -36,15 +37,22 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
 
   const user = await requireUser();
   const today = todayIso();
-  const stats = await leadStats(today);
+  // Two aggregates, no rows: the nav bar's counters and the New/Called badges
+  // in the rail. Both are `count(*)` over an indexed column, and neither
+  // depends on the other, so they go together.
+  const [stats, workCounts] = await Promise.all([leadStats(today), leadWorkCounts()]);
 
   return (
     // One set of counts for the shell. Whichever screen learns a fresher set
     // replaces them, so the bar keeps moving as an agent works.
     <PortalStatsProvider initialStats={stats}>
-      <AppShell today={today} user={user}>
-        {children}
-      </AppShell>
+      {/* The queue lives out here because the control that changes it is in the
+          sidebar and the screen that answers to it is in the route. */}
+      <LeadQueueProvider initialCounts={workCounts}>
+        <AppShell today={today} user={user}>
+          {children}
+        </AppShell>
+      </LeadQueueProvider>
     </PortalStatsProvider>
   );
 }

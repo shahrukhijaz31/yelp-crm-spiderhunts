@@ -1,5 +1,5 @@
 import { apiUser } from "@/lib/authz";
-import { leadCategories, leadStats, listLeadsPage } from "@/lib/leadDb";
+import { leadCategories, leadStats, leadWorkCounts, listLeadsPage } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
 
@@ -31,6 +31,8 @@ import { parseLeadSearchParams } from "@/lib/leadQuery";
  *   totalPages  derived, but sent so the client and the server cannot disagree
  *               about which page is the last one
  *   stats       workspace-wide counts (see `leadStats`) — unfiltered by design
+ *   workCounts  how many leads are New and how many Called (`lib/workState.ts`),
+ *               likewise unfiltered — these are the tab badges
  *   categories  only when `?categories=1`, because the list changes with an
  *               import and not with a keystroke
  *
@@ -59,9 +61,13 @@ export async function GET(request: Request): Promise<Response> {
   const wantRows = url.searchParams.get("rows") !== "0";
 
   try {
-    const [page, stats, categories] = await Promise.all([
+    // `workCounts` rides along with `stats` — including on the `?rows=0`
+    // request, so saving a call outcome moves the New and Called badges on the
+    // same tick as the headline figures rather than a page load later.
+    const [page, stats, workCounts, categories] = await Promise.all([
       wantRows ? listLeadsPage(query) : Promise.resolve(null),
       leadStats(query.today),
+      leadWorkCounts(),
       wantCategories ? leadCategories() : Promise.resolve(null),
     ]);
 
@@ -78,6 +84,7 @@ export async function GET(request: Request): Promise<Response> {
             }
           : {}),
         stats,
+        workCounts,
         ...(categories ? { categories } : {}),
         source: "postgres",
       },

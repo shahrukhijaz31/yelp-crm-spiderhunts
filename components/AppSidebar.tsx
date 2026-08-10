@@ -2,19 +2,26 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowDownToLine,
   BarChart3,
   CalendarDays,
+  Inbox,
+  PhoneOutgoing,
   Settings,
-  Table2,
   Upload,
   Users,
   type LucideIcon,
 } from "lucide-react";
 
+import { useLeadQueue } from "./LeadQueueProvider";
 import { canAccess, type Role } from "@/lib/access";
+import {
+  LEAD_WORK_STATES,
+  LEAD_WORK_STATE_LABELS,
+  type LeadWorkState,
+} from "@/lib/workState";
 
 /**
  * The workspace navigation.
@@ -51,9 +58,27 @@ interface NavItem {
   icon: LucideIcon;
 }
 
+/**
+ * The two lead queues, as rail items.
+ *
+ * They used to be a segmented control inside the worklist panel. They are here
+ * instead because that is what they actually are: New and Called are not two
+ * ways of looking at one list — they are two lists, and picking between them is
+ * the same kind of decision as picking the worklist over the agenda. In the
+ * rail they are also visible from every screen, so an agent on Meetings can see
+ * how many leads are still waiting to be called.
+ *
+ * Both point at `/`; the queue itself is app state, held by `LeadQueueProvider`
+ * for the shell (see the note there on why it is not a URL parameter). The icons
+ * are what makes them survive the 60px icon rail, where labels are gone.
+ */
+const QUEUE_ICONS: Record<LeadWorkState, LucideIcon> = {
+  new: Inbox,
+  called: PhoneOutgoing,
+};
+
 /** The workspaces an agent moves between all day. Order is a day's work. */
 const WORKSPACE: NavItem[] = [
-  { href: "/", label: "Leads", icon: Table2 },
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
 ];
 
@@ -79,9 +104,29 @@ export default function AppSidebar({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { workState, setWorkState, counts } = useLeadQueue();
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  /**
+   * Pick a queue, and make sure the leads workspace is on screen to show it.
+   *
+   * `router.push` only when we are not already there: from Meetings this is a
+   * navigation, from the worklist it is a state change the open screen answers
+   * with one bounded fetch. Pushing `/` unconditionally would re-render the
+   * whole screen from the server every time an agent switched queue.
+   *
+   * `onNavigate` closes the phone drawer. `AppShell` closes it on a path
+   * change, which does not happen when the queue is switched from the worklist
+   * itself — so it is called here rather than left to the route.
+   */
+  function chooseQueue(next: LeadWorkState) {
+    setWorkState(next);
+    if (pathname !== "/") router.push("/");
+    onNavigate?.();
+  }
 
   const groups = [
     { heading: "Workspace", items: WORKSPACE },
@@ -135,6 +180,51 @@ export default function AppSidebar({
         aria-label="Workspace"
         className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-2 py-4 2xl:px-3"
       >
+        {/* --- the two lead queues ---------------------------------------- */}
+        {/* First in the rail because they are the day's work. Buttons rather
+            than links: they go to the same place and differ in what is shown
+            there, so a `href` would be a lie and a middle-click would promise
+            a second tab that opened on the wrong queue. */}
+        {canAccess(role, "/") && (
+          <div className="flex flex-col gap-1">
+            <p className="eyebrow px-2 pb-1 max-2xl:hidden">Leads</p>
+            {LEAD_WORK_STATES.map((candidate) => {
+              // Only lit while the worklist is actually on screen. On Meetings
+              // these are a way *back* to a queue, not a description of what is
+              // in front of you, and a highlight there would say otherwise.
+              const active = pathname === "/" && workState === candidate;
+              const Icon = QUEUE_ICONS[candidate];
+              const label = LEAD_WORK_STATE_LABELS[candidate];
+              const count = counts[candidate];
+
+              return (
+                <button
+                  key={candidate}
+                  type="button"
+                  onClick={() => chooseQueue(candidate)}
+                  data-active={active}
+                  aria-current={active ? "page" : undefined}
+                  // The count joins the accessible name: on the icon rail the
+                  // whole row is a tooltip, and "New, 843 leads" is the useful
+                  // form of it.
+                  title={`${label} — ${count} lead${count === 1 ? "" : "s"}`}
+                  className="nav-item w-full max-2xl:justify-center max-2xl:px-0"
+                >
+                  <Icon className="nav-icon h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                  <span className="truncate max-2xl:sr-only">{label}</span>
+                  {/* Pushed to the trailing edge and quiet: a number you glance
+                      at while scanning the rail, not a badge demanding action.
+                      Gone on the icon rail, where it would not fit and is
+                      already in the tooltip. */}
+                  <span className="nav-count max-2xl:hidden">
+                    {count.toLocaleString()}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {groups.map((group) => (
           <div key={group.heading} className="flex flex-col gap-1">
             {/* The heading is what a flat list of tabs could never say: these

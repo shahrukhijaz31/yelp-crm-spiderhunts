@@ -1,7 +1,7 @@
 // Prisma 7 exports model row types with a `Model` suffix (`LeadModel`), which
 // leaves the name `Lead` free for the app's own type below.
 import type { LeadModel as LeadRow } from "./generated/prisma/models";
-import type { Lead } from "./types";
+import { isCalled, type Lead } from "./types";
 
 /**
  * The boundary between Postgres rows and the app's `Lead` type.
@@ -84,6 +84,18 @@ export function toCreateData(lead: Lead, sourceBatch: string | null) {
     owner: lead.owner,
     url: lead.url,
     status: lead.status,
+    /*
+     * A row arriving already carrying an outcome has, by definition, been
+     * worked — so it belongs in Called rather than in the queue of leads nobody
+     * has rung. This is the same rule the backfill migration applied to the
+     * rows that were already in the table, kept here so a re-import or a demo
+     * seed cannot put a called lead back in front of an agent to call again.
+     *
+     * In practice this is null for every scraped row: `parseLeadsCsv` and the
+     * ingest endpoint both write `not_called`, so the only leads it stamps are
+     * the ones some source deliberately said were already handled.
+     */
+    firstCalledAt: isCalled(lead.status) ? new Date() : null,
     notes: lead.notes,
     callbackDate: fromIsoDate(lead.callbackDate),
     meetingTime: lead.meetingTime,

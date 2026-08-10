@@ -6,6 +6,11 @@ import {
 } from "./filters";
 import { CALL_STATUSES, type CallStatus } from "./types";
 import { WORKLIST_VIEWS, type WorklistView } from "./views";
+import {
+  DEFAULT_WORK_STATE,
+  LEAD_WORK_STATES,
+  type LeadWorkState,
+} from "./workState";
 
 /**
  * One description of "which slice of the worklist am I looking at", shared by
@@ -82,6 +87,11 @@ export const DEFAULT_SORT: LeadSort = { key: "default", direction: "asc" };
 
 /** Everything needed to answer "give me the rows for this screen". */
 export interface LeadPageQuery {
+  /**
+   * Which queue: never-called leads, or ones already worked. The outermost
+   * narrowing, applied before the view and the filters — see `lib/workState.ts`.
+   */
+  workState: LeadWorkState;
   /** The worklist tab — the *scope* being worked. */
   view: WorklistView;
   /** The filter rail's narrowing *within* that scope. */
@@ -126,6 +136,10 @@ export interface LeadPageMeta {
 export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   const params = new URLSearchParams();
   const { view, filters } = query;
+
+  // Omitted when it is the default, like every other param here — and the
+  // default is New, so the queue an agent lands on asks for nothing extra.
+  if (query.workState !== DEFAULT_WORK_STATE) params.set("work", query.workState);
 
   if (view !== "all") params.set("view", view);
 
@@ -222,6 +236,7 @@ export function parseLeadSearchParams(
   const today = params.get("today");
 
   return {
+    workState: readOneOf(params.get("work"), LEAD_WORK_STATES, DEFAULT_WORK_STATE),
     view: readOneOf(params.get("view"), WORKLIST_VIEWS, "all"),
     filters,
     sort: {

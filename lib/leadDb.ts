@@ -5,7 +5,8 @@ import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
 import type { LeadPageMeta, LeadPageQuery, LeadSort, LeadSortKey } from "./leadQuery";
 import { normalisePhone, type LeadStats } from "./leadUtils";
 import { prisma } from "./prisma";
-import { CALL_STATUSES, type CallStatus, type Lead, type LeadEditableFields } from "./types";
+import { CALL_STATUSES, isCalled, type CallStatus, type Lead, type LeadEditableFields } from "./types";
+import type { LeadWorkCounts, LeadWorkState } from "./workState";
 
 /**
  * Every database query the app makes.
@@ -82,8 +83,19 @@ function likeEscape(value: string): string {
  * so the "All leads" tab with no filters is a plain scan and not `WHERE true`.
  */
 function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
-  const { view, filters, today } = query;
+  const { workState, view, filters, today } = query;
   const clauses: Prisma.Sql[] = [];
+
+  // --- the queue (lib/workState.ts) ---
+  // The outermost narrowing, and the only one with no equivalent in
+  // `matchesFilters`: New and Called are a property of the row, not of what the
+  // agent has ticked. One column, two halves of the table, no overlap and no
+  // gap — every lead is in exactly one of them.
+  clauses.push(
+    workState === "called"
+      ? Prisma.sql`l.first_called_at IS NOT NULL`
+      : Prisma.sql`l.first_called_at IS NULL`,
+  );
 
   // --- the tab (lib/views.ts) ---
   // `callback_date <= today` covers "due today" and "overdue" in one comparison;
@@ -230,10 +242,25 @@ function sortExpression(key: Exclude<LeadSortKey, "default">): Prisma.Sql {
  * dozens of others, so without a tiebreak that is the common case, not an edge
  * one. Keeping the same tail as {@link listLeads} also means the unsorted table
  * is byte-for-byte the query it was before sorting existed.
+ *
+ * The two queues have different *defaults*, because they are read for different
+ * reasons. New keeps insertion order — a scraped batch is meant to be worked
+ * top to bottom, and that has been the worklist's order since it existed.
+ * Called is a record rather than a queue, and the question asked of it is "what
+ * did I just do", so it leads with the most recently worked: `updated_at`, the
+ * column that already tracks exactly that, rather than a second timestamp that
+ * would have to be kept in step by hand.
+ *
+ * A heading click overrides both. An explicit sort is the agent saying what
+ * they want the order to be, and it means the same thing in either queue.
  */
-function leadOrderSql(sort: LeadSort): Prisma.Sql {
+function leadOrderSql(sort: LeadSort, workState: LeadWorkState): Prisma.Sql {
   const stable = Prisma.sql`l.created_at ASC, l.id ASC`;
-  if (sort.key === "default") return stable;
+  if (sort.key === "default") {
+    return workState === "called"
+      ? Prisma.sql`l.updated_at DESC, ${stable}`
+      : stable;
+  }
 
   const direction = sort.direction === "desc" ? Prisma.sql`DESC` : Prisma.sql`ASC`;
   return Prisma.sql`${sortExpression(sort.key)} ${direction} NULLS LAST, ${stable}`;
@@ -264,7 +291,7 @@ export interface LeadPageResult extends LeadPageMeta {
  */
 export async function listLeadsPage(query: LeadPageQuery): Promise<LeadPageResult> {
   const where = leadFilterSql(query);
-  const orderBy = leadOrderSql(query.sort);
+  const orderBy = leadOrderSql(query.sort, query.workState);
   const { pageSize } = query;
 
   const [{ count: total }] = await prisma.$queryRaw<{ count: number }[]>(
@@ -368,6 +395,35 @@ export async function leadStats(today: string): Promise<LeadStats> {
 }
 
 /**
+ * The New and Called totals behind the tab badges.
+ *
+ * Deliberately unfiltered, exactly like {@link leadStats} and for the same
+ * reason: these numbers describe the workspace ("there are 843 leads nobody has
+ * called"), and an agent uses them to decide what to do next. Narrowing them by
+ * whatever is currently typed in the search box would make "how much is left"
+ * depend on what happened to be ticked, and the number would drop as they typed
+ * without anything having been worked. The *pager* is the filtered count, and
+ * it already says so — "Showing 1–20 of 42".
+ *
+ * One statement rather than two counts, so the pair can never describe two
+ * different instants and add up to the wrong total. `FILTER` reads the column
+ * once; `::int` for the same reason it appears in `listLeadsPage` — Postgres
+ * counts in bigint and `JSON.stringify` refuses to serialise one.
+ */
+export async function leadWorkCounts(): Promise<LeadWorkCounts> {
+  const [row] = await prisma.$queryRaw<{ fresh: number; called: number }[]>(
+    Prisma.sql`
+      SELECT
+        count(*) FILTER (WHERE first_called_at IS NULL)::int     AS fresh,
+        count(*) FILTER (WHERE first_called_at IS NOT NULL)::int AS called
+      FROM leads
+    `,
+  );
+
+  return { new: row?.fresh ?? 0, called: row?.called ?? 0 };
+}
+
+/**
  * Every distinct category in the table, most common first — the list the
  * filter panel offers, previously derived by `collectCategories` from the array
  * in memory.
@@ -422,6 +478,41 @@ export async function updateLeadFields(
 
   const row = await prisma.lead.findUnique({ where: { id } });
   if (!row) return null;
+
+  /*
+   * New -> Called, and only here.
+   *
+   * This is the single place a lead crosses over, hung off the save that was
+   * already happening rather than a second endpoint or a button. Opening a
+   * lead, expanding it, dialling the number or typing into a field reach no
+   * write at all, so none of them can move it — which is exactly the rule:
+   * saving a call outcome is what counts as having called.
+   *
+   * Three conditions, each doing real work:
+   *
+   *   - `"status" in changes` — a save that carries a status is an outcome
+   *     being recorded. A notes-only or callback-only PATCH is bookkeeping and
+   *     leaves an uncalled lead uncalled.
+   *   - `isCalled(...)` — every status except `not_called` is the result of a
+   *     call (see CALL_STATUS_LABELS: they read "Called - No answer" and so
+   *     on). Explicitly setting a lead *back* to "Not called" is someone
+   *     undoing a mis-click, and must not be what promotes it.
+   *   - `firstCalledAt === null` — first only. A Called lead being re-worked
+   *     keeps the instant it was first called; nothing in the app ever moves
+   *     this value or clears it, so no later edit, status change or correction
+   *     can send a lead back to the New queue.
+   *
+   * `updatedAt` is stamped by Prisma on this same write, which is what orders
+   * the Called list — so a lead just worked is at the top of it.
+   */
+  if (
+    "status" in changes &&
+    changes.status !== undefined &&
+    isCalled(changes.status) &&
+    row.firstCalledAt === null
+  ) {
+    data.firstCalledAt = new Date();
+  }
 
   return toLead(await prisma.lead.update({ where: { id }, data }));
 }

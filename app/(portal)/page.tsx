@@ -4,6 +4,7 @@ import { EMPTY_FILTERS } from "@/lib/filters";
 import { leadCategories, listLeadsPage } from "@/lib/leadDb";
 import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
+import { DEFAULT_WORK_STATE } from "@/lib/workState";
 
 /**
  * The worklist.
@@ -36,6 +37,12 @@ export default async function Home(props: PageProps<"/">) {
   const today = todayIso();
 
   const result = await listLeadsPage({
+    // The queue the screen opens on — New, the leads nobody has called. Not
+    // read from the URL for the same reason the tab and the filters are not:
+    // `Worklist` owns it from the first interaction onwards, and it is seeded
+    // with the same default here so the server renders the page the client is
+    // about to recognise as the one it already has.
+    workState: DEFAULT_WORK_STATE,
     view: "all",
     filters: EMPTY_FILTERS,
     // The first paint is always the unsorted list, for the same reason the tab
@@ -51,6 +58,10 @@ export default async function Home(props: PageProps<"/">) {
   // The full category list, for the filter panel. Read once here rather than
   // with every page: it changes when someone imports a CSV, not when an agent
   // ticks a box, and the panel needs all of them to be searchable.
+  //
+  // The New/Called counts are *not* read here: the sidebar shows them on every
+  // screen, so they are the layout's job (`LeadQueueProvider`), and reading
+  // them again would be a second identical aggregate per page load.
   const categories = await leadCategories();
 
   return (

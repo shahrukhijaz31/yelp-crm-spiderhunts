@@ -15,6 +15,7 @@ import HeadlineStrip from "./HeadlineStrip";
 import LeadTable from "./LeadTable";
 import Pagination from "./Pagination";
 import ViewTabs from "./ViewTabs";
+import { useLeadQueue } from "./LeadQueueProvider";
 import { usePortalStats } from "./PortalStatsProvider";
 import { useLeadEditor } from "./useLeadEditor";
 import { EMPTY_FILTERS, type CategoryOption, type LeadFilters } from "@/lib/filters";
@@ -29,14 +30,28 @@ import {
 } from "@/lib/leadQuery";
 import type { Lead } from "@/lib/types";
 import { WORKLIST_VIEW_HINTS, type WorklistView } from "@/lib/views";
+import {
+  DEFAULT_WORK_STATE,
+  LEAD_WORK_STATE_HINTS,
+  LEAD_WORK_STATE_LABELS,
+  type LeadWorkCounts,
+  type LeadWorkState,
+} from "@/lib/workState";
 
 /**
  * The worklist screen: headline strip → tabs → (optional breakdown) → filter
  * toolbar → table → pager.
  *
- * Two layers of narrowing, deliberately separate: the tab picks the *scope* an
- * agent is working ("everything I owe a callback"), and the toolbar filters
- * *within* it.
+ * Three layers of narrowing, deliberately separate and in that order: the queue
+ * picks *which list* is being worked (New — never called — or Called; see
+ * `lib/workState.ts`), the tab picks the *scope* within it ("everything I owe a
+ * callback"), and the toolbar filters within that. All three travel to Postgres
+ * together, so "New + Dental + page 3" is one query and one page of rows.
+ *
+ * Only the outermost of the three is not drawn here. The queue is chosen in the
+ * sidebar and read from `LeadQueueProvider`, so this screen shows it as a label
+ * and reacts to it like any other change of criteria — a new key, one bounded
+ * fetch, the old rows dimmed until it lands.
  *
  * **Both now run in Postgres.** This component used to read every lead out of
  * `LeadsProvider` and narrow the array on each render, which was fine at a few
@@ -69,6 +84,7 @@ import { WORKLIST_VIEW_HINTS, type WorklistView } from "@/lib/views";
 
 /** Identifies a request, so one already answered is not made twice. */
 function fetchKey(
+  workState: LeadWorkState,
   view: WorklistView,
   filters: LeadFilters,
   sort: LeadSort,
@@ -76,7 +92,7 @@ function fetchKey(
   page: number,
   pageSize: number,
 ): string {
-  return JSON.stringify([view, filters, sort, today, page, pageSize]);
+  return JSON.stringify([workState, view, filters, sort, today, page, pageSize]);
 }
 
 /** How long the search box may go quiet before the query is sent. */
@@ -103,6 +119,13 @@ export default function Worklist({
   serverToday: string;
 }) {
   const { stats, setStats } = usePortalStats();
+
+  // Which queue — New or Called — chosen in the sidebar and held for the whole
+  // shell, because the control and this screen are on opposite sides of the
+  // layout. It starts on the queue the server rendered the first page under.
+  // `setWorkCounts` sends the fresh numbers back the other way, so the badges
+  // in the rail move when an agent saves an outcome.
+  const { workState, setCounts: setWorkCounts } = useLeadQueue();
 
   const [view, setView] = useState<WorklistView>("all");
   const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS);
@@ -144,7 +167,7 @@ export default function Worklist({
    * by business name and staying on page 4 lands an agent in the middle of the
    * alphabet, which is not where anyone means to be after clicking a heading.
    */
-  const criteriaKey = JSON.stringify([view, appliedFilters, sort, today]);
+  const criteriaKey = JSON.stringify([workState, view, appliedFilters, sort, today]);
   const [lastCriteria, setLastCriteria] = useState(criteriaKey);
   if (lastCriteria !== criteriaKey) {
     setLastCriteria(criteriaKey);
@@ -156,6 +179,7 @@ export default function Worklist({
   // screen from fetching on mount the data it was handed.
   const settledKey = useRef(
     fetchKey(
+      DEFAULT_WORK_STATE,
       "all",
       EMPTY_FILTERS,
       DEFAULT_SORT,
@@ -167,6 +191,7 @@ export default function Worklist({
 
   useEffect(() => {
     const request = {
+      workState,
       view,
       filters: appliedFilters,
       sort,
@@ -175,6 +200,7 @@ export default function Worklist({
       pageSize,
     };
     const requestKey = fetchKey(
+      request.workState,
       request.view,
       request.filters,
       request.sort,
@@ -201,12 +227,14 @@ export default function Worklist({
         const data = (await response.json()) as LeadPageMeta & {
           leads: Lead[];
           stats: LeadStats;
+          workCounts: LeadWorkCounts;
         };
 
         // The server clamps a page past the end of the result set, so record
         // the page it actually served — otherwise the state change below reads
         // as a new request and fetches the same rows a second time.
         settledKey.current = fetchKey(
+          request.workState,
           request.view,
           request.filters,
           request.sort,
@@ -224,6 +252,7 @@ export default function Worklist({
         });
         if (data.page !== request.page) setPage(data.page);
         setStats(data.stats);
+        if (data.workCounts) setWorkCounts(data.workCounts);
         setError(null);
       } catch (caught) {
         // An aborted request is this component superseding itself, not a
@@ -239,10 +268,20 @@ export default function Worklist({
     })();
 
     return () => controller.abort();
-    // `appliedFilters` is memoised and `setStats` is stable, so these are the
-    // six values that actually describe a request plus the one way to report
-    // its counts — this does not re-run per render.
-  }, [view, appliedFilters, sort, today, effectivePage, pageSize, setStats]);
+    // `appliedFilters` is memoised and both setters are stable, so these are
+    // the seven values that actually describe a request plus the two ways of
+    // reporting its counts — this does not re-run per render.
+  }, [
+    workState,
+    view,
+    appliedFilters,
+    sort,
+    today,
+    effectivePage,
+    pageSize,
+    setStats,
+    setWorkCounts,
+  ]);
 
   /*
    * Page and page size live in the address bar so a reload, a bookmark or a
@@ -290,12 +329,19 @@ export default function Worklist({
       const params = new URLSearchParams({ rows: "0", today });
       void fetch(`/api/leads?${params}`)
         .then((response) => (response.ok ? response.json() : null))
-        .then((data: { stats: LeadStats } | null) => {
-          if (data) setStats(data.stats);
+        .then((data: { stats: LeadStats; workCounts: LeadWorkCounts } | null) => {
+          if (!data) return;
+          setStats(data.stats);
+          // The New/Called badges in the sidebar are counted the same way and
+          // on the same request, so saving a call outcome moves them here — the
+          // row itself deliberately stays put until the next load (see the
+          // route handler: a lead vanishing from under the agent who just saved
+          // it is losing your place, not a refresh).
+          if (data.workCounts) setWorkCounts(data.workCounts);
         })
         .catch((caught) => console.error("Refreshing lead counts failed:", caught));
     }, STATS_REFRESH_DEBOUNCE_MS);
-  }, [today, setStats]);
+  }, [today, setStats, setWorkCounts]);
 
   const updateLead = useLeadEditor(leads, setLeads, refreshStats);
 
@@ -361,13 +407,41 @@ export default function Worklist({
       <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* --- view switcher ------------------------------------------- */}
         <div className="panel-rail flex flex-wrap items-center justify-between gap-3 border-b border-line px-3 py-2.5">
-          <ViewTabs
-            view={view}
-            counts={counts}
-            onChange={setView}
-            breakdownOpen={breakdownOpen}
-            onToggleBreakdown={() => setBreakdownOpen((open) => !open)}
-          />
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            {/*
+             * Which queue is on screen. A label, not a control — the queue is
+             * chosen in the sidebar, and two ways to change one thing is how
+             * they start disagreeing.
+             *
+             * It is here at all because the rail does not survive every width:
+             * it collapses to icons on a laptop and off-canvas on a phone, and
+             * a worklist that cannot say whether it is showing called leads is
+             * a worklist an agent has to guess at. Reads as one phrase with the
+             * views beside it — "New · All leads" — which is exactly the scope.
+             */}
+            <span
+              className="flex shrink-0 items-center gap-2 text-ui font-semibold tracking-[-0.01em] text-fg"
+              title={LEAD_WORK_STATE_HINTS[workState]}
+            >
+              <span
+                aria-hidden="true"
+                className={`queue-dot ${
+                  workState === "new" ? "bg-st-sky" : "bg-fg-4"
+                }`}
+              />
+              {LEAD_WORK_STATE_LABELS[workState]}
+            </span>
+
+            <span aria-hidden="true" className="h-4 w-px shrink-0 bg-line" />
+
+            <ViewTabs
+              view={view}
+              counts={counts}
+              onChange={setView}
+              breakdownOpen={breakdownOpen}
+              onToggleBreakdown={() => setBreakdownOpen((open) => !open)}
+            />
+          </div>
 
           {/* What the current tab means, in one line. Beside the control
               rather than under it: it is a caption for the segment that is

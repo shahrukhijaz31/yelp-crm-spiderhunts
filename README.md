@@ -245,8 +245,9 @@ generated client lands in `lib/generated/prisma` and is gitignored.
 - **Whole-table reads** — `listLeads()`, called by the four routes whose job is
   the whole table: `/export`, `/meetings`, `/reports` and `/import`. Each mounts
   `LeadsProvider` itself; the portal layout no longer does.
-- **Aggregates** — `leadStats()` and `leadCategories()`, counted by Postgres.
-  The layout seeds the nav bar's counters from the first; the filter panel's
+- **Aggregates** — `leadStats()`, `leadCategories()` and `leadWorkCounts()`,
+  counted by Postgres. The layout seeds the nav bar's counters from the first
+  and the sidebar's New/Called counts from the third; the filter panel's
   category list comes from the second.
 - **Writes** — `useLeadEditor()` in `components/useLeadEditor.ts` is still the
   only mutation path in the UI, now shared by the worklist and by
@@ -267,10 +268,51 @@ downloading the entire database in order to display twenty of it, and the cost
 grew with every scraper run — on every route, because the *layout* did the
 loading, including `/settings`, which has no leads on it.
 
-The tab, the filter rail, the page and the page size now travel to
+The queue, the tab, the filter rail, the page and the page size now travel to
 `GET /api/leads` as query parameters (`lib/leadQuery.ts` defines the vocabulary
 and validates it) and Postgres does the narrowing. Responses are bounded by the
 page size, at most 100 rows.
+
+### New and Called
+
+**New** and **Called** are the two lead queues, and they are the top group in the
+sidebar rather than tabs inside the worklist — picking between them is the same
+kind of decision as picking the worklist over the agenda, and in the rail their
+counts are visible from every screen. The portal opens on New.
+
+The queue is held for the shell by `LeadQueueProvider` (mounted in the portal
+layout, beside `PortalStatsProvider`), because the control is in the layout and
+the screen that answers to it is in the route. It is app state rather than a URL
+parameter, like the view tabs and the filter rail and for the same reason:
+switching queues is one bounded fetch with the rows dimmed, not a whole screen
+re-rendered from the server. The worklist shows which queue it is displaying as
+a label beside the view tabs, since the rail collapses to icons on a laptop and
+off-canvas on a phone.
+
+The split itself is one column, `leads.first_called_at` (`lib/workState.ts`):
+
+- **Null is New, non-null is Called.** Nothing about it lives in React, so a
+  reload, another agent or another browser all see the same answer.
+- **It is stamped once**, in `updateLeadFields`, when a `PATCH /api/leads/:id`
+  carries a status other than `not_called` and the column is still null. Opening
+  a lead, expanding it, dialling the number or typing into a field reach no
+  write, so none of them move it — saving the outcome is what counts as having
+  called. Nothing ever clears it, so a later status change (including a
+  correction back to "Not called") leaves the lead in Called.
+- **It is not a status.** A lead is Called *and* Interested, or Called *and* No
+  answer; the eight `CallStatus` values are untouched by any of this. The older
+  `isCalled(status)` approximation still drives the headline "called" figure and
+  is deliberately not what the queues read — a corrected mis-click would
+  otherwise push an already-dialled lead back in front of an agent to redial.
+- **The queue is the outermost `WHERE`**, so search, filters, sorting and the
+  pager all operate inside it and behave exactly as they did. New keeps the
+  worklist's insertion order; Called leads with the most recently worked, which
+  is `updated_at` — a heading click overrides both.
+- **The two counts in the rail are workspace-wide**, like every other badge in
+  the shell: "how much is left to call" must not drop as an agent types in the
+  search box. The filtered number is the pager's — "Showing 1–20 of 42". They
+  are seeded by the layout from `leadWorkCounts()` and replaced by whatever came
+  back with the worklist's last request, so they move when an outcome is saved.
 
 Three consequences worth knowing about:
 

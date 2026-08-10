@@ -63,6 +63,25 @@ model Lead {
 
   // --- Agent-owned fields ---
   status       CallStatus @default(not_called)
+  /// When this lead was first *worked* — stamped the moment an agent saves a
+  /// call outcome, and never cleared or moved afterwards.
+  ///
+  /// This is what splits the worklist into New and Called, and it is a column
+  /// rather than a re-reading of `status` because the two answer different
+  /// questions. `status` is where the lead stands *now* and an agent may move
+  /// it anywhere, including back to `not_called`; this records that the call
+  /// happened at all, which is not something a later edit can un-happen. Using
+  /// `status != 'not_called'` for the split would quietly return a worked lead
+  /// to the New queue the moment someone corrected a mis-click, and the agent
+  /// would call it again.
+  ///
+  /// Null means never called. Nothing in the app writes null over a non-null
+  /// value — see `updateLeadFields`.
+  ///
+  /// *When* it was last worked is `updatedAt`, which already tracks exactly
+  /// that; the Called list orders by it rather than carrying a second
+  /// timestamp that would have to be kept in step by hand.
+  firstCalledAt DateTime? @map("first_called_at")
   notes        String     @default("")
   /// Date only: the UI works in `YYYY-MM-DD` strings and never has a time here.
   callbackDate DateTime?  @map("callback_date") @db.Date
@@ -96,6 +115,10 @@ model Lead {
   /// constraint on phone — duplicate handling is a flag (`isDuplicate`), not a
   /// database rejection, so a repeat can be surfaced rather than refused.
   @@index([status])
+  /// The New/Called split is `IS NULL` / `IS NOT NULL` on this column, and it
+  /// is now on every worklist query — including the two count queries behind
+  /// the tab badges.
+  @@index([firstCalledAt])
   @@index([callbackDate])
   @@index([sourceBatch])
   @@index([isDuplicate])
