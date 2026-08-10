@@ -24,6 +24,9 @@ import type { SessionUser } from "@/lib/access";
 
 /** Path → the name of the screen. Longest prefix wins. */
 const TITLES: Array<[string, string]> = [
+  // One lead, opened in its own tab from the worklist. Named separately so a
+  // tab sitting on a lead does not claim to be the list it came from.
+  ["/leads", "Lead workspace"],
   ["/meetings", "Meetings"],
   ["/reports", "Reports"],
   ["/export", "Export"],

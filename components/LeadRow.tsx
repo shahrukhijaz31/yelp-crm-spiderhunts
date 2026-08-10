@@ -1,98 +1,72 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowUpRight, Check, Star } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ArrowUpRight, Star } from "lucide-react";
 
-import CallbackCell from "./CallbackCell";
-import NotesCell from "./NotesCell";
-import StatusSelect from "./StatusSelect";
+import { StatusChip } from "./StatusSelect";
 import WhatsAppLink from "./WhatsAppLink";
-import { callbackState, displayWebsite, websiteHref } from "@/lib/leadUtils";
-import type { Lead, LeadEditableFields } from "@/lib/types";
-
-/** How long the green confirmation wash and the "Saved" chip stay up. */
-const SAVED_FEEDBACK_MS = 1800;
+import {
+  callbackState,
+  displayWebsite,
+  formatCallbackDate,
+  websiteHref,
+} from "@/lib/leadUtils";
+import { formatMeetingTime } from "@/lib/meetings";
+import type { Lead } from "@/lib/types";
 
 /**
- * Typographic hierarchy, in order of what an agent needs before dialling:
- *   PRIMARY    business name (`text-cell`, semibold, full-contrast ink) and
+ * One lead on the worklist — and, since the workspace exists, **one link**.
+ *
+ * This row used to be an editing surface: a status dropdown, a booking cell, a
+ * notes box and a Save/Cancel bar that appeared under whichever of them had
+ * been touched. All four moved to the lead's own page. What is left is the job
+ * the list is actually good at — deciding *which* lead to work — so the row is
+ * now read-only and every cell in it exists to answer that question:
+ *
+ *   PRIMARY    business name (`text-cell`, medium, full-contrast ink) and
  *              phone (`text-num`, mono, full-contrast ink)
  *   SECONDARY  address, website (`text-ui`, fg-2) then category (fg-3)
- *   TERTIARY   rating and owner (`text-meta`, quietest step that is still read)
+ *   TERTIARY   rating and owner (`text-meta`, quietest step still read)
  *
- * Four sizes across the row, not one: the gap between the name and everything
- * beside it is what lets an agent find a business by shape rather than by
- * reading each cell, and it is worth more than any absolute font size. The
- * sizes themselves are named steps from `globals.css`, so the whole table's
- * density is retuned there rather than cell by cell.
+ * Status and the booked date stay, as **chips rather than controls**. Dropping
+ * them entirely would have made the Called queue unreadable — a list of leads
+ * with no outcome beside them is a list you have to open one by one to sort
+ * out — and a chip is not an editing surface, which is the thing that moved.
  *
- * The working columns — status, callback, notes — are set apart by living on a
- * faintly tinted panel to the right of a hairline.
+ * **The whole row is one link, and it is a real one.** A single
+ * `<a href="/leads/…" target="_blank">` is stretched across the row by an
+ * absolutely-positioned overlay, so Ctrl/Cmd-click, middle-click and
+ * "Open in new tab" work anywhere on the row because they are the browser's,
+ * not because anything here reimplemented them. Nothing calls `preventDefault`,
+ * and there is no `window.open` or `onClick`.
  *
- * Status and notes are *staged*, not committed: editing them fills a local
- * draft and the row grows a Save/Cancel bar. Nothing reaches the central lead
- * state until Save, so a mis-click on a dropdown mid-call costs nothing.
- * The callback date is deliberately still immediate — picking a date from a
- * calendar is already a deliberate, hard-to-fat-finger action.
+ * The stacking is the whole trick, and it is worth stating because it is not
+ * obvious from the markup:
+ *
+ *   the overlay        z-6, anchored to the `<tr>`
+ *   the frozen cell    z-5 (it is `position: sticky`, see globals.css)
+ *   the real links     z-7 — phone, WhatsApp, website
+ *
+ * The overlay has to clear the frozen business cell or the business name would
+ * be the one part of the row that is not clickable. The links have to clear the
+ * overlay, or clicking a website would open the lead instead of the website.
+ * Both are one number, and both are load-bearing.
+ *
+ * The overlay is also the only link in the row that points at the lead — the
+ * name is plain text. Two anchors to the same place would be read out twice by
+ * a screen reader and would make Tab stop on the row twice.
  */
 export default function LeadRow({
   lead,
   today,
-  onUpdate,
+  href,
 }: {
   lead: Lead;
   today: string;
-  onUpdate: (id: string, changes: Partial<LeadEditableFields>) => void;
+  /** The lead's workspace, carrying the list it was opened from. */
+  href: string;
 }) {
-  /** Pending edits. `null` means the row is clean. */
-  const [draft, setDraft] = useState<Partial<LeadEditableFields> | null>(null);
-  const [justSaved, setJustSaved] = useState(false);
-  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (savedTimer.current) clearTimeout(savedTimer.current);
-    },
-    [],
-  );
-
-  // What the row displays: the draft where one exists, the lead otherwise.
-  const shownStatus = draft?.status ?? lead.status;
-  const shownNotes = draft?.notes ?? lead.notes;
   const state = callbackState(lead, today);
-
-  /**
-   * Stage a change, dropping any field that matches what is already committed —
-   * so setting a dropdown back to its original value clears the pending state
-   * instead of leaving a no-op edit to save.
-   */
-  function stage(changes: Partial<LeadEditableFields>) {
-    setJustSaved(false);
-    setDraft((current) => {
-      const merged = { ...current, ...changes };
-      const next: Partial<LeadEditableFields> = {};
-      if (merged.status !== undefined && merged.status !== lead.status) {
-        next.status = merged.status;
-      }
-      if (merged.notes !== undefined && merged.notes !== lead.notes) {
-        next.notes = merged.notes;
-      }
-      return Object.keys(next).length > 0 ? next : null;
-    });
-  }
-
-  function save() {
-    if (!draft) return;
-    onUpdate(lead.id, draft);
-    setDraft(null);
-    setJustSaved(true);
-    if (savedTimer.current) clearTimeout(savedTimer.current);
-    savedTimer.current = setTimeout(() => setJustSaved(false), SAVED_FEEDBACK_MS);
-  }
-
-  function cancel() {
-    setDraft(null);
-  }
 
   // Callback urgency is the only row-level marker now that unreachable leads
   // are filtered out at ingest. It is drawn as an inset stripe down the first
@@ -105,23 +79,13 @@ export default function LeadRow({
   // a relative path to a browser. Null means it is not a linkable address.
   const websiteUrl = lead.website ? websiteHref(lead.website) : null;
 
-  const dirty = draft !== null;
-
   return (
     <tr
-      // `focus-within` as well as `hover`: tabbing through the working columns
-      // should light the row up the same way the cursor does, or a keyboard
-      // user has no idea which lead they are about to change.
-      className={`group border-b border-line align-middle transition-colors hover:bg-hover focus-within:bg-hover ${
-        justSaved ? "row-saved" : ""
-      }`}
-      // Escape anywhere in the row abandons the pending edit.
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && dirty) {
-          event.stopPropagation();
-          cancel();
-        }
-      }}
+      // `relative` is what the row-wide link overlay is measured against, and
+      // `focus-within` as well as `hover`: tabbing to that link should light the
+      // row up the same way the cursor does, or a keyboard user cannot tell
+      // which lead they are about to open.
+      className="group relative border-b border-line align-middle transition-colors hover:bg-hover focus-within:bg-hover"
     >
       {/* pl-[18px] matches the header: 2px of urgency stripe plus 16px. */}
       <td data-urgency={urgency} className="py-2 pl-[18px] pr-3">
@@ -129,51 +93,48 @@ export default function LeadRow({
             row. Medium rather than semibold: at 15px on a 14px page, weight
             *and* size together makes the name shout, and one of the two is
             enough to make it the thing the eye lands on. */}
-        <span
-          className="block truncate text-cell font-medium tracking-[-0.012em] text-fg"
-          title={lead.name}
-        >
+        <span className="row-open-name block truncate text-cell font-medium tracking-[-0.012em] text-fg">
           {lead.name}
         </span>
         {/* Only drawn when there is something to say — an always-present empty
             line under every name would cost 16px a row across the whole list. */}
         {(lead.rating !== null || lead.owner) && (
-          <div className="mt-0.5 flex items-center gap-1.5 text-meta text-fg-3">
+          <span className="mt-0.5 flex items-center gap-1.5 text-meta text-fg-3">
             {lead.rating !== null && (
               <span className="tnum flex shrink-0 items-center gap-0.5 font-mono">
                 <Star className="h-2.5 w-2.5 fill-current" strokeWidth={0} aria-hidden="true" />
                 {lead.rating.toFixed(1)}
               </span>
             )}
-            {lead.rating !== null && lead.owner && (
-              <span aria-hidden="true">·</span>
-            )}
+            {lead.rating !== null && lead.owner && <span aria-hidden="true">·</span>}
             {lead.owner && (
               <span className="truncate" title={lead.owner}>
                 {lead.owner}
               </span>
             )}
-          </div>
+          </span>
         )}
       </td>
 
       {/* Always present: `cleanLeads` drops rows without a dialable number.
           The number is set in the mono face at full contrast — after the
           business name it is the single most-read thing in the row, because it
-          is the thing an agent is about to dial. */}
+          is the thing an agent is about to dial.
+
+          The WhatsApp glyph is lifted above the row overlay so that clicking it
+          opens a chat rather than the lead. */}
       <td className="whitespace-nowrap px-3 py-2">
         <span className="flex items-center gap-1.5">
           <span className="tnum font-mono text-num tracking-[-0.02em] text-fg">
             {lead.phone}
           </span>
-          <WhatsAppLink phone={lead.phone} leadName={lead.name} />
+          <span className="row-inner-link flex">
+            <WhatsAppLink phone={lead.phone} leadName={lead.name} />
+          </span>
         </span>
       </td>
 
-      <td
-        className="truncate px-3 py-2 text-ui text-fg-2"
-        title={lead.address}
-      >
+      <td className="truncate px-3 py-2 text-ui text-fg-2" title={lead.address}>
         {lead.address || <Flag>No address</Flag>}
       </td>
 
@@ -197,12 +158,16 @@ export default function LeadRow({
           // An external link, and marked as one. The arrow appears on hover
           // rather than always: a glyph on every row of a column is chrome,
           // and the underline already says "link".
+          //
+          // `row-inner-link` lifts it above the row's own overlay — without it
+          // this cell would open the lead workspace, which is the one thing a
+          // link labelled with a domain must not do.
           <a
             href={websiteUrl}
             target="_blank"
             rel="noopener noreferrer"
             title={websiteUrl}
-            className="group/link inline-flex max-w-full items-center gap-1 rounded-sm text-ui text-fg-2 transition-colors hover:text-fg"
+            className="row-inner-link group/link inline-flex max-w-full items-center gap-1 rounded-sm text-ui text-fg-2 transition-colors hover:text-fg"
           >
             <span className="truncate underline decoration-line-2 underline-offset-[3px] transition-colors group-hover/link:decoration-fg-4">
               {displayWebsite(lead.website)}
@@ -222,126 +187,60 @@ export default function LeadRow({
         )}
       </td>
 
-      {/* --- working columns -----------------------------------------------
-          The three an agent edits. They used to sit on a tinted `recessed`
-          panel; that tint is gone. A block of differently-coloured cells
-          running down a table is the loudest "admin template" signal there is,
-          and the one vertical hairline before Status says the same thing —
-          scraper on the left, agent on the right — without repainting a third
-          of every row.
-
-          All three are middle-aligned so the status pill, the callback date
-          and the first line of a note sit on one optical line across the row,
-          and the notes cell grows about its centre when a pending bar appears
-          under it. */}
-      <td className="border-l border-line px-2 py-2 align-middle">
-        <StatusSelect
-          value={shownStatus}
-          pending={draft?.status !== undefined}
-          onChange={(status) => stage({ status })}
-        />
+      {/* --- what the agent already decided ---------------------------------
+          Both read-only, and to the right of one vertical hairline: scraped
+          facts on the left, the workspace's answer on the right. Editing them
+          is what the lead's own page is for. */}
+      <td className="border-l border-line px-3 py-2">
+        <StatusChip status={lead.status} />
       </td>
 
-      {/* Booking stays immediate — it happens behind an explicit Book button in
-          a dialog, which is already the deliberate confirmation that the staged
-          Save/Cancel bar provides for the dropdown and the notes box. */}
-      <td className="px-2 py-2 align-middle">
-        <CallbackCell
-          lead={lead}
-          today={today}
-          onChange={(changes) => onUpdate(lead.id, changes)}
+      <td className="whitespace-nowrap px-3 py-2">
+        {/*
+         * The row's link.
+         *
+         * It lives in the last cell rather than the first, and that is not
+         * arbitrary: the business cell is `position: sticky` (it is frozen
+         * against horizontal scroll), so an overlay inside it is measured
+         * against *that cell* and can never reach the rest of the row. A
+         * non-positioned cell lets the overlay anchor to the `<tr>` instead.
+         *
+         * Its label is the whole of what this link is for, because there is no
+         * visible text inside it — the row is what you see, and this is what
+         * you click.
+         */}
+        <Link
+          href={href}
+          // A new tab, and the worklist stays exactly where it was — which is
+          // the point of the whole arrangement: the list is where an agent
+          // keeps their place, and a lead is a thing they finish and close.
+          target="_blank"
+          rel="noopener"
+          title={`${lead.name} — open in a new tab`}
+          aria-label={`Open ${lead.name} in a new tab`}
+          className="row-open-link"
         />
-      </td>
 
-      <td className="py-2 pl-2 pr-4 align-middle">
-        <NotesCell
-          value={shownNotes}
-          leadName={lead.name}
-          pending={draft?.notes !== undefined}
-          onChange={(notes) => stage({ notes })}
-        />
-
-        {dirty && (
-          <PendingBar
-            leadName={lead.name}
-            fields={[
-              ...(draft?.status !== undefined ? ["Status"] : []),
-              ...(draft?.notes !== undefined ? ["Notes"] : []),
-            ]}
-            onSave={save}
-            onCancel={cancel}
-          />
-        )}
-
-        {justSaved && (
-          <p
-            role="status"
-            className="mt-1.5 flex items-center gap-1.5 px-2 text-meta font-medium text-success"
+        {lead.callbackDate ? (
+          <span
+            className={`tnum font-mono text-caption font-medium ${
+              state === "overdue"
+                ? "text-accent"
+                : state === "today"
+                  ? "text-accent"
+                  : "text-fg-2"
+            }`}
           >
-            <Check className="h-3 w-3 shrink-0" strokeWidth={2.5} aria-hidden="true" />
-            Saved
-          </p>
+            {formatCallbackDate(lead.callbackDate, today)}
+            {lead.meetingTime && (
+              <span className="text-fg-3"> {formatMeetingTime(lead.meetingTime)}</span>
+            )}
+          </span>
+        ) : (
+          <span className="text-fg-4">—</span>
         )}
       </td>
     </tr>
-  );
-}
-
-/**
- * The confirmation bar. It only exists while a row has staged changes, names
- * which fields are pending so an agent knows what they are committing, and
- * puts Save under the cursor that just made the edit.
- */
-function PendingBar({
-  leadName,
-  fields,
-  onSave,
-  onCancel,
-}: {
-  leadName: string;
-  fields: string[];
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="mt-1.5 flex items-center gap-2 px-2">
-      {/* Compact on purpose — the notes column is narrow, so the field names
-          live in the tooltip rather than wrapping the bar onto two lines. */}
-      <span
-        title={`Unsaved changes: ${fields.join(", ").toLowerCase()}`}
-        className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-meta font-medium text-warning"
-      >
-        <span
-          aria-hidden="true"
-          className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-        />
-        <span aria-hidden="true">Unsaved</span>
-        {/* Screen readers get the full sentence; the eye gets one short word. */}
-        <span className="sr-only">
-          Unsaved changes to {fields.join(" and ").toLowerCase()}
-        </span>
-      </span>
-
-      <div className="ml-auto flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={onCancel}
-          aria-label={`Discard changes to ${leadName}`}
-          className="rounded-md px-2 py-1 text-caption font-medium text-fg-3 transition-colors hover:bg-hover hover:text-fg"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={onSave}
-          aria-label={`Save changes to ${leadName}`}
-          className="inline-flex items-center gap-1 rounded-md bg-accent-solid px-2 py-1 text-caption font-medium text-on-accent transition-colors hover:brightness-110"
-        >
-          <Check className="h-3 w-3 shrink-0" strokeWidth={2.5} aria-hidden="true" />
-          Save
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -367,4 +266,3 @@ function Flag({ children }: { children: React.ReactNode }) {
     </span>
   );
 }
-

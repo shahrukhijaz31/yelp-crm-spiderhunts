@@ -17,13 +17,14 @@ import Pagination from "./Pagination";
 import ViewTabs from "./ViewTabs";
 import { useLeadQueue } from "./LeadQueueProvider";
 import { usePortalStats } from "./PortalStatsProvider";
-import { useLeadEditor } from "./useLeadEditor";
 import { EMPTY_FILTERS, type CategoryOption, type LeadFilters } from "@/lib/filters";
+import { leadPosition, leadWorkspaceHref } from "@/lib/leadLink";
 import { todayIso, type LeadStats } from "@/lib/leadUtils";
 import {
   buildLeadSearchParams,
   DEFAULT_SORT,
   type LeadPageMeta,
+  type LeadPageQuery,
   type LeadSort,
   type LeadSortKey,
   type PageSize,
@@ -74,8 +75,14 @@ import {
  *     "overdue" one an agent asked for afterwards.
  *   - **The counts are no longer derivable here.** They come back with the page
  *     and are pushed into the portal-wide store so the nav bar agrees with the
- *     strip. After an inline edit the counts are re-read (rows deliberately are
- *     not — see the route handler).
+ *     strip. They are re-read when this tab comes back to the front, which is
+ *     when a lead worked in another tab has just changed them (rows
+ *     deliberately are not — see the route handler).
+ *
+ * **This screen no longer edits.** Status, meetings and notes moved to the
+ * lead's own page (`/leads/[id]`), which opens in a new tab from any row. What
+ * is left here is discovery — narrow the list, find the lead, open it — and the
+ * three layers of narrowing below are exactly that job.
  *
  * The first page is rendered on the server and handed in, so this screen paints
  * with data rather than with a spinner; the effect below recognises that it
@@ -98,7 +105,7 @@ function fetchKey(
 /** How long the search box may go quiet before the query is sent. */
 const SEARCH_DEBOUNCE_MS = 300;
 
-/** How long edits may keep landing before the counts are re-read. */
+/** How long a return to this tab settles before the counts are re-read. */
 const STATS_REFRESH_DEBOUNCE_MS = 400;
 
 /** Poll the clock so the "due today" view is still correct after midnight. */
@@ -305,12 +312,23 @@ export default function Worklist({
   }, [meta.page, meta.pageSize]);
 
   /*
-   * After an edit is saved, re-read the counts. The strip, the tab badges and
-   * the status tallies in the filter panel used to move on the same tick as the
-   * chip because the browser held every lead and could count them; it no longer
-   * does, so this is the closest honest equivalent — a counts-only request
-   * (`rows=0`), debounced so working quickly down a column is one round trip
-   * rather than one per row.
+   * Re-read the counts when this tab comes back to the front.
+   *
+   * This used to run after an inline save, because the row that changed was on
+   * this screen. It is not any more: a lead is worked in its own tab, and the
+   * agent returns here with a status changed, a lead moved from New to Called
+   * and every number in the strip, the tab badges and the sidebar one out of
+   * date. The moment they look at this screen again is exactly the moment those
+   * numbers have to be right, so that is when they are re-read.
+   *
+   * A counts-only request (`rows=0`) — deliberately not the rows. Re-fetching
+   * the page would re-apply the filters and could take the lead the agent just
+   * worked out from under the cursor they are about to move to the next one
+   * with; losing your place is not a refresh. The rows update on the next
+   * deliberate change of page, tab or filter.
+   *
+   * Debounced, because a browser fires `focus` and `visibilitychange` together
+   * when a tab is re-selected and that is one return, not two.
    */
   const statsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -332,18 +350,60 @@ export default function Worklist({
         .then((data: { stats: LeadStats; workCounts: LeadWorkCounts } | null) => {
           if (!data) return;
           setStats(data.stats);
-          // The New/Called badges in the sidebar are counted the same way and
-          // on the same request, so saving a call outcome moves them here — the
-          // row itself deliberately stays put until the next load (see the
-          // route handler: a lead vanishing from under the agent who just saved
-          // it is losing your place, not a refresh).
           if (data.workCounts) setWorkCounts(data.workCounts);
         })
         .catch((caught) => console.error("Refreshing lead counts failed:", caught));
     }, STATS_REFRESH_DEBOUNCE_MS);
   }, [today, setStats, setWorkCounts]);
 
-  const updateLead = useLeadEditor(leads, setLeads, refreshStats);
+  useEffect(() => {
+    function onReturn() {
+      if (document.visibilityState === "visible") refreshStats();
+    }
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [refreshStats]);
+
+  /*
+   * Where a row points.
+   *
+   * The address carries the list itself — the queue, the tab, the applied
+   * filters, the sort, the page — written with `buildLeadSearchParams`, the
+   * same function that asks the API for this page. That is what lets the
+   * workspace's "Next lead" mean *the next lead in what I was looking at*
+   * rather than the next row in the database, and it is why the context is in
+   * the URL rather than in a store: the lead opens in a new tab, which starts
+   * with no memory of this one.
+   *
+   * The ordinal is over the whole result set, not the page, so Next walks on
+   * past row twenty instead of returning to the top of it.
+   */
+  const linkQuery = useMemo<LeadPageQuery>(
+    () => ({
+      workState,
+      view,
+      filters: appliedFilters,
+      sort,
+      today,
+      page: meta.page,
+      pageSize: meta.pageSize as PageSize,
+    }),
+    [workState, view, appliedFilters, sort, today, meta.page, meta.pageSize],
+  );
+
+  const hrefFor = useCallback(
+    (lead: Lead, index: number) =>
+      leadWorkspaceHref(
+        lead.id,
+        linkQuery,
+        leadPosition(meta.page, meta.pageSize, index),
+      ),
+    [linkQuery, meta.page, meta.pageSize],
+  );
 
   // The tab badges are slices of the same workspace-wide aggregate, so they
   // need no query of their own: "needs callback" is due-today plus overdue,
@@ -496,7 +556,7 @@ export default function Worklist({
             today={today}
             sort={sort}
             onSort={cycleSort}
-            onUpdate={updateLead}
+            hrefFor={hrefFor}
             // What the rows *are*, not what they contain: the page, the size
             // and the criteria. `lastCriteria` already encodes the tab, the
             // applied filters, the sort and the date.

@@ -1394,6 +1394,299 @@ select option {
     color: var(--c-fg-3);
   }
 
+  /* ---- the lead workspace ------------------------------------------------
+   *
+   * One screen, four layers, and the layers are the design. Reading down the
+   * page: the document's own atmosphere is the ground, the identity band is a
+   * lit surface cut into it, the working column is a raised panel, and the
+   * save bar floats over all of it. Nothing here is another rounded card on a
+   * flat background — that is the shape this screen was specifically not to
+   * take.
+   */
+
+  /*
+   * The lead's own header strip.
+   *
+   * Sticky at 52px rather than 0: `AppTopBar` owns the top of the viewport and
+   * is exactly that tall, so this docks *under* it and the two read as one
+   * two-tier header instead of one covering the other. Same translucent fill
+   * and blur as the bar above, for the same reason — the content has to be
+   * seen passing beneath both.
+   */
+  .ws-topbar {
+    position: sticky;
+    top: 52px;
+    z-index: 20;
+    display: flex;
+    height: 46px;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.75rem;
+    border-bottom: 1px solid var(--c-line);
+    background: color-mix(in srgb, var(--c-base) 72%, transparent);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding-inline: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .ws-topbar {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  .ws-back {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: var(--radius-md);
+    margin-inline-start: -0.375rem;
+    padding: 0.25rem 0.375rem;
+    font-size: var(--text-caption);
+    font-weight: 500;
+    color: var(--c-fg-3);
+    transition:
+      color var(--duration-fast) var(--ease-out-soft),
+      background-color var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .ws-back:hover {
+    background: var(--c-hover);
+    color: var(--c-fg);
+  }
+
+  /*
+   * The identity band.
+   *
+   * The one place on this screen where colour arrives from behind the surface
+   * rather than being painted on it: a wide accent wash rising from the lower
+   * left and a cool one answering from the top right, at the same strengths
+   * the document's own atmosphere uses. The business name sits on top of it
+   * untouched, which is the difference between a lit band and a coloured
+   * header.
+   */
+  .ws-identity {
+    position: relative;
+    border-bottom: 1px solid var(--c-line);
+    background-color: color-mix(
+      in srgb,
+      var(--c-recessed) calc(var(--c-recessed-alpha) * 100%),
+      transparent
+    );
+    background-image:
+      radial-gradient(80% 120% at 0% 100%, var(--c-wash-accent-weak), transparent 62%),
+      radial-gradient(60% 100% at 100% 0%, var(--c-wash-cool), transparent 60%);
+  }
+
+  /* A hairline of accent along the very bottom of the band, bright in the
+     middle and gone at both ends — the same `edge-accent` treatment the app
+     uses to mark something selected, borrowed here to close the band. */
+  .ws-identity::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: -1px;
+    height: 1px;
+    pointer-events: none;
+    background: var(--c-grad-edge);
+    opacity: 0.5;
+  }
+
+  /* One section of the working column. The wrapper carries the padding so the
+     hairlines between sections run the full width of the panel. */
+  .ws-block-wrap {
+    padding: 1.125rem 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .ws-block-wrap {
+      padding: 1.25rem 1.25rem;
+    }
+  }
+
+  .ws-block {
+    display: block;
+  }
+
+  /*
+   * "Nothing here yet, and here is what to do about it."
+   *
+   * A dashed inset rather than a filled card: an empty meeting slot is an
+   * absence with an invitation in it, and a solid panel would give it the same
+   * weight as the sections that actually hold something.
+   */
+  .ws-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    border-radius: var(--radius-lg);
+    border: 1px dashed var(--c-line-2);
+    background: color-mix(in srgb, var(--c-recessed) 45%, transparent);
+    padding: 1rem 1.125rem;
+  }
+
+  /* ---- the status control ------------------------------------------------ */
+
+  /*
+   * The trigger wears the status's own colour triple — the same
+   * `CALL_STATUS_STYLES` the row chip wears, so a status is one colour decision
+   * made in `lib/types.ts` and worn in three places. Full width and 2.5rem
+   * tall: this is the most consequential control on the screen and it is sized
+   * to say so.
+   */
+  .status-trigger {
+    display: flex;
+    width: 100%;
+    height: 2.5rem;
+    align-items: center;
+    gap: 0.5rem;
+    border-width: 1px;
+    border-style: solid;
+    border-radius: var(--radius-md);
+    padding-inline: 0.75rem;
+    font-size: var(--text-ui);
+    font-weight: 500;
+    cursor: pointer;
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, currentColor 10%, transparent),
+      transparent 70%
+    );
+    transition:
+      filter var(--duration-fast) var(--ease-out-soft),
+      box-shadow var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .status-trigger:hover {
+    filter: brightness(1.08);
+  }
+
+  /* Staged but not saved. The same warning ring the row's pending chip wears,
+     so "you have not committed this yet" looks identical in both places. */
+  .status-trigger-pending {
+    box-shadow:
+      0 0 0 1px var(--c-warning),
+      0 0 0 4px color-mix(in srgb, var(--c-warning) 18%, transparent);
+  }
+
+  .status-option {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.625rem;
+    border-radius: var(--radius-md);
+    padding: 0.4375rem 0.5rem;
+    font-size: var(--text-ui);
+    color: var(--c-fg-2);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  /* One highlight, driven by the keyboard cursor — the pointer moves that
+     cursor rather than lighting a second row of its own, so there is never a
+     hovered option and a focused option at the same time. */
+  .status-option-active {
+    background: var(--c-hover);
+    color: var(--c-fg);
+  }
+
+  /* ---- the save bar ------------------------------------------------------ */
+
+  /*
+   * Floats at the foot of the viewport, centred on the workspace column.
+   *
+   * `pointer-events: none` on the wrapper and `auto` on the bar: the strip
+   * spans the width of the screen so the bar can be centred in it, and without
+   * this it would swallow clicks on everything underneath its full-width
+   * bounding box.
+   */
+  .ws-savebar-wrap {
+    position: sticky;
+    bottom: 0;
+    z-index: 25;
+    display: flex;
+    justify-content: center;
+    padding: 0 1rem 1rem;
+    pointer-events: none;
+  }
+
+  .ws-savebar {
+    display: flex;
+    width: 100%;
+    max-width: 42rem;
+    align-items: center;
+    gap: 1rem;
+    border: 1px solid var(--c-line-2);
+    border-radius: var(--radius-xl);
+    background: color-mix(in srgb, var(--c-surface) 92%, transparent);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    padding: 0.625rem 0.75rem 0.625rem 1rem;
+    box-shadow:
+      inset 0 1px 0 0 var(--c-edge-light),
+      var(--c-shadow-3);
+    pointer-events: auto;
+  }
+
+  /* ---- the activity trail ------------------------------------------------ */
+
+  /*
+   * A row is a node and a line: the connector is drawn as a pseudo-element
+   * running down from each node, and `:last-child` cuts it so the trail ends
+   * at the last event rather than trailing into the caption below it.
+   */
+  .timeline-row {
+    position: relative;
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .timeline-node {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    height: 1.375rem;
+    width: 1.375rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: 1px solid var(--c-line);
+    background: var(--c-surface);
+    color: var(--c-fg-3);
+  }
+
+  .timeline-row:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: 0.6875rem;
+    top: 1.375rem;
+    bottom: 0;
+    width: 1px;
+    background: var(--c-line);
+  }
+
+  /* ---- skeleton ---------------------------------------------------------- */
+
+  /* The one loading treatment in the app: a surface a shade above recessed,
+     breathing. No shimmer sweeping across it — a gradient travelling over a
+     dozen blocks is a screensaver, and this is on screen for 200ms. */
+  .skeleton {
+    background: var(--c-hover);
+    animation: skeleton-pulse 1.4s var(--ease-in-out-soft) infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 0.85;
+    }
+  }
+
   /* ---- queue marker (New / Called) -------------------------------------- */
 
   /*
@@ -1555,6 +1848,59 @@ select option {
 
 .row-saved > td {
   animation: saved-flash 1.6s ease-out;
+}
+
+/*
+ * The whole row is the link.
+ *
+ * One empty anchor, stretched across the `<tr>` it sits in. Everything the row
+ * shows is ordinary table markup underneath it, so nothing had to be turned
+ * into a button and no cell had to give up its own contents to be clickable.
+ *
+ * The three z-indexes here are the entire mechanism, and each is answering a
+ * specific obstruction:
+ *
+ *   6  this overlay. It has to clear the frozen business cell below, which is
+ *      `position: sticky; z-index: 5` — otherwise the business name, the one
+ *      thing an agent actually aims at, would be the only dead spot in the row.
+ *   7  `.row-inner-link`, worn by the WhatsApp glyph and the website link.
+ *      They have to clear the overlay, or a link labelled with a domain would
+ *      open the lead workspace instead of the domain.
+ *
+ * `top: 0; bottom: 0` rather than `inset: 0` with a width: the anchor is inside
+ * the last cell, so the left edge is pulled back across the row with a negative
+ * `left` of 100vw and clipped by the table — simpler is `inset: 0` against the
+ * row, which is what `position: relative` on the `<tr>` gives us.
+ */
+.row-open-link {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  /* The ring is drawn just inside the row, since a 2px offset on a full-row
+     element is clipped by the rows above and below it. */
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Anything inside a row that is a link in its own right. Above the overlay, so
+   it keeps its own destination. */
+.row-inner-link {
+  position: relative;
+  z-index: 7;
+}
+
+/* The name underlines as the pointer crosses the row — the row is the link, so
+   the row's own primary text is what says so. */
+.lead-table tbody tr:hover .row-open-name {
+  text-decoration-line: underline;
+  text-decoration-color: var(--c-line-2);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* A row you can click is a row that says so under the cursor. */
+.lead-table tbody tr:has(.row-open-link) {
+  cursor: pointer;
 }
 
 /* Warning flags are annotations, not chips: no fill, dashed underline. */
@@ -1961,7 +2307,8 @@ select option {
   .page-enter,
   .pop-in,
   .table-body-enter,
-  .row-saved > td {
+  .row-saved > td,
+  .skeleton {
     animation: none !important;
   }
 

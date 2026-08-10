@@ -4,14 +4,26 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, SearchX } from "lucide-react";
 
 import LeadRow from "./LeadRow";
 import type { LeadSort, LeadSortKey } from "@/lib/leadQuery";
-import type { Lead, LeadEditableFields } from "@/lib/types";
+import type { Lead } from "@/lib/types";
 
 /**
  * Fixed column widths. With `table-fixed` every row is exactly one line tall,
  * so the list keeps a steady vertical rhythm instead of jumping around as
  * business names and addresses wrap — which is what makes 30 rows scannable.
  *
- * `working` columns are the ones an agent edits; they sit on a tinted panel.
+ * **Three columns left this table.** Status, Callback/meeting and Notes were
+ * editing surfaces — a dropdown, a booking dialog, a textarea and a Save bar,
+ * inside a row twenty of which are on screen at once. They now live on the
+ * lead's own page, where there is room to work one lead properly, and this
+ * screen went back to the question it is actually good at: *which* lead next.
+ *
+ * Status and the booked date remain as read-only chips, because a queue of
+ * already-called leads with no outcome beside them would have to be opened one
+ * row at a time to be understood. Notes did not: a note is written to be read
+ * in full, and two truncated lines in a 13% column was never that.
+ *
+ * The table is ~300px narrower as a result, which is the difference between
+ * scrolling sideways on a laptop and not.
  *
  * There are no row checkboxes here. Choosing rows is part of exporting, and
  * exporting lives entirely in the Export view — this screen is for working the
@@ -20,35 +32,29 @@ import type { Lead, LeadEditableFields } from "@/lib/types";
 const COLUMNS: Array<{
   label: string;
   width: string;
-  working?: boolean;
   /** Present on the four scraped columns a header click can order by. */
   sortKey?: LeadSortKey;
 }> = [
-  // Widest of the scraped columns, and frozen against horizontal scroll: the
-  // business name is what an agent is scanning for, so it gets both the room
-  // for a longer name before truncation and a permanent seat on screen.
-  { label: "Business", width: "18%", sortKey: "name" },
+  // Widest of the columns, and frozen against horizontal scroll: the business
+  // name is what an agent is scanning for *and* the link into the lead's
+  // workspace, so it gets both the room for a longer name before truncation
+  // and a permanent seat on screen.
+  { label: "Business", width: "24%", sortKey: "name" },
   // Wider than the number needs: it also carries the WhatsApp glyph, and the
   // cell never wraps, so a tight column would clip one or the other.
-  { label: "Phone", width: "12%", sortKey: "phone" },
-  { label: "Address", width: "13.5%", sortKey: "address" },
-  // The two lowest-priority columns, trimmed to pay for the ones either side.
-  // Both truncate by design and carry the full value in a title tooltip.
-  { label: "Category", width: "8.5%", sortKey: "category" },
-  { label: "Website", width: "10.5%" },
-  // Sized against their *longest* content at the new type size, not their
-  // average: "Not interested" and an overdue date with its clear button are
-  // what these columns have to hold without clipping.
-  { label: "Status", width: "12%", working: true },
-  // "Callback" alone undersold it: this column is also how a meeting gets
-  // booked, and how the Meetings agenda is populated. A wider column pays for
-  // the time now shown beside the date.
-  { label: "Callback / meeting", width: "12%", working: true },
-  { label: "Notes", width: "13.5%", working: true },
+  { label: "Phone", width: "13%", sortKey: "phone" },
+  { label: "Address", width: "19%", sortKey: "address" },
+  // Truncates by design and carries the full value in a title tooltip.
+  { label: "Category", width: "11%", sortKey: "category" },
+  { label: "Website", width: "14%" },
+  // Sized against their longest content: "Not interested" as a chip, and a
+  // date with a time beside it.
+  { label: "Status", width: "11%" },
+  { label: "Booked", width: "8%" },
 ];
 
 /**
- * One page of the list, rendered in full — no virtualisation, no detail pages.
+ * One page of the list, rendered in full — no virtualisation.
  *
  * Nothing here narrows or slices: `leads` is exactly what gets drawn. Which
  * leads those are is decided by Postgres and handed down by `Worklist`, so the
@@ -60,18 +66,22 @@ export default function LeadTable({
   today,
   sort,
   onSort,
-  onUpdate,
+  hrefFor,
   datasetKey,
 }: {
   leads: Lead[];
   today: string;
   sort: LeadSort;
   onSort: (key: LeadSortKey) => void;
-  onUpdate: (id: string, changes: Partial<LeadEditableFields>) => void;
+  /**
+   * Where a row points. Supplied by `Worklist` rather than built here, because
+   * the address carries the queue, tab, filters and sort the row was found
+   * under — and this component is handed rows, not the query behind them.
+   */
+  hrefFor: (lead: Lead, index: number) => string;
   /**
    * Identifies *which* set of rows is on screen — the page, tab, sort and
-   * filters. Changing it fades the new rows in; editing a row does not change
-   * it, so an inline save never re-animates the table.
+   * filters. Changing it fades the new rows in.
    */
   datasetKey: string;
 }) {
@@ -81,7 +91,7 @@ export default function LeadTable({
     // rows scroll — the toolbar and the pager stay put, which is what makes a
     // long list feel like a window onto data rather than a long page.
     <div className="min-h-0 flex-1 overflow-auto">
-      <table className="lead-table lead-table-frozen w-full min-w-[1460px] table-fixed border-collapse">
+      <table className="lead-table lead-table-frozen w-full min-w-[1120px] table-fixed border-collapse">
         <colgroup>
           {COLUMNS.map((column) => (
             <col key={column.label} style={{ width: column.width }} />
@@ -156,12 +166,12 @@ export default function LeadTable({
          * underneath the person who just clicked it.
          */}
         <tbody key={datasetKey} className="table-body-enter">
-          {leads.map((lead) => (
+          {leads.map((lead, index) => (
             <LeadRow
               key={lead.id}
               lead={lead}
               today={today}
-              onUpdate={onUpdate}
+              href={hrefFor(lead, index)}
             />
           ))}
           {leads.length === 0 && (

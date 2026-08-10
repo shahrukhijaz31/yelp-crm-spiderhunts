@@ -333,6 +333,95 @@ export async function listLeadsPage(query: LeadPageQuery): Promise<LeadPageResul
   return { leads, total, page, pageSize, totalPages };
 }
 
+// --- the lead workspace's single-row read ------------------------------------
+
+/**
+ * One lead, plus the bookkeeping timestamps the workspace's activity trail is
+ * built from.
+ *
+ * Deliberately *not* folded into `Lead`. That type is the shape the table, the
+ * export, the CSV parser and the filters all speak, and three timestamps that
+ * exactly one screen reads would have to be carried by every one of them —
+ * including the CSV path, where `createdAt` has no meaning until the row is
+ * written. So the workspace asks for what it needs and the shared type is left
+ * alone.
+ *
+ * Every field here already exists in Postgres (see schema.prisma). Nothing was
+ * added to record activity: the timeline is assembled from facts the table has
+ * always kept, which is why it can only say what actually happened.
+ */
+export interface LeadDetail {
+  lead: Lead;
+  /** ISO instants — the browser formats them in the reader's own timezone. */
+  createdAt: string;
+  updatedAt: string;
+  /** When the lead was first worked, or null while it is still New. */
+  firstCalledAt: string | null;
+  /** Which import the row arrived in, when it came from one. */
+  sourceBatch: string | null;
+}
+
+/** One lead by id, or null when the id does not name one. */
+export async function getLeadDetail(id: string): Promise<LeadDetail | null> {
+  const row = await prisma.lead.findUnique({ where: { id } });
+  if (!row) return null;
+
+  return {
+    lead: toLead(row),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    firstCalledAt: row.firstCalledAt?.toISOString() ?? null,
+    sourceBatch: row.sourceBatch,
+  };
+}
+
+/**
+ * The lead that comes after this one **in the list the agent opened it from**.
+ *
+ * This is what makes "Next lead" a workflow rather than a shuffle. The query is
+ * the worklist's own — the same queue, tab, filters and sort, built by the same
+ * two functions {@link listLeadsPage} uses — so an agent working New + Dental
+ * is handed the next New dental lead and never a stranger from the far end of
+ * the table.
+ *
+ * `position` is the 1-based ordinal the current lead occupied when its tab was
+ * opened, carried in the URL. It exists for one case, and that case is the
+ * common one: saving a call outcome moves a lead from New to Called, so by the
+ * time anyone presses Next the current lead is **no longer in the set** and
+ * `WHERE id = current` finds nothing. The rows behind it have each shifted up
+ * by one, which means the lead now standing at the old ordinal is exactly the
+ * one that was next. `coalesce` picks that up when the direct lookup fails, and
+ * the whole thing stays one statement.
+ *
+ * Null when there is nothing after it — the end of the queue, a filter that no
+ * longer matches anything, or an id that was never in this list to begin with.
+ */
+export async function nextLeadId(
+  query: LeadPageQuery,
+  currentId: string,
+  position: number | null,
+): Promise<string | null> {
+  const where = leadFilterSql(query);
+  const orderBy = leadOrderSql(query.sort, query.workState);
+
+  const rows = await prisma.$queryRaw<{ id: string }[]>(
+    Prisma.sql`
+      WITH ordered AS (
+        SELECT l.id, row_number() OVER (ORDER BY ${orderBy}) AS rn
+        FROM leads l ${where}
+      )
+      SELECT id FROM ordered
+      WHERE rn = coalesce(
+        (SELECT rn + 1 FROM ordered WHERE id = ${currentId}),
+        ${position}::bigint
+      )
+      LIMIT 1
+    `,
+  );
+
+  return rows[0]?.id ?? null;
+}
+
 /**
  * The headline numbers, counted by Postgres instead of by the browser.
  *
