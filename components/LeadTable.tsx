@@ -67,6 +67,7 @@ export default function LeadTable({
   sort,
   onSort,
   hrefFor,
+  onOpen,
   datasetKey,
 }: {
   leads: Lead[];
@@ -79,6 +80,12 @@ export default function LeadTable({
    * under — and this component is handed rows, not the query behind them.
    */
   hrefFor: (lead: Lead, index: number) => string;
+  /**
+   * Open a row as a window over this list. The index is what the workspace
+   * walks with — Previous and Next are positions in the page of rows this
+   * table was handed, not a second query.
+   */
+  onOpen: (index: number) => void;
   /**
    * Identifies *which* set of rows is on screen — the page, tab, sort and
    * filters. Changing it fades the new rows in.
@@ -172,6 +179,7 @@ export default function LeadTable({
               lead={lead}
               today={today}
               href={hrefFor(lead, index)}
+              onOpen={() => onOpen(index)}
             />
           ))}
           {leads.length === 0 && (

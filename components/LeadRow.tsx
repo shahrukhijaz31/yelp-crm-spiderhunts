@@ -34,11 +34,12 @@ import type { Lead } from "@/lib/types";
  * out — and a chip is not an editing surface, which is the thing that moved.
  *
  * **The whole row is one link, and it is a real one.** A single
- * `<a href="/leads/…" target="_blank">` is stretched across the row by an
- * absolutely-positioned overlay, so Ctrl/Cmd-click, middle-click and
- * "Open in new tab" work anywhere on the row because they are the browser's,
- * not because anything here reimplemented them. Nothing calls `preventDefault`,
- * and there is no `window.open` or `onClick`.
+ * `<a href="/leads/…">` is stretched across the row by an absolutely-positioned
+ * overlay. A plain click is intercepted and opens the lead as a window over
+ * this list — the fast path, and the reason the list keeps its place — while
+ * Ctrl/Cmd-click, middle-click and "Open in new tab" are left to the browser
+ * and follow the href to the lead's own address. Both behaviours come out of
+ * one anchor, which is why this is not a div with a handler.
  *
  * The stacking is the whole trick, and it is worth stating because it is not
  * obvious from the markup:
@@ -60,11 +61,14 @@ export default function LeadRow({
   lead,
   today,
   href,
+  onOpen,
 }: {
   lead: Lead;
   today: string;
   /** The lead's workspace, carrying the list it was opened from. */
   href: string;
+  /** Open the lead over this list, without leaving it. */
+  onOpen: () => void;
 }) {
   const state = callbackState(lead, today);
 
@@ -211,13 +215,29 @@ export default function LeadRow({
          */}
         <Link
           href={href}
-          // A new tab, and the worklist stays exactly where it was — which is
-          // the point of the whole arrangement: the list is where an agent
-          // keeps their place, and a lead is a thing they finish and close.
-          target="_blank"
-          rel="noopener"
-          title={`${lead.name} — open in a new tab`}
-          aria-label={`Open ${lead.name} in a new tab`}
+          onClick={(event) => {
+            // A plain click opens the workspace *over* this list, so the page,
+            // the search, the filters and the scroll position an agent built up
+            // are still there when they close it. Nothing here reimplements the
+            // browser: a Ctrl/Cmd/Shift click, a middle click or "open in new
+            // tab" is left alone and follows the href to the lead's own
+            // address, which is why this is still a real link with a real
+            // target rather than a div with a handler.
+            if (
+              event.defaultPrevented ||
+              event.button !== 0 ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.shiftKey ||
+              event.altKey
+            ) {
+              return;
+            }
+            event.preventDefault();
+            onOpen();
+          }}
+          title={`${lead.name} — open workspace`}
+          aria-label={`Open ${lead.name}`}
           className="row-open-link"
         />
 

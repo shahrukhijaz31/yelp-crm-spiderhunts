@@ -1629,6 +1629,139 @@ select option {
     pointer-events: auto;
   }
 
+  /* ---- the lead window --------------------------------------------------- */
+
+  /*
+   * The workspace as a window within the worklist window.
+   *
+   * The governing idea is that the agent has not gone anywhere. A lead used to
+   * open in a browser tab of its own, which meant leaving the list — and the
+   * list is where the work is organised. So this is drawn as a *surface lifted
+   * off the list*, not as a page that replaced it: the rows stay visible around
+   * and behind it, dimmed and blurred but plainly still there.
+   *
+   * Everything about the treatment follows from that one sentence. The window
+   * is large enough (90% of the viewport, to a ceiling) to be the thing you are
+   * working in, and short enough of the edges that the list frames it. It has a
+   * hairline and a real shadow, because layer 6 is the only layer in this app
+   * that casts one. Its corners are 12px — enough to read as an object, not so
+   * much that it looks like a toy.
+   */
+  .lead-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(0.5rem, 3vh, 2rem) clamp(0.5rem, 3vw, 2.5rem);
+  }
+
+  /*
+   * Dimmed *and* blurred, at the strength that leaves the table legible as
+   * shape but not as data. A scrim that only darkens leaves eight columns of
+   * text perfectly readable behind the window, and a list you can read is a
+   * list people try to click.
+   */
+  .lead-overlay-scrim {
+    position: absolute;
+    inset: 0;
+    cursor: default;
+    background: color-mix(in srgb, var(--c-base) 62%, transparent);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+
+  .lead-overlay-panel {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    /* 90% of the viewport on a laptop, capped so it does not sprawl on a
+       large display — past ~1400px the workspace stops gaining anything and
+       the eye starts travelling between two far-apart columns. */
+    width: min(90vw, 1400px);
+    height: min(90vh, 1000px);
+    max-height: 100%;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--c-line-2);
+    border-radius: var(--radius-xl);
+    /* Nearly opaque. The atmosphere behind the app still shows through a
+       little, which is what keeps it in the same material as the panels
+       underneath — but text in a window has to sit on a floor, not on a view
+       of the table below it. */
+    background: color-mix(in srgb, var(--c-surface) 97%, transparent);
+    box-shadow:
+      inset 0 1px 0 0 var(--c-edge-light),
+      var(--c-shadow-3);
+  }
+
+  /* On a phone the surrounding list is not a useful frame — there is no room
+     for it — so the window takes what it can get. */
+  @media (max-width: 640px) {
+    .lead-overlay-panel {
+      width: 100%;
+      height: 100%;
+    }
+  }
+
+  /* The window's three bands: a docked header, one scrolling body, a docked
+     foot. Only the middle one moves, which is what keeps the business name,
+     the phone number and the Save/Next pair on screen throughout a call. */
+  .ws-window {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .ws-window-scroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    /* Stops the worklist behind the window from scrolling on when this body
+       reaches its end. Losing the list's place is the one thing the window
+       exists to prevent. */
+    overscroll-behavior: contain;
+  }
+
+  .ws-window-foot {
+    display: flex;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    border-top: 1px solid var(--c-line);
+    background: var(--c-rail);
+    padding: 0.625rem 0.75rem;
+  }
+
+  @media (min-width: 640px) {
+    .ws-window-foot {
+      padding-inline: 1.25rem;
+    }
+  }
+
+  .ws-window-close {
+    display: inline-flex;
+    height: 1.75rem;
+    width: 1.75rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    color: var(--c-fg-3);
+    cursor: pointer;
+    transition:
+      color var(--duration-fast) var(--ease-out-soft),
+      background-color var(--duration-fast) var(--ease-out-soft);
+  }
+
+  .ws-window-close:hover {
+    background: var(--c-hover);
+    color: var(--c-fg);
+  }
+
   /* ---- the activity trail ------------------------------------------------ */
 
   /*

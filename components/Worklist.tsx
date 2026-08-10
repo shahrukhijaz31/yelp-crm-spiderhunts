@@ -9,9 +9,12 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { AnimatePresence } from "framer-motion";
+
 import Breakdown from "./Breakdown";
 import FilterToolbar from "./FilterToolbar";
 import HeadlineStrip from "./HeadlineStrip";
+import LeadOverlay from "./LeadOverlay";
 import LeadTable from "./LeadTable";
 import Pagination from "./Pagination";
 import ViewTabs from "./ViewTabs";
@@ -148,6 +151,34 @@ export default function Worklist({
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+  /*
+   * Which lead is open over this list, and where in the list it was.
+   *
+   * `null` is the list on its own, which is what this screen shows for most of
+   * its life. When it is not null it carries all three of the things the window
+   * needs, and each is there for a reason:
+   *
+   *   id      what the window fetches and holds. Kept *beside* the index rather
+   *           than looked up through it, so a row set that changes underneath
+   *           the window — a page turn, a midnight re-read — can never swap the
+   *           lead an agent is mid-call on for whatever now occupies row 4.
+   *   name    known from the row that was clicked, so the window's header is
+   *           real before its request lands.
+   *   index   where Previous and Next step from.
+   */
+  const [open, setOpen] = useState<{ id: string; name: string; index: number } | null>(
+    null,
+  );
+
+  /*
+   * Next at the bottom of a page, or Previous at the top of one, has to cross
+   * a page boundary — and the rows for the next page are not here yet. This
+   * records which end of the incoming page to open, and the fetch below acts on
+   * it once the rows land. A ref, not state: nothing renders differently for
+   * the 100ms it is set, and it must not itself cause a render.
+   */
+  const pendingEdge = useRef<"first" | "last" | null>(null);
+
   // "Today" comes from the server for the SSR/hydration render, then from the
   // agent's own clock — so callback highlighting uses their timezone, and a
   // portal left open overnight rolls over on its own. When the two differ the
@@ -251,6 +282,18 @@ export default function Worklist({
         );
 
         setLeads(data.leads);
+
+        // A page turned from inside the workspace: open the row the agent was
+        // walking towards, at whichever end of the new page it arrived at. An
+        // empty page ends the walk and leaves the list on screen.
+        if (pendingEdge.current) {
+          const edge = pendingEdge.current;
+          pendingEdge.current = null;
+          const index = edge === "first" ? 0 : data.leads.length - 1;
+          const row = data.leads[index];
+          setOpen(row ? { id: row.id, name: row.name, index } : null);
+        }
+
         setMeta({
           page: data.page,
           pageSize: data.pageSize,
@@ -369,15 +412,16 @@ export default function Worklist({
   }, [refreshStats]);
 
   /*
-   * Where a row points.
+   * Where a row points **when the browser opens it rather than this screen**.
    *
-   * The address carries the list itself — the queue, the tab, the applied
-   * filters, the sort, the page — written with `buildLeadSearchParams`, the
-   * same function that asks the API for this page. That is what lets the
-   * workspace's "Next lead" mean *the next lead in what I was looking at*
-   * rather than the next row in the database, and it is why the context is in
-   * the URL rather than in a store: the lead opens in a new tab, which starts
-   * with no memory of this one.
+   * A plain click opens the workspace over this list and never uses this
+   * address. A Ctrl/Cmd-click, a middle click or "open in new tab" does, and
+   * lands on `/leads/[id]` with no worklist behind it — so the address still
+   * has to carry the list itself: the queue, the tab, the applied filters, the
+   * sort, the page, written with `buildLeadSearchParams`, the same function
+   * that asks the API for this page. That is what lets the *page* frame's
+   * "Next lead" mean the next lead in what the agent was looking at, in a tab
+   * that started with no memory of this one.
    *
    * The ordinal is over the whole result set, not the page, so Next walks on
    * past row twenty instead of returning to the top of it.
@@ -403,6 +447,83 @@ export default function Worklist({
         leadPosition(meta.page, meta.pageSize, index),
       ),
     [linkQuery, meta.page, meta.pageSize],
+  );
+
+  /* ----------------------------------------------------------------------
+   * The lead window
+   *
+   * Opening one costs a single request for a single lead (see `LeadOverlay`);
+   * this screen is not re-queried, re-rendered from the server or navigated
+   * away from, which is the whole point. Everything below is bookkeeping about
+   * *which* row is open — no data is fetched here.
+   * -------------------------------------------------------------------- */
+
+  const openLead = useCallback(
+    (index: number) => {
+      const lead = leads[index];
+      if (lead) setOpen({ id: lead.id, name: lead.name, index });
+    },
+    [leads],
+  );
+
+  const closeLead = useCallback(() => setOpen(null), []);
+
+  /*
+   * Previous and Next walk the list the agent is actually looking at — the
+   * same queue, tab, filters, sort and page — because they walk the rows this
+   * screen already fetched. At the edge of a page they turn it and open the row
+   * that continues the sequence, which is the only case that touches the
+   * network, and it fetches a page of the list rather than anything extra.
+   */
+  const stepTo = useCallback(
+    (delta: 1 | -1) => {
+      setOpen((current) => {
+        if (!current) return current;
+
+        const next = current.index + delta;
+        const lead = leads[next];
+        if (lead) return { id: lead.id, name: lead.name, index: next };
+
+        // Off the end of this page. Ask for the neighbouring one and let the
+        // fetch open whichever row continues the walk; the window stays on the
+        // current lead until those rows land.
+        const target = meta.page + delta;
+        if (target < 1 || target > meta.totalPages) return current;
+        pendingEdge.current = delta === 1 ? "first" : "last";
+        setPage(target);
+        return current;
+      });
+    },
+    [leads, meta.page, meta.totalPages],
+  );
+
+  const hasPrev = open !== null && (open.index > 0 || meta.page > 1);
+  const hasNext =
+    open !== null && (open.index < leads.length - 1 || meta.page < meta.totalPages);
+
+  const goPrev = useCallback(() => stepTo(-1), [stepTo]);
+  const goNext = useCallback(() => stepTo(1), [stepTo]);
+
+  /*
+   * A lead saved in the window, written back into the row behind it.
+   *
+   * The row is replaced, not re-fetched: the response to the PATCH *is* the
+   * saved row, so the chip in the table and the window on top of it cannot
+   * disagree about a status the agent just committed. The rows are deliberately
+   * left otherwise alone — re-running the query here could take the lead out
+   * from under the window mid-call, since saving an outcome is exactly what
+   * moves a lead out of the New queue. The counts are a different matter: they
+   * are what the strip and the sidebar badges show, and they are wrong the
+   * moment a save lands.
+   */
+  const handleSaved = useCallback(
+    (saved: Lead) => {
+      setLeads((current) =>
+        current.map((row) => (row.id === saved.id ? saved : row)),
+      );
+      refreshStats();
+    },
+    [refreshStats],
   );
 
   // The tab badges are slices of the same workspace-wide aggregate, so they
@@ -557,6 +678,7 @@ export default function Worklist({
             sort={sort}
             onSort={cycleSort}
             hrefFor={hrefFor}
+            onOpen={openLead}
             // What the rows *are*, not what they contain: the page, the size
             // and the criteria. `lastCriteria` already encodes the tab, the
             // applied filters, the sort and the date.
@@ -575,6 +697,34 @@ export default function Worklist({
           onPageSizeChange={changePageSize}
         />
       </section>
+
+      {/*
+       * The lead, as a window over this screen.
+       *
+       * Rendered here, inside the worklist, and that placement is the feature:
+       * everything above stays mounted while it is open, so closing it does not
+       * restore the page, the search, the filters, the tab and the scroll
+       * position — it simply stops covering them.
+       *
+       * `AnimatePresence` is only for the way out. Without it the window would
+       * vanish on the frame it is closed, which after a 200ms entrance reads as
+       * a crash rather than a dismissal.
+       */}
+      <AnimatePresence>
+        {open && (
+          <LeadOverlay
+            key="lead-overlay"
+            leadId={open.id}
+            leadName={open.name}
+            positionLabel={`${leadPosition(meta.page, meta.pageSize, open.index)} of ${meta.total}`}
+            serverToday={today}
+            onClose={closeLead}
+            onPrev={hasPrev ? goPrev : null}
+            onNext={hasNext ? goNext : null}
+            onSaved={handleSaved}
+          />
+        )}
+      </AnimatePresence>
     </main>
   );
 }

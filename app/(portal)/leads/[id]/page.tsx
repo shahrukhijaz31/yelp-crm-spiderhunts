@@ -66,13 +66,14 @@ export default async function LeadPage(props: PageProps<"/leads/[id]">) {
       detail={detail}
       initialRecording={recording}
       serverToday={query.today}
-      backHref={leadsListHref(query)}
-      nextHref={
-        nextId
+      nav={{
+        variant: "page",
+        backHref: leadsListHref(query),
+        nextHref: nextId
           ? // The next lead inherits the same list, one ordinal further along.
             leadWorkspaceHref(nextId, query, position === null ? null : position + 1)
-          : null
-      }
+          : null,
+      }}
     />
   );
 }
