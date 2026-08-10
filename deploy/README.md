@@ -185,6 +185,68 @@ whose file is missing streams a `410`, and a file with no row is unreachable.
 ssh leadportal 'du -sh /var/lib/leadportal/recordings'   # how much audio is stored
 ```
 
+### Backups
+
+`/usr/local/bin/leadportal-backup`, from `deploy/leadportal-backup`, installed by
+`provision.sh` and run from root's crontab at **03:45 nightly** — staggered off
+the 03:30 spideychat and leadquasar dumps so three `pg_dump`s never hit the one
+shared cluster at once.
+
+```
+/var/backups/leadportal/
+  daily/    leadportal_<stamp>.sql.gz              14 kept
+            leadportal-recordings_<stamp>.tar.gz   only when there is audio
+  weekly/   Sunday's dump, promoted                8 kept
+  last-status   `ok <epoch> <file>` or `fail <epoch> <reason>`
+```
+
+It **verifies rather than assumes**: `gzip -t`, a minimum size, and a check that
+`leads`, `users`, `sessions`, `meeting_recordings` and `password_resets` are
+each actually in the dump. A truncated file, a mid-stream permissions error or a
+connection to an empty database all produce a plausible-looking `.gz`, and the
+day you find out is the day you needed it. A failed run leaves no file and
+writes the reason to `last-status`.
+
+Recordings go in a **separate** archive alongside the dump, not instead of it: a
+row in `meeting_recordings` with no file streams a 410, and a file with no row
+is unreachable, so the pair has to be restored together.
+
+```bash
+ssh leadportal 'cat /var/backups/leadportal/last-status'      # did last night work
+ssh leadportal 'tail -5 /var/log/leadportal-backup.log'
+ssh leadportal '/usr/local/bin/leadportal-backup'             # run one now
+```
+
+**Restore — rehearse into a scratch database first.** A backup that has never
+been restored is a guess. This was run against the first real dump: 1,964 leads,
+2 users, 2 sessions, matching live exactly.
+
+```bash
+sudo -u postgres createdb lead_portal_restore_test
+gunzip -c /var/backups/leadportal/daily/<file>.sql.gz \
+  | sudo -u postgres psql -d lead_portal_restore_test
+sudo -u postgres psql -d lead_portal_restore_test -c 'SELECT count(*) FROM leads;'
+sudo -u postgres dropdb lead_portal_restore_test
+```
+
+For the real thing, stop both slots first so nothing writes mid-restore:
+
+```bash
+systemctl stop leadportal@blue leadportal@green
+gunzip -c <file>.sql.gz | sudo -u postgres psql -d lead_portal
+tar -xzf <recordings>.tar.gz -C /var/lib/leadportal/recordings
+systemctl start leadportal@blue
+```
+
+> **This is on the same disk as the database.** It answers a bad migration or a
+> mistaken `DELETE` — the likely cases — but not the loss of the machine. The
+> hook for that is already there: put `OFFSITE_CMD` in
+> `/etc/leadportal-backup.env` and it receives each archive path as `$1`, e.g.
+> `OFFSITE_CMD='rclone copy "$1" b2:leadportal-backups/'`. A failure there is
+> logged and never fails the run. Contabo's own Auto Backup is a separate paid
+> add-on in their panel, and being a whole-box image it is a blunt tool for
+> recovering one table across ten sites.
+
 ### Migration safety
 
 Migrations run *before* the traffic flip, so old code briefly runs against the
@@ -260,14 +322,21 @@ Recorded because each would have recurred:
    the person who made it (the `users` table now makes that possible), and
    there is no password self-service — an administrator resets one from the
    Users screen.
-2. **No database backups.** Nothing here sets any up, and the cluster holds four
-   other products' data. Worth a cron job:
-   `sudo -u postgres pg_dump lead_portal | gzip > /root/backups/lead_portal-$(date +%F).sql.gz`
+2. ~~**No database backups.**~~ **Fixed.** Nightly dump + verification +
+   rotation; see "Backups" above.
 3. **A failed save reverts silently** in the UI apart from a console error.
-4. **Emptying the table is a database operation, on purpose.** Both write paths
-   merge, and nothing in the UI can wipe the worklist. To start genuinely fresh:
-   `sudo -u postgres psql -d lead_portal -c 'TRUNCATE leads;'` — take a
-   `pg_dump` first. `POST /api/leads/upload` used to replace the entire table,
-   which made an ordinary second import a silent data-loss event; it merges now.
+4. **Nothing can empty the worklist, and that is deliberate.** Both write paths
+   merge, and no UI action wipes the table. `POST /api/leads/upload` used to
+   replace the entire table, which made an ordinary second import a silent
+   data-loss event; it merges now.
+
+   This section used to end with a ready-to-paste one-line SQL statement for
+   wiping the whole `leads` table to "start fresh". **It has been removed on
+   purpose and should not be reinstated.** There is no routine reason to destroy
+   1,900+ rows of call history — the worklist is filtered, not emptied — and an
+   irreversible command sitting in a deploy guide is the likeliest way this
+   database ever gets wiped by accident. Anyone with a real reason to do it can
+   write the statement themselves, and should take a manual `leadportal-backup`
+   run and confirm it landed first.
 5. **The root password was shared in plaintext** during setup and should be
    rotated. Key auth is installed, so nothing depends on it.

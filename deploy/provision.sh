@@ -218,6 +218,52 @@ log "Installing systemd template unit"
 install -m 644 "$(dirname "$0")/leadportal@.service" /etc/systemd/system/leadportal@.service
 systemctl daemon-reload
 
+# --- Nightly backup ---------------------------------------------------------
+# Installed here rather than left as undocumented server state, so a rebuilt box
+# gets it without anyone remembering. Idempotent: the script is overwritten each
+# run (it is version-controlled, so that is the point) and the crontab line is
+# only appended when absent.
+#
+# 03:45 is chosen to clear the 03:30 spideychat and leadquasar dumps — three
+# concurrent pg_dumps against the one shared cluster is avoidable load, and this
+# box has been saturated by careless scheduling before (see the CONCURRENCY note
+# on the leadquasar warm-pages job).
+log "Installing nightly backup"
+install -m 750 "$(dirname "$0")/leadportal-backup" /usr/local/bin/leadportal-backup
+install -d -m 700 "/var/backups/${SITE}/daily" "/var/backups/${SITE}/weekly"
+
+CRON_LINE="45 3 * * * /usr/local/bin/${SITE}-backup >> /var/log/${SITE}-backup.log 2>&1"
+if crontab -l 2>/dev/null | grep -qF "${SITE}-backup"; then
+  log "Backup cron entry already present, leaving it alone"
+else
+  # Read-modify-write of root's crontab. `crontab -l` exits non-zero when no
+  # crontab exists at all, hence the `|| true` — without it this would install
+  # an empty crontab over the ten jobs the other sites depend on.
+  { crontab -l 2>/dev/null || true; \
+    printf '\n# Lead Portal: nightly Postgres dump + recordings, 14 daily / 8 weekly.\n'; \
+    printf '%s\n' "$CRON_LINE"; } | crontab -
+  log "Added nightly backup at 03:45"
+fi
+
+# Keep the log from growing without bound, the same way every other site here
+# does it.
+cat > "/etc/logrotate.d/${SITE}-backup" <<EOF
+/var/log/${SITE}-backup.log {
+  weekly
+  rotate 8
+  compress
+  missingok
+  notifempty
+  create 640 root adm
+  # /var/log is root:syslog 775 on this box, and logrotate refuses to rotate
+  # inside a directory writable by a group other than its own user unless told
+  # explicitly whose privileges to use. Without this the rule silently skips
+  # every run and the log grows forever. \`su root root\` is what cloud-init and
+  # postgresql-common already use here.
+  su root root
+}
+EOF
+
 # --- Basic Auth ------------------------------------------------------------
 HTPASSWD="/etc/nginx/${SITE}.htpasswd"
 if [[ ! -f "$HTPASSWD" ]]; then

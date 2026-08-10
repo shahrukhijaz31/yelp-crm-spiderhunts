@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+#
+# Nightly backup for the Lead Portal.  Installed at /usr/local/bin/leadportal-backup
+#
+# The application and PostgreSQL share one box, and until this script existed
+# there was no copy of the lead database anywhere — while three neighbouring
+# sites on the same machine (spideychat, leadquasar, saleshandy) each had one.
+# This closes that gap and is deliberately modelled on `spideychat-backup`, so
+# there is one backup idiom on this server rather than two.
+#
+# The likeliest loss here is not hardware. It is a mistaken write: a bad
+# migration applied by deploy.sh before the traffic flip, or a `DELETE`/
+# `TRUNCATE` typed against the wrong database. Both are silent and both are
+# noticed later, which is why retention is a fortnight of dailies plus two
+# months of weeklies rather than "keep the newest". If the only copy is last
+# night's, it already contains the damage.
+#
+# Call recordings are included, in a separate archive. A row in
+# `meeting_recordings` whose audio file is missing streams a 410, and a file
+# with no row is unreachable — so the two have to be restored as a pair or
+# neither is worth much.
+
+set -uo pipefail
+
+ENV_FILE="${LEADPORTAL_ENV:-/etc/leadportal/env}"
+ROOT="${LEADPORTAL_BACKUP_DIR:-/var/backups/leadportal}"
+DAILY_KEEP="${DAILY_KEEP:-14}"
+WEEKLY_KEEP="${WEEKLY_KEEP:-8}"
+STATUS="$ROOT/last-status"
+
+log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
+die() {
+  log "FAILED: $1"
+  mkdir -p "$ROOT" 2>/dev/null
+  printf 'fail %s %s\n' "$(date +%s)" "$1" > "$STATUS" 2>/dev/null
+  exit 1
+}
+
+[ -r "$ENV_FILE" ] || die "cannot read $ENV_FILE"
+
+# Read straight out of the app's own env file so the credentials live in exactly
+# one place and a password rotation cannot leave this script behind. Parsed
+# rather than sourced: the value is quoted there precisely because the `&`
+# before `connection_limit` is a shell control operator, and sourcing it
+# unquoted once sent the assignment into a background subshell where it silently
+# never reached the parent (deploy/README.md, "Bugs found and fixed").
+#
+# `cut -d= -f2-` keeps everything after the FIRST `=`, so the `=` inside
+# `?schema=public&connection_limit=8` survives intact.
+DB_URL=$(grep -m1 '^DATABASE_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
+[ -n "$DB_URL" ] || die "DATABASE_URL missing from $ENV_FILE"
+
+RECORDINGS=$(grep -m1 '^RECORDINGS_DIR=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
+
+# ---- Prisma's URL is not libpq's URL ------------------------------------------
+# `DATABASE_URL` carries query parameters Prisma invented and libpq has never
+# heard of, and libpq does not ignore what it does not recognise — it hard-fails
+# with `invalid URI query parameter: "schema"`. Handing the app's connection
+# string to pg_dump verbatim therefore backs up nothing at all.
+#
+# So keep only the parameters libpq actually defines and drop the rest.
+# Allow-list, not deny-list: a new Prisma parameter appearing in a future
+# connection string would silently break a deny-list, and a backup is the wrong
+# place to find that out.
+PG_BASE="${DB_URL%%\?*}"
+PG_QUERY=""
+SCHEMA=""
+if [ "$DB_URL" != "$PG_BASE" ]; then
+  OLD_IFS="$IFS"; IFS='&'
+  for param in ${DB_URL#*\?}; do
+    case "${param%%=*}" in
+      sslmode|sslrootcert|sslcert|sslkey|connect_timeout|application_name|target_session_attrs)
+        PG_QUERY="${PG_QUERY:+$PG_QUERY&}$param" ;;
+      schema)
+        SCHEMA="${param#*=}" ;;
+      *) ;;   # schema is handled above; connection_limit, pool_timeout,
+              # pgbouncer and friends are Prisma pool settings with no meaning
+              # to a one-shot dump.
+    esac
+  done
+  IFS="$OLD_IFS"
+fi
+PG_URL="${PG_BASE}${PG_QUERY:+?$PG_QUERY}"
+
+# `public` is already pg_dump's default and restricting to it would drop
+# anything living outside it, so only a non-default schema is worth pinning.
+DUMP_ARGS=()
+if [ -n "$SCHEMA" ] && [ "$SCHEMA" != "public" ]; then
+  DUMP_ARGS+=(-n "$SCHEMA")
+fi
+
+mkdir -p "$ROOT/daily" "$ROOT/weekly" || die "cannot create $ROOT"
+chmod 700 "$ROOT" "$ROOT/daily" "$ROOT/weekly"
+
+STAMP=$(date +%Y%m%d_%H%M%S)
+OUT="$ROOT/daily/leadportal_$STAMP.sql.gz"
+TMP="$OUT.partial"
+
+log "dumping to $(basename "$OUT")"
+if ! pg_dump --no-owner --no-privileges "${DUMP_ARGS[@]}" "$PG_URL" 2>/tmp/leadportal-pgdump.err | gzip -9 > "$TMP"; then
+  head -3 /tmp/leadportal-pgdump.err | while read -r l; do log "  pg_dump: $l"; done
+  rm -f "$TMP"
+  die "pg_dump errored"
+fi
+
+# ---- verify before trusting it ------------------------------------------------
+# A dump that exists is not a dump that works. A truncated file, a permissions
+# error mid-stream, or a connection to an empty database all produce a
+# plausible-looking .gz that is only discovered to be worthless on the day it
+# is needed.
+gzip -t "$TMP" 2>/dev/null || { rm -f "$TMP"; die "archive is corrupt (gzip -t)"; }
+
+SIZE=$(stat -c %s "$TMP")
+[ "$SIZE" -gt 2048 ] || { rm -f "$TMP"; die "archive suspiciously small (${SIZE}B)"; }
+
+# The tables that would matter most on a bad day must actually be in there.
+# These are the `@@map` names from prisma/schema.prisma, not the camelCase
+# Prisma model names.
+for t in leads users sessions meeting_recordings password_resets; do
+  zgrep -qE "CREATE TABLE (public\.)?$t\b" "$TMP" || { rm -f "$TMP"; die "table '$t' missing from dump"; }
+done
+
+# A dump with the schema but no rows restores cleanly and returns an empty
+# portal, which is the failure this catches.
+zgrep -qE '^COPY (public\.)?leads\b' "$TMP" || log "WARNING no COPY block for leads — is the table empty?"
+
+mv "$TMP" "$OUT"
+log "ok $(du -h "$OUT" | cut -f1)"
+
+# ---- call recordings ----------------------------------------------------------
+# Skipped entirely when the directory is unset, missing or empty, so this stays
+# silent until there is actually audio to protect.
+if [ -n "${RECORDINGS:-}" ] && [ -d "$RECORDINGS" ] && [ -n "$(ls -A "$RECORDINGS" 2>/dev/null)" ]; then
+  AOUT="$ROOT/daily/leadportal-recordings_$STAMP.tar.gz"
+  if tar -czf "$AOUT.partial" -C "$RECORDINGS" . 2>/dev/null && gzip -t "$AOUT.partial" 2>/dev/null; then
+    mv "$AOUT.partial" "$AOUT"
+    log "recordings ok $(du -h "$AOUT" | cut -f1)"
+  else
+    rm -f "$AOUT.partial"
+    log "WARNING recordings archive failed (database backup is fine)"
+  fi
+fi
+
+# ---- rotation -----------------------------------------------------------------
+# Sunday's dump is promoted to the weekly set before the daily window trims it.
+if [ "$(date +%u)" = "7" ]; then
+  cp -f "$OUT" "$ROOT/weekly/$(basename "$OUT")" && log "promoted to weekly"
+fi
+
+prune() { # dir, glob, keep
+  local dir="$1" glob="$2" keep="$3" removed=0
+  # shellcheck disable=SC2012
+  for old in $(ls -1t "$dir"/$glob 2>/dev/null | tail -n +$((keep + 1))); do
+    rm -f "$old" && removed=$((removed + 1))
+  done
+  [ "$removed" -gt 0 ] && log "pruned $removed $glob from $(basename "$dir") (keeping $keep)"
+  return 0
+}
+prune "$ROOT/daily"  'leadportal_*.sql.gz'            "$DAILY_KEEP"
+prune "$ROOT/daily"  'leadportal-recordings_*.tar.gz' "$DAILY_KEEP"
+prune "$ROOT/weekly" 'leadportal_*.sql.gz'            "$WEEKLY_KEEP"
+
+# ---- optional offsite ---------------------------------------------------------
+# This directory is on the same disk as the database, so it answers a mistaken
+# write but not the loss of the machine. Drop a command in
+# /etc/leadportal-backup.env as OFFSITE_CMD to ship it elsewhere; it receives
+# the archive path as $1. e.g.
+#   OFFSITE_CMD='rclone copy "$1" b2:leadportal-backups/'
+# A failure here is logged but never fails the run — the local backup is good
+# and a broken remote should not make it look otherwise.
+if [ -r /etc/leadportal-backup.env ]; then
+  # shellcheck disable=SC1091
+  . /etc/leadportal-backup.env
+  if [ -n "${OFFSITE_CMD:-}" ]; then
+    if sh -c "$OFFSITE_CMD" _ "$OUT" >/dev/null 2>&1; then
+      log "offsite copy ok"
+    else
+      log "WARNING offsite copy failed (local backup is fine)"
+    fi
+  fi
+fi
+
+DAILIES=$(ls -1 "$ROOT/daily"/leadportal_*.sql.gz 2>/dev/null | wc -l)
+WEEKLIES=$(ls -1 "$ROOT/weekly"/leadportal_*.sql.gz 2>/dev/null | wc -l)
+printf 'ok %s %s\n' "$(date +%s)" "$(basename "$OUT")" > "$STATUS"
+log "done — $DAILIES daily, $WEEKLIES weekly, $(du -sh "$ROOT" | cut -f1) total"
+
+# Restore, for when it matters. Rehearse into a scratch database FIRST — a
+# backup that has never been restored is a guess:
+#
+#   sudo -u postgres createdb lead_portal_restore_test
+#   gunzip -c /var/backups/leadportal/daily/<file>.sql.gz \
+#     | sudo -u postgres psql -d lead_portal_restore_test
+#   sudo -u postgres psql -d lead_portal_restore_test -c 'SELECT count(*) FROM leads;'
+#   sudo -u postgres dropdb lead_portal_restore_test
+#
+# For the real thing, stop both slots first so nothing writes mid-restore:
+#
+#   systemctl stop leadportal@blue leadportal@green
+#   gunzip -c <file>.sql.gz | sudo -u postgres psql -d lead_portal
+#   tar -xzf <recordings>.tar.gz -C /var/lib/leadportal/recordings
+#   systemctl start leadportal@blue
