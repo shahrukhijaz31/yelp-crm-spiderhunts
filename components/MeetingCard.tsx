@@ -96,7 +96,7 @@ export default function MeetingCard({
               {formatMeetingTime(meeting.time)}
             </span>
           ) : (
-            <span className="block text-caption text-fg-4">No time</span>
+            <span className="block text-caption text-fg-3">No time</span>
           )}
           {overdue && (
             <span className="mt-1 block text-meta font-medium text-accent">

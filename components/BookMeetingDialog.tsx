@@ -149,7 +149,7 @@ export default function BookMeetingDialog({
           />
         </label>
 
-        <p className="mt-2.5 text-meta leading-relaxed text-fg-4">
+        <p className="mt-2.5 text-meta leading-relaxed text-fg-3">
           {time ? (
             <>
               Books a meeting and marks this lead{" "}

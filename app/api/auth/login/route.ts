@@ -132,6 +132,26 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // The forced-password-change state, enforced at the door.
+  //
+  // In practice this is unreachable: issuing a reset code replaces the account's
+  // hash with one nobody holds the preimage of, so a user in this state has no
+  // password that verifies and never gets this far. It is checked anyway,
+  // because "must change password" should be a property of *signing in* rather
+  // than a side effect of how the reset happened to be implemented — if some
+  // future path ever sets the flag on an account whose password still works,
+  // the flag will still mean what it says.
+  if (user.requirePasswordChange) {
+    return Response.json(
+      {
+        error: "password_change_required",
+        message:
+          "Your password was reset. Use the reset code from your administrator to set a new one.",
+      },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   try {
     await createSession(user.id, {
       userAgent: request.headers.get("user-agent"),

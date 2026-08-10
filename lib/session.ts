@@ -216,6 +216,26 @@ export async function destroyAllSessionsFor(userId: string): Promise<void> {
 }
 
 /**
+ * Sign a user out everywhere *except* the browser making this request.
+ *
+ * For changing your own password, which must not log you out of the tab you
+ * are typing in — but must end every other session, because "I think someone
+ * else knows my password" is the most common reason anyone changes one, and a
+ * change that leaves the intruder signed in achieves nothing.
+ *
+ * Falls back to ending every session if the current cookie cannot be read: the
+ * safe direction to fail is fewer live sessions, not more.
+ */
+export async function destroyOtherSessionsFor(userId: string): Promise<void> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+
+  await prisma.session.deleteMany({
+    where: token ? { userId, tokenHash: { not: hashToken(token) } } : { userId },
+  });
+}
+
+/**
  * Housekeeping: drop rows whose clocks have run out.
  *
  * Called opportunistically from the login route rather than on a timer — this

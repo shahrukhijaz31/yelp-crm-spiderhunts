@@ -240,6 +240,36 @@
   --c-recessed-alpha: 0.55;
 
   /*
+   * WASH HUES — the colours used to *tint a surface*, as opposed to the ones
+   * used to draw text on it.
+   *
+   * These exist because the two jobs pull in opposite directions on a light
+   * theme. `--c-warning` there is #7d5106, a dark brown chosen to clear 4.5:1
+   * as text on a pale tint; painting a radial gradient with it produces mud.
+   * A wash needs the *bright* end of the hue on both themes, and then differs
+   * only in how much of it is used.
+   *
+   * On dark the wash hue and the text hue happen to coincide, because adding a
+   * bright colour to a near-black surface both tints it and stays legible. The
+   * separate token still earns its place: it is what makes the light theme's
+   * override a one-line change rather than a hunt through every gradient.
+   */
+  --c-wash-accent: color-mix(in srgb, #ea5a5f 16%, transparent);
+  --c-wash-accent-weak: color-mix(in srgb, #ea5a5f 6%, transparent);
+  --c-wash-warning: color-mix(in srgb, #e5a23f 15%, transparent);
+  --c-wash-cool: color-mix(in srgb, #6b7ce8 14%, transparent);
+
+  /*
+   * What a panel does to lift off the page.
+   *
+   * On dark that is a hairline of light along its top edge — the sheet
+   * catching the field above it. On light there is no light to catch (a white
+   * highlight on a white card is nothing), so the same job is done by a
+   * contact shadow instead. One token, two lighting models.
+   */
+  --c-panel-shadow: inset 0 1px 0 0 var(--c-edge-light);
+
+  /*
    * Gradient accents. Used on the primary action, the active nav item, the
    * selected segment and the urgent KPI — never as a fill for a whole panel.
    */
@@ -265,8 +295,9 @@
     color-mix(in srgb, var(--c-accent) 65%, transparent) 75%,
     transparent
   );
-  /* The soft illumination a surface picks up under the cursor. */
-  --c-spotlight: color-mix(in srgb, var(--c-accent) 9%, transparent);
+  /* The soft illumination a surface picks up under the cursor. A wash, so it
+     follows the wash hue rather than the text hue. */
+  --c-spotlight: var(--c-wash-accent-weak);
 }
 
 :root[data-theme="light"] {
@@ -283,16 +314,30 @@
    * The page grey is a real grey (#f6f7f8), not a wash of the accent and not
    * white — a white page under white cards has no hierarchy at all.
    */
-  --c-base: #f6f7f8;
-  --c-recessed: #f1f2f4;
+  /*
+   * The page is deeper than it was, and that is the single most important
+   * change in this theme.
+   *
+   * It used to be #f6f7f8 — three points off white. That left nowhere for
+   * anything to go: the cards on it were white, so there was no separation to
+   * see, and the ambient washes had no luminance headroom, so a 7% red over it
+   * landed on #f5ebec and was invisible. Depth on a light theme does not come
+   * from putting light *on* the page; it comes from the page being a tinted
+   * ground and the surfaces on it being genuinely white.
+   *
+   * So: `base` drops to a definite cool grey, `surface` stays pure white, and
+   * the gap between them is what does the work the shadows cannot.
+   */
+  --c-base: #e8ebf2;
+  --c-recessed: #eef1f6;
   --c-surface: #ffffff;
-  --c-rail: #fafbfc;
-  --c-hover: #f3f4f6;
+  --c-rail: #f7f9fc;
+  --c-hover: #f0f2f7;
 
   /* Sharper than dark needs: on light, the hairline does most of the work of
      separating, because the shadows are nearly nothing. */
-  --c-line: #e5e7ea;
-  --c-line-2: #d2d6db;
+  --c-line: #dde1e9;
+  --c-line-2: #c5cbd6;
 
   /*
    * Near-black, very slightly cool. Same rule as dark: fg-3 is the floor for
@@ -307,12 +352,12 @@
    */
   --c-fg: #16181d;
   --c-fg-2: #474d57;
-  --c-fg-3: #656b73;
-  --c-fg-4: #7d838b;
+  --c-fg-3: #5b6068;
+  --c-fg-4: #787e86;
 
   /* The same signal red, darkened so it holds 4.5:1 on white. */
-  --c-accent: #cf2b31;
-  --c-accent-2: #ad1f25;
+  --c-accent: #bd191f;
+  --c-accent-2: #a4171d;
   --c-accent-3: #f0b4b6;
   --c-accent-soft: #fdf2f2;
   --c-accent-line: #f3c9cb;
@@ -378,39 +423,69 @@
    * actually looks like. Tighter than dark's, too — on light, a large soft
    * shadow reads as a smudge rather than as height.
    */
-  --c-shadow-1: 0 1px 2px rgb(16 24 40 / 0.05);
-  --c-shadow-2: 0 4px 12px -4px rgb(16 24 40 / 0.1), 0 1px 2px rgb(16 24 40 / 0.05);
-  --c-shadow-3: 0 16px 40px -12px rgb(16 24 40 / 0.16), 0 2px 8px -4px rgb(16 24 40 / 0.06);
+  /* Stronger than before, because on a light theme the shadow is the *only*
+     thing lifting a white card off a grey ground — there is no edge highlight
+     to help it. Still ink-tinted rather than black, which is what keeps it
+     from going grey and muddy. */
+  --c-shadow-1: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 1px rgb(16 24 40 / 0.04);
+  --c-shadow-2: 0 4px 12px -3px rgb(16 24 40 / 0.12), 0 1px 2px rgb(16 24 40 / 0.06);
+  --c-shadow-3: 0 18px 44px -12px rgb(16 24 40 / 0.2), 0 3px 10px -4px rgb(16 24 40 / 0.08);
   --c-shadow-hover:
-    0 10px 28px -12px rgb(16 24 40 / 0.18),
-    0 0 20px -12px color-mix(in srgb, var(--c-accent) 30%, transparent);
+    0 12px 30px -10px rgb(16 24 40 / 0.22),
+    0 0 22px -10px color-mix(in srgb, var(--c-accent) 26%, transparent);
 
   --c-focus: color-mix(in srgb, var(--c-accent) 45%, transparent);
 
-  /* On light the top edge catches near-white and is nearly opaque; the
-     recessed shadow is ink-tinted rather than black, like every other shadow
-     in this theme. */
+  /* On light there is no edge highlight worth drawing — white on white is
+     nothing — so the panel lifts with a contact shadow instead (see
+     `--c-panel-shadow` below). The recessed shadow is ink-tinted rather than
+     black, like every other shadow in this theme. */
   --c-edge-light: rgb(255 255 255 / 0.85);
   --c-edge-dark: rgb(16 24 40 / 0.07);
+  --c-panel-shadow: var(--c-shadow-1);
 
   /*
    * ATMOSPHERE, light.
    *
-   * Roughly a third of the dark theme's strength, and the base is warmed off
-   * pure white rather than cooled. The failure mode here is not "too subtle",
-   * it is "the page looks stained" — a 12% red wash that reads as ambient
-   * light over charcoal reads as a printing error over off-white. These sit
-   * at 4–7% and the eye reads them as warmth, not as colour.
+   * These were 4–7% and effectively invisible, on the theory that a strong
+   * wash over off-white would read as a stain. The theory was right about the
+   * risk and wrong about the numbers, because it ignored where the colour
+   * lands: over a *near-white* page a 7% tint moves three channels by eight
+   * points and disappears, while the same 7% over charcoal moves them by
+   * fifty and reads as light.
+   *
+   * Two things fix it together, and neither works alone:
+   *
+   *   the ground got darker (`--c-base` above), giving the wash somewhere to
+   *   go, and
+   *
+   *   the hues got *lighter and more saturated* — #f4636a rather than the
+   *   #cf2b31 used for accent text. A dark hue at high alpha over white goes
+   *   grey-brown; a bright hue at high alpha over white stays chromatic.
+   *
+   * Tuned so the per-channel shift matches the dark theme's within a few
+   * points, which is the only honest definition of "the same amount of
+   * atmosphere in both themes".
    */
-  --c-atmo-warm: color-mix(in srgb, #e5484d 7%, transparent);
-  --c-atmo-cool: color-mix(in srgb, #4a5bd8 5%, transparent);
-  --c-atmo-deep: color-mix(in srgb, #6478d8 4%, transparent);
+  --c-atmo-warm: color-mix(in srgb, #f4636a 14%, transparent);
+  --c-atmo-cool: color-mix(in srgb, #6b7ce8 10%, transparent);
+  --c-atmo-deep: color-mix(in srgb, #8b93d8 5%, transparent);
   /* Surfaces stay much more opaque on light. White is the brightest thing in
-     the theme and the hierarchy depends on it staying white; letting a red
-     wash through a card at 30% would cost more than the depth is worth. */
-  --c-surface-alpha: 0.88;
-  --c-rail-alpha: 0.8;
-  --c-recessed-alpha: 0.75;
+     the theme and the hierarchy depends on it staying white: the colour is
+     carried by the ground *around* the cards, not through them. */
+  --c-surface-alpha: 0.93;
+  --c-rail-alpha: 0.86;
+  --c-recessed-alpha: 0.82;
+
+  /*
+   * Wash hues, light. Brighter than the text hues and used at roughly twice
+   * the alpha — which lands them in the same visual place the dark theme's
+   * washes occupy, rather than the same *numeric* place.
+   */
+  --c-wash-accent: color-mix(in srgb, #f4636a 20%, transparent);
+  --c-wash-accent-weak: color-mix(in srgb, #f4636a 9%, transparent);
+  --c-wash-warning: color-mix(in srgb, #f7b23c 28%, transparent);
+  --c-wash-cool: color-mix(in srgb, #7b8cf0 18%, transparent);
 
   --c-grad-accent: linear-gradient(
     140deg,
@@ -431,7 +506,7 @@
     color-mix(in srgb, var(--c-accent) 45%, transparent) 75%,
     transparent
   );
-  --c-spotlight: color-mix(in srgb, var(--c-accent) 6%, transparent);
+  --c-spotlight: var(--c-wash-accent-weak);
 }
 
 @theme inline {
@@ -917,7 +992,7 @@ select option {
       var(--c-surface) calc(var(--c-surface-alpha) * 100%),
       transparent
     );
-    box-shadow: inset 0 1px 0 0 var(--c-edge-light);
+    box-shadow: var(--c-panel-shadow);
     /*
      * Translucent but deliberately *not* blurred, unlike the shell and the
      * overlays. Two reasons, and the first is a bug:
@@ -993,7 +1068,7 @@ select option {
     transform: translateY(-2px);
     border-color: var(--c-line-2);
     box-shadow:
-      inset 0 1px 0 0 var(--c-edge-light),
+      var(--c-panel-shadow),
       var(--c-shadow-hover);
   }
 
@@ -1176,7 +1251,7 @@ select option {
   .nav-item[data-active="true"] {
     background-image: linear-gradient(
       90deg,
-      color-mix(in srgb, var(--c-accent) 16%, transparent),
+      var(--c-wash-accent),
       transparent 62%
     );
     background-color: var(--c-hover);
@@ -1269,9 +1344,10 @@ select option {
     border-radius: var(--radius-md);
     background-image: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--c-accent) 10%, var(--c-surface)),
-      var(--c-surface)
+      var(--c-wash-accent-weak),
+      transparent 70%
     );
+    background-color: var(--c-surface);
     box-shadow:
       inset 0 1px 0 0 var(--c-edge-light),
       0 1px 2px -1px var(--c-edge-dark),
@@ -1337,7 +1413,7 @@ select option {
 .lead-table tbody tr:focus-within {
   background-image: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--c-accent) 5%, transparent),
+    var(--c-wash-accent-weak),
     transparent 60%
   );
 }
@@ -1398,7 +1474,7 @@ select option {
 .lead-table-frozen td:first-child[data-urgency="overdue"] {
   background-image: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--c-accent) 13%, transparent),
+    var(--c-wash-accent),
     transparent 68%
   );
   box-shadow:
@@ -1556,24 +1632,118 @@ select option {
   }
 }
 
-/* Light theme: the same composition at a third of the strength, over warm
-   white rather than charcoal. */
+/*
+ * Light theme.
+ *
+ * Not "the same thing, fainter" — that is what it was, and at 7–9% over a
+ * near-white panel it was a blank rectangle. The composition is identical; the
+ * hues are the bright wash reds and indigos rather than the dark text ones,
+ * and the alphas are roughly double, because a tint over white has to travel
+ * further to be seen than a tint over charcoal.
+ *
+ * The base is dropped to `recessed` and then washed, so the brand column is
+ * *darker* than the form column beside it. On dark the split reads because the
+ * brand side is lit; on light it reads because the brand side is shaded. Same
+ * composition, inverted lighting — which is the whole difference between a
+ * designed light theme and an inverted dark one.
+ */
 :root[data-theme="light"] .auth-brand {
+  background-color: var(--c-recessed);
   background-image:
     radial-gradient(
       90% 70% at 5% 100%,
-      color-mix(in srgb, var(--c-accent) 9%, transparent),
+      color-mix(in srgb, #f4636a 30%, transparent),
       transparent 62%
     ),
     radial-gradient(
       80% 65% at 95% 0%,
-      color-mix(in srgb, #4a5bd8 7%, transparent),
+      color-mix(in srgb, #6b7ce8 24%, transparent),
       transparent 60%
+    ),
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, #8b93d8 14%, transparent),
+      transparent 55%
     );
 }
 
 :root[data-theme="light"] .auth-brand::after {
-  opacity: 0.5;
+  background:
+    radial-gradient(
+      38% 38% at 30% 70%,
+      color-mix(in srgb, #f4636a 26%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      34% 34% at 72% 28%,
+      color-mix(in srgb, #7b8cf0 22%, transparent),
+      transparent 60%
+    );
+}
+
+/* The grid has to be darker than the wash it sits on, or it vanishes into it.
+   `line-2` rather than `line`, and at full opacity. */
+:root[data-theme="light"] .auth-brand::before {
+  background-image:
+    linear-gradient(to right, var(--c-line-2) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--c-line-2) 1px, transparent 1px);
+  opacity: 0.45;
+}
+
+/* The halo is a *glow*. On light there is nothing to glow against, so it
+   becomes a soft coloured shadow under the mark instead — the same job done
+   the way light actually behaves on paper. */
+:root[data-theme="light"] .auth-halo::before {
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, #f4636a 34%, transparent),
+    transparent 72%
+  );
+}
+
+/*
+ * The form side of the split.
+ *
+ * The same composition as `.auth-brand`, mirrored and turned down to roughly a
+ * quarter of the strength: the accent sits at the *bottom right* where the
+ * brand panel puts it bottom left, and the cool tone answers from the top. So
+ * the two halves read as one room lit from both ends rather than an atmospheric
+ * panel bolted to a blank one.
+ *
+ * Deliberately much quieter than the left, and deliberately static — no grid,
+ * no bloom, no animation. This half has three form fields and an error banner
+ * to hold, and anything moving behind an input someone is typing a password
+ * into is a distraction with no upside. It is also the only half that exists
+ * below `lg`, where it becomes the whole page.
+ */
+.auth-form {
+  position: relative;
+  background-color: var(--c-base);
+  background-image:
+    radial-gradient(
+      85% 60% at 100% 100%,
+      color-mix(in srgb, var(--c-accent) 9%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      70% 55% at 100% 0%,
+      color-mix(in srgb, #4a5bd8 7%, transparent),
+      transparent 58%
+    );
+}
+
+:root[data-theme="light"] .auth-form {
+  background-image:
+    radial-gradient(
+      85% 60% at 100% 100%,
+      color-mix(in srgb, var(--c-accent) 5%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      70% 55% at 100% 0%,
+      color-mix(in srgb, #4a5bd8 4%, transparent),
+      transparent 58%
+    );
 }
 
 /*

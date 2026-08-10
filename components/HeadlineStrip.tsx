@@ -83,17 +83,25 @@ export default function HeadlineStrip({ stats }: { stats: LeadStats }) {
   );
 }
 
-/** Where each segment's light comes from, and what colour it is. */
+/**
+ * Where each segment's light comes from, and what colour it is.
+ *
+ * The wash reads `--c-wash-*`, not `--c-warning` / `--c-accent`. Those two are
+ * *text* colours, and on the light theme they are deliberately dark — #7d5106
+ * for warning — so painting a gradient with one produced a muddy beige rather
+ * than a warm glow. The wash tokens are the bright end of each hue in both
+ * themes, at whatever alpha that theme needs. See `globals.css`.
+ */
 const TONES = {
   neutral: { wash: "", numeral: "text-fg", icon: "text-fg-4", dot: "" },
   warm: {
-    wash: "before:bg-[radial-gradient(14rem_9rem_at_100%_0%,color-mix(in_srgb,var(--c-warning)_16%,transparent),transparent_70%)]",
+    wash: "before:bg-[radial-gradient(15rem_10rem_at_100%_0%,var(--c-wash-warning),transparent_72%)]",
     numeral: "text-warning",
     icon: "text-warning",
     dot: "bg-warning",
   },
   danger: {
-    wash: "before:bg-[radial-gradient(14rem_9rem_at_100%_0%,color-mix(in_srgb,var(--c-accent)_18%,transparent),transparent_70%)]",
+    wash: "before:bg-[radial-gradient(15rem_10rem_at_100%_0%,var(--c-wash-accent),transparent_72%)]",
     numeral: "text-accent",
     icon: "text-accent",
     dot: "bg-accent",
@@ -156,7 +164,7 @@ function Metric({
           </p>
           {/* The one line of prose. It is what turns "3" into "3 leads past
               their date", and it costs 16px of height. */}
-          <p className="mt-1.5 truncate text-meta text-fg-4">{hint}</p>
+          <p className="mt-1.5 truncate text-meta text-fg-3">{hint}</p>
         </div>
 
         {/* Iconography sits at fg-4 — the step reserved for marks rather than

@@ -373,7 +373,7 @@ export default function Worklist({
               rather than under it: it is a caption for the segment that is
               selected, and putting it on its own row cost a whole band of
               vertical space to say six words. */}
-          <p className="hidden text-caption text-fg-4 xl:block">
+          <p className="hidden text-caption text-fg-3 xl:block">
             {WORKLIST_VIEW_HINTS[view]}
           </p>
         </div>

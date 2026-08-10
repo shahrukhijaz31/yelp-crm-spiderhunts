@@ -1,5 +1,5 @@
 import type { Role, SessionUser } from "./access";
-import { describePasswordProblem, hashPassword } from "./password";
+import { describePasswordProblem, hashPassword, verifyPassword } from "./password";
 import { prisma } from "./prisma";
 
 /**
@@ -18,6 +18,7 @@ const PUBLIC_FIELDS = {
   name: true,
   role: true,
   isActive: true,
+  requirePasswordChange: true,
   lastLoginAt: true,
   createdAt: true,
 } as const;
@@ -29,6 +30,8 @@ export interface PublicUser {
   name: string;
   role: Role;
   isActive: boolean;
+  /** True between an administrator issuing a reset code and it being redeemed. */
+  requirePasswordChange: boolean;
   lastLoginAt: Date | null;
   createdAt: Date;
 }
@@ -63,6 +66,7 @@ export async function findUserForLogin(identifier: string) {
       name: true,
       role: true,
       isActive: true,
+      requirePasswordChange: true,
       passwordHash: true,
     },
   });
@@ -177,6 +181,7 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
     isActive?: boolean;
     name?: string;
     passwordHash?: string;
+    requirePasswordChange?: boolean;
   } = {};
 
   if (edits.role !== undefined) {
@@ -201,6 +206,10 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
     const problem = describePasswordProblem(edits.password);
     if (problem) throw new UserInputError(problem);
     data.passwordHash = await hashPassword(edits.password);
+    // An administrator handing over a password they chose settles the account:
+    // the person can sign in with it, so leaving a "must change" flag standing
+    // from an earlier reset would lock them out of a password that works.
+    data.requirePasswordChange = false;
   }
 
   const losingAnAdmin =
@@ -230,6 +239,58 @@ export function editEndsAccess(edits: UserEdits): boolean {
   // Sessions carry no role, but signing them out makes the change unmissable
   // and removes any doubt about half-rendered pages from before the change.
   return edits.isActive === false || edits.role !== undefined || edits.password !== undefined;
+}
+
+/** The reset dialog needs to name the person before it does anything to them. */
+export async function findUserForReset(id: string): Promise<PublicUser | null> {
+  const user = await prisma.user.findUnique({ where: { id }, select: PUBLIC_FIELDS });
+  return (user as PublicUser | null) ?? null;
+}
+
+/**
+ * A user changing their own password.
+ *
+ * The current password is required and verified here, not merely collected by
+ * the form: a live session is not proof that the person at the keyboard is the
+ * account owner, and an unattended logged-in machine is exactly the situation
+ * this check exists for. It is also what makes the operation safe to expose to
+ * every role — there is nothing to escalate when the caller must already know
+ * the secret they are replacing.
+ *
+ * Deliberately *not* reachable for anybody else's account. An administrator
+ * wanting to help someone has one route (`lib/passwordReset.ts`), and it never
+ * involves knowing or seeing a password.
+ */
+export async function changeOwnPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    // The second of the two places in the app that reads a hash, and like the
+    // first it does one thing with it and returns nothing derived from it.
+    select: { id: true, passwordHash: true },
+  });
+  if (!user) throw new UserInputError("No such user.");
+
+  if (!(await verifyPassword(currentPassword ?? "", user.passwordHash))) {
+    throw new UserInputError("Your current password is not correct.");
+  }
+
+  const problem = describePasswordProblem(newPassword ?? "");
+  if (problem) throw new UserInputError(problem);
+
+  if (await verifyPassword(newPassword, user.passwordHash)) {
+    throw new UserInputError("Choose a password you have not used here before.");
+  }
+
+  await prisma.user.update({
+    where: { id: userId },
+    // Clearing the flag here too: choosing your own password is the thing the
+    // "must change" state was waiting for, however you arrived at it.
+    data: { passwordHash: await hashPassword(newPassword), requirePasswordChange: false },
+  });
 }
 
 /** For the profile dropdown and anywhere else that needs the caller's own record. */

@@ -18,6 +18,7 @@ import { HOME_PATH, safeCallbackUrl } from "./access";
 export type AuthErrorCode =
   | "invalid_credentials"
   | "account_disabled"
+  | "password_change_required"
   | "too_many_attempts"
   | "network"
   | "server";
@@ -36,6 +37,8 @@ export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   // is wrong tells that to anyone guessing, too.
   invalid_credentials: "Incorrect username or password. Check both and try again.",
   account_disabled: "This account has been disabled. Contact your administrator.",
+  password_change_required:
+    "Your password was reset. Use “Forgot your password?” below and enter the reset code your administrator gave you.",
   too_many_attempts: "Too many sign-in attempts. Try again in a few minutes.",
   network: "Could not reach the server. Check your connection and try again.",
   server: "Something went wrong on our end. Try again in a moment.",
@@ -44,6 +47,7 @@ export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
 /** HTTP status / error code -> the form's vocabulary. */
 function codeFor(status: number, error: unknown): AuthErrorCode {
   if (error === "account_disabled") return "account_disabled";
+  if (error === "password_change_required") return "password_change_required";
   if (status === 429) return "too_many_attempts";
   if (status === 401 || status === 400) return "invalid_credentials";
   return "server";

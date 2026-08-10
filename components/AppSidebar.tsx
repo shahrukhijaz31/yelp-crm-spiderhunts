@@ -111,16 +111,18 @@ export default function AppSidebar({
           className="flex min-w-0 items-center gap-2.5 rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--c-focus)]"
         >
           {/* `unoptimized`: .ico is not a format the image optimiser handles,
-              and at 22px there is nothing worth optimising anyway. */}
+              and at this size there is nothing worth optimising anyway.
+              `grayscale` matches the sign-in screen — the mark is the same
+              object in both places and must not change colour between them. */}
           <Image
             src="/logo.ico"
             alt=""
             aria-hidden="true"
-            width={22}
-            height={22}
+            width={26}
+            height={26}
             unoptimized
             priority
-            className="h-[22px] w-[22px] shrink-0 rounded object-contain"
+            className="h-[26px] w-[26px] shrink-0 rounded object-contain grayscale"
           />
           <span className="min-w-0 truncate text-ui font-semibold tracking-[-0.02em] text-fg 2xl:block max-2xl:hidden">
             SpiderHunts
@@ -168,7 +170,7 @@ export default function AppSidebar({
 
       {/* --- footer ------------------------------------------------------ */}
       <div className="shrink-0 border-t border-line px-3 py-2.5 max-2xl:hidden">
-        <p className="flex items-center gap-2 text-meta text-fg-4">
+        <p className="flex items-center gap-2 text-meta text-fg-3">
           <span
             aria-hidden="true"
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-success"

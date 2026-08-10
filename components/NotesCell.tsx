@@ -69,7 +69,7 @@ export default function NotesCell({
           // The focus ring comes from `.ui-field`; nothing to restate here.
           autoFocus
         />
-        <span className="text-meta text-fg-4">
+        <span className="text-meta text-fg-3">
           Esc to discard · Ctrl+Enter to apply, then Save
         </span>
       </div>
@@ -103,7 +103,7 @@ export default function NotesCell({
           {value}
         </span>
       ) : (
-        <span className="flex items-center gap-1.5 text-ui text-fg-4">
+        <span className="flex items-center gap-1.5 text-ui text-fg-3">
           <Plus className="h-3 w-3 shrink-0" strokeWidth={2} aria-hidden="true" />
           Add note
         </span>

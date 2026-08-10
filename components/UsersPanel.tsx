@@ -2,7 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { KeyRound } from "lucide-react";
 
+import ResetPasswordDialog from "./ResetPasswordDialog";
 import type { Role } from "@/lib/access";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password";
 
@@ -27,6 +29,8 @@ export interface UserRow {
   email: string;
   role: Role;
   isActive: boolean;
+  /** Set by a reset, cleared when the person redeems the code. */
+  requirePasswordChange: boolean;
   lastLoginAt: string | null;
   createdAt: string;
 }
@@ -44,7 +48,9 @@ export default function UsersPanel({
   const [notice, setNotice] = useState<Notice>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [settingPasswordId, setSettingPasswordId] = useState<string | null>(null);
+  /** The row whose reset dialog is open, if any. */
+  const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
 
   async function patchUser(id: string, edits: Record<string, unknown>, describe: string) {
     setBusyId(id);
@@ -82,6 +88,14 @@ export default function UsersPanel({
           Everyone who can sign in to this workspace. Agents get the worklist
           and meetings; administrators get everything, including this page.
           Disabling an account ends its sessions immediately.
+        </p>
+        {/* Said once, at the top, rather than repeated on every row: it is a
+            property of the whole page. */}
+        <p className="mt-2 page-intro text-fg-4">
+          Passwords are never visible here or anywhere else — not to
+          administrators, and not to us. Use{" "}
+          <span className="text-fg-3">Reset password</span> to issue a one-time
+          code the person exchanges for a password of their own.
         </p>
       </header>
 
@@ -122,6 +136,14 @@ export default function UsersPanel({
                   {!user.isActive && (
                     <span className="rounded border border-line-2 bg-st-steel-bg px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider text-st-steel">
                       Disabled
+                    </span>
+                  )}
+                  {/* The state between a reset and the person redeeming it.
+                      Worth a badge because it explains a support call before
+                      it is made: this account cannot sign in, on purpose. */}
+                  {user.requirePasswordChange && (
+                    <span className="rounded border border-accent-line bg-accent-soft px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-wider text-accent">
+                      Reset pending
                     </span>
                   )}
                 </div>
@@ -169,19 +191,41 @@ export default function UsersPanel({
                 {user.isActive ? "Disable" : "Enable"}
               </button>
 
+              {/* The recovery path: no password is chosen here, and none is
+                  shown. It is refused on your own row — an administrator who
+                  reset themselves would be signed out mid-action, holding a
+                  code on a screen they are about to lose. Changing your own
+                  password lives in the profile menu, where it belongs. */}
+              <button
+                type="button"
+                disabled={isSelf || busy}
+                onClick={() => setResetTarget(user)}
+                title={
+                  isSelf
+                    ? "Use Change password in your profile menu"
+                    : `Issue a one-time reset code for ${user.name}`
+                }
+                className="ui-btn ui-btn-secondary"
+              >
+                <KeyRound className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                Reset password
+              </button>
+
               {/* Allowed on your own row, unlike role and disable: setting your
                   own password is not a way to lock yourself out. */}
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => setResettingId(resettingId === user.id ? null : user.id)}
-                aria-expanded={resettingId === user.id}
-                className="ui-btn ui-btn-secondary"
+                onClick={() =>
+                  setSettingPasswordId(settingPasswordId === user.id ? null : user.id)
+                }
+                aria-expanded={settingPasswordId === user.id}
+                className="ui-btn ui-btn-ghost"
               >
-                Password
+                Set password
               </button>
 
-              {resettingId === user.id && (
+              {settingPasswordId === user.id && (
                 <form
                   className="flex w-full items-end gap-2 border-t border-line pt-3"
                   onSubmit={(event) => {
@@ -194,7 +238,7 @@ export default function UsersPanel({
                       // the old password is signed out rather than left on a
                       // page that will start refusing them.
                       `${user.name}'s password has been changed. They have been signed out.`,
-                    ).then(() => setResettingId(null));
+                    ).then(() => setSettingPasswordId(null));
                   }}
                 >
                   <label className="flex flex-1 flex-col gap-1.5">
@@ -253,6 +297,24 @@ export default function UsersPanel({
           />
         )}
       </section>
+
+      {resetTarget && (
+        <ResetPasswordDialog
+          user={resetTarget}
+          onIssued={() => {
+            // Refresh while the code is still on screen, so the row behind the
+            // dialog already shows "Reset pending" when it closes. The dialog
+            // holds the code in its own state and is unaffected by the
+            // re-render.
+            router.refresh();
+            setNotice({
+              tone: "ok",
+              message: `A reset code was generated for ${resetTarget.name}. Their password no longer works and they have been signed out.`,
+            });
+          }}
+          onClose={() => setResetTarget(null)}
+        />
+      )}
     </div>
   );
 }

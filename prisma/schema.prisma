@@ -207,11 +207,21 @@ model User {
   /// request, not just at login, so disabling takes effect at once.
   isActive Boolean @default(true) @map("is_active")
 
+  /// Set when an administrator issues a reset code, cleared the moment the
+  /// person chooses a new password. It is a *state*, not a permission: the
+  /// account's password hash is scrambled at the same moment the flag goes up,
+  /// so the flag is what explains the lockout rather than what causes it.
+  requirePasswordChange Boolean @default(false) @map("require_password_change")
+
   lastLoginAt DateTime? @map("last_login_at")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   sessions Session[]
+  /// Reset codes issued *for* this account, and (the second relation) the ones
+  /// this administrator issued for other people.
+  passwordResets       PasswordReset[] @relation("PasswordResetSubject")
+  passwordResetsIssued PasswordReset[] @relation("PasswordResetIssuer")
   /// Call recordings this person uploaded. The back-reference exists so that
   /// "who uploaded this" is a join rather than a second lookup, and so the
   /// Restrict on the far side is visible from here: a user holding recordings
@@ -219,6 +229,53 @@ model User {
   recordings MeetingRecording[]
 
   @@map("users")
+}
+
+/// A one-time credential an administrator hands to someone who cannot sign in.
+///
+/// A separate table rather than four more columns on `users`, for the same
+/// reason sessions are a separate table: these rows are short-lived, there can
+/// be a history of them, and none of it belongs in the record that every page
+/// load reads. Expired and used rows stay as the only trace that a reset
+/// happened — the code itself is never recoverable from them.
+///
+/// **The code is not stored.** `codeHash` is the same salted scrypt format
+/// `lib/password.ts` writes for passwords, so a database dump yields no usable
+/// code, and an administrator with SQL access learns nothing they could hand to
+/// anyone. Verification is a hash comparison against the one active row for the
+/// account, which is why a slow hash is affordable here where it would not be
+/// if codes had to be looked up *by* their hash.
+model PasswordReset {
+  id String @id @default(cuid())
+
+  /// Whose account this unlocks. Cascade: a deleted user's pending code must
+  /// not outlive them.
+  userId String @map("user_id")
+  user   User   @relation("PasswordResetSubject", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// scrypt hash of the code, in `lib/password.ts` format.
+  codeHash String @map("code_hash")
+
+  /// The administrator who issued it. Restrict, matching recordings: accounts
+  /// are disabled rather than deleted, and the record of who reset whose
+  /// password should not be removable by deleting a user.
+  issuedById String @map("issued_by_user_id")
+  issuedBy   User   @relation("PasswordResetIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
+
+  /// Enforced server-side on every use. 30 minutes from issue.
+  expiresAt DateTime  @map("expires_at")
+  /// Stamped once, when the code is redeemed. A non-null value here is what
+  /// makes the code single-use — it is never deleted on redemption, so a
+  /// replay finds a row that says "already used" rather than no row at all.
+  usedAt    DateTime? @map("used_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The redemption path looks up "the active code for this user", and the
+  /// housekeeping sweep ranges over the clock.
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_resets")
 }
 
 /// A signed-in browser.

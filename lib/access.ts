@@ -46,10 +46,18 @@ export const LOGIN_PATH = "/login";
  * `/api/leads/ingest` is called by the scraper on another box with its own
  * bearer token (`lib/ingestAuth.ts`) — neither can carry a session cookie, and
  * both were already exempted at the nginx layer for the same reason.
+ *
+ * The two reset endpoints are public for the obvious reason: someone redeeming
+ * a one-time code has no password and therefore cannot have a session. They are
+ * not unauthenticated in any meaningful sense — the code *is* the credential,
+ * it is checked server-side against a hash on every call, and neither endpoint
+ * ever issues a session (see `lib/passwordReset.ts`).
  */
 const PUBLIC_PATHS = new Set<string>([
   LOGIN_PATH,
   "/api/auth/login",
+  "/api/auth/reset/verify",
+  "/api/auth/reset/complete",
   "/api/health",
   "/api/leads/ingest",
 ]);

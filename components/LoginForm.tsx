@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Eye, EyeOff, Loader2, LockKeyhole } from "lucide-react";
 
+import PasswordRecoveryPanel from "./PasswordRecoveryPanel";
 import ThemeToggle from "./ThemeToggle";
 import { AUTH_ERROR_MESSAGES, signIn } from "@/lib/auth";
 
@@ -98,6 +99,14 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
   /** Field errors only show once the form has been submitted at least once. */
   const [checked, setChecked] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  /**
+   * Recovery replaces the form in place rather than living on its own route.
+   * The brand column, the theme control and the entrance animation all stay
+   * put, so "I forgot my password" is a change of question on one screen — and
+   * there is no `/reset` URL for anyone to arrive at cold, out of context and
+   * without a code.
+   */
+  const [recovering, setRecovering] = useState(false);
 
   const errors = validate(username, password);
   const showErrors = checked ? errors : {};
@@ -162,20 +171,29 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
               looping foreground animation in the app, and it exists because a
               logo on a sign-in screen is the single element that is allowed to
               be purely presentational. */}
-          <span className="auth-halo flex h-9 w-9 items-center justify-center rounded-lg border border-line-2 bg-surface/70 backdrop-blur">
+          <span className="auth-halo flex h-12 w-12 items-center justify-center rounded-xl border border-line-2 bg-surface/70 backdrop-blur">
             <Image
               src="/logo.ico"
               alt=""
               aria-hidden="true"
-              width={22}
-              height={22}
+              width={32}
+              height={32}
               unoptimized
               priority
-              className="h-[22px] w-[22px] rounded object-contain"
+              // Desaturated on purpose, here and everywhere else the mark is
+              // drawn. This app spends its one signal colour on things an agent
+              // must act on — a red status, an overdue callback, the primary
+              // button — and a logo that competes for that colour spends it on
+              // something nobody needs to look at twice.
+              className="h-8 w-8 rounded object-contain grayscale"
             />
           </span>
-          <span className="text-ui font-semibold tracking-[-0.02em] text-fg">
-            SpiderHunts
+          {/* The product's name, at a size that says it is the name of the
+              product. It was set at `text-ui` — the same 13px as a form label
+              — which is the size a wordmark takes when it is decoration in a
+              corner, and this one is the first thing on the page. */}
+          <span className="text-[22px] font-semibold leading-tight tracking-[-0.025em] text-fg">
+            SpiderHunts Leads Portal
           </span>
         </div>
 
@@ -191,13 +209,13 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             The call list, and everything that happens to it.
           </h2>
           <p className="mt-5 text-ui leading-relaxed text-fg-2">
-            Statuses, callbacks, meetings and recordings — one workspace for the
+            Statuses, callbacks, meetings and recordings. One workspace for the
             whole outbound desk.
           </p>
         </div>
 
         <p
-          className="auth-enter relative z-10 text-caption text-fg-4"
+          className="auth-enter relative z-10 text-caption text-fg-3"
           style={{ "--delay": "160ms" } as React.CSSProperties}
         >
           © {new Date().getFullYear()} SpiderHunts
@@ -205,7 +223,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
       </section>
 
       {/* ================= form ========================================== */}
-      <section className="relative flex min-w-0 flex-1 flex-col items-center justify-center px-5 py-12 sm:px-8">
+      <section className="auth-form flex min-w-0 flex-1 flex-col items-center justify-center px-5 py-12 sm:px-8">
         {/* The shell is not rendered on this route, so the theme control comes
             with the page — an agent on a night shift should not have to sign in
             through a screen set to the wrong theme first. */}
@@ -218,23 +236,40 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
               so it is never shown twice on one screen. It keeps the halo: on a
               phone this is the only branding there is. */}
           <div className="auth-enter mb-8 flex items-center gap-3 lg:hidden">
-            <span className="auth-halo flex h-9 w-9 items-center justify-center rounded-lg border border-line-2 bg-surface/70">
+            <span className="auth-halo flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-line-2 bg-surface/70">
               <Image
                 src="/logo.ico"
                 alt=""
                 aria-hidden="true"
-                width={22}
-                height={22}
+                width={32}
+                height={32}
                 unoptimized
                 priority
-                className="h-[22px] w-[22px] rounded object-contain"
+                className="h-8 w-8 rounded object-contain grayscale"
               />
             </span>
-            <span className="text-ui font-semibold tracking-[-0.02em] text-fg">
-              SpiderHunts
+            {/* A step down from the brand column's 22px: this one shares a
+                380px column with the form rather than owning half the screen. */}
+            <span className="text-[19px] font-semibold leading-tight tracking-[-0.025em] text-fg">
+              SpiderHunts Leads Portal
             </span>
           </div>
 
+          {recovering ? (
+            <div {...rise(0.02)}>
+              <PasswordRecoveryPanel
+                onBack={() => {
+                  setRecovering(false);
+                  // Come back to a clean form. Whatever banner sent them to
+                  // recovery is answered by now, one way or the other.
+                  setFormError(null);
+                  setPassword("");
+                  setChecked(false);
+                }}
+              />
+            </div>
+          ) : (
+            <>
           <header {...rise(0.06)}>
             <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.028em] text-fg">
               Sign in
@@ -389,13 +424,34 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             </button>
           </form>
 
+          {/* A quiet link rather than a second button: it is the exit for the
+              minority who cannot get in, and it must not compete with the
+              action ninety-nine people in a hundred came here for. */}
+          <div
+            className="auth-enter mt-5 text-center"
+            style={{ "--delay": "170ms" } as React.CSSProperties}
+          >
+            <button
+              type="button"
+              onClick={() => setRecovering(true)}
+              className="rounded text-caption text-fg-3 underline decoration-line-2 underline-offset-4 transition-colors duration-150 hover:text-fg hover:decoration-fg-4"
+            >
+              Forgot your password?
+            </button>
+            <p className="mt-1.5 text-caption leading-relaxed text-fg-3">
+              Contact your workspace administrator to reset your password.
+            </p>
+          </div>
+
           <p
-            className="auth-enter mt-8 flex items-center justify-center gap-2 text-caption text-fg-4"
+            className="auth-enter mt-8 flex items-center justify-center gap-2 text-caption text-fg-3"
             style={{ "--delay": "200ms" } as React.CSSProperties}
           >
             <LockKeyhole className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden="true" />
             Access is issued by your workspace administrator.
           </p>
+            </>
+          )}
         </div>
       </section>
     </main>

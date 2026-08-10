@@ -2,8 +2,9 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, LogOut } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut } from "lucide-react";
 
 import { LOGIN_PATH, type SessionUser } from "@/lib/access";
 
@@ -17,18 +18,24 @@ import { LOGIN_PATH, type SessionUser } from "@/lib/access";
  * exactly nothing.
  *
  * Keyboard behaviour is hand-rolled rather than borrowed from a primitives
- * library, because there is exactly one menu in this application and it has
- * one item. Down-arrow from the trigger opens it and lands on that item, Up
- * and Down wrap within the menu, Escape closes and returns focus to the
- * trigger, and Tab out closes it. That is the whole `menu` pattern for a menu
- * this size.
+ * library, because there is exactly one menu in this application and it is two
+ * items long. Down-arrow from the trigger opens it and lands on the first item,
+ * Escape closes and returns focus to the trigger, and Tab out closes it. That
+ * is the whole `menu` pattern for a menu this size.
+ *
+ * "Change password" is a link to a page, not a dialog. It was a dialog first,
+ * and the form turned out to be too tall for one: three fields, a strength
+ * meter, a requirements list and room for an error banner is more than a modal
+ * can hold on a laptop without running off the top of the window. The page it
+ * points at has the whole column, and an address someone can be told over the
+ * phone.
  */
 export default function UserMenu({ user }: { user: SessionUser }) {
   const router = useRouter();
   const menuId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const itemRef = useRef<HTMLButtonElement>(null);
+  const itemRef = useRef<HTMLAnchorElement>(null);
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -156,8 +163,21 @@ export default function UserMenu({ user }: { user: SessionUser }) {
 
           <div aria-hidden="true" className="my-1 h-px bg-line" />
 
-          <button
+          <Link
             ref={itemRef}
+            href="/account/password"
+            role="menuitem"
+            // The menu must not survive the navigation: it is fixed to the top
+            // bar, which stays mounted across routes, so it would otherwise
+            // still be hanging open over the page it just sent you to.
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-ui text-fg-2 transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg"
+          >
+            <KeyRound className="h-4 w-4 shrink-0 text-fg-4" strokeWidth={1.75} aria-hidden="true" />
+            Change password
+          </Link>
+
+          <button
             type="button"
             role="menuitem"
             disabled={signingOut}

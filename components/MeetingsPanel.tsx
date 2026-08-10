@@ -185,7 +185,7 @@ export default function MeetingsPanel({
             })}
           </div>
         </LayoutGroup>
-        <p className="text-caption text-fg-4">{MEETING_BUCKET_HINTS[bucket]}</p>
+        <p className="text-caption text-fg-3">{MEETING_BUCKET_HINTS[bucket]}</p>
       </div>
 
       {shown.length === 0 ? (

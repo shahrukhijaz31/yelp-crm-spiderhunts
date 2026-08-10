@@ -30,6 +30,9 @@ const TITLES: Array<[string, string]> = [
   ["/import", "Import"],
   ["/users", "Users"],
   ["/settings", "Settings"],
+  // Everything under `/account` is about the signed-in person rather than the
+  // workspace, which is why it is one heading rather than a per-page title.
+  ["/account", "Account"],
   ["/", "Leads workspace"],
 ];
 
@@ -98,7 +101,7 @@ export default function AppTopBar({
           </span>
         </p>
 
-        <p className="hidden text-caption text-fg-4 2xl:block">{longDate(today)}</p>
+        <p className="hidden text-caption text-fg-3 2xl:block">{longDate(today)}</p>
 
         <span aria-hidden="true" className="hidden h-4 w-px bg-line lg:block" />
 

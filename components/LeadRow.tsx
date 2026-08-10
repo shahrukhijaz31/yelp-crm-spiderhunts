@@ -138,7 +138,7 @@ export default function LeadRow({
         {/* Only drawn when there is something to say — an always-present empty
             line under every name would cost 16px a row across the whole list. */}
         {(lead.rating !== null || lead.owner) && (
-          <div className="mt-0.5 flex items-center gap-1.5 text-meta text-fg-4">
+          <div className="mt-0.5 flex items-center gap-1.5 text-meta text-fg-3">
             {lead.rating !== null && (
               <span className="tnum flex shrink-0 items-center gap-0.5 font-mono">
                 <Star className="h-2.5 w-2.5 fill-current" strokeWidth={0} aria-hidden="true" />
