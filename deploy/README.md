@@ -1,6 +1,7 @@
 # Deploying the Lead Portal
 
-**Live: <https://leadportal.169-58-34-205.sslip.io>** — login `agent`.
+**Live: <https://leads.spiderhunts-coworkingspace.com>**
+(also <https://leadportal.169-58-34-205.sslip.io>, kept as a fallback).
 
 ## The server this targets
 
@@ -258,18 +259,54 @@ which can offer to reset the database on drift.
 
 ## DNS
 
-**No records needed.** sslip.io resolves the hostname to this IP already.
+One record, in the **Hostinger** DNS zone for `spiderhunts-coworkingspace.com`
+(nameservers `ns1/ns2.dns-parking.com`):
 
-For a real domain later, add `A leads → 169.58.34.205`, then on the server:
+| Type | Name | Points to | TTL |
+|---|---|---|---|
+| A | `leads` | `169.58.34.205` | 300 |
+
+Nothing else in that zone changed. MX, the apex and `www` are untouched, and the
+marketing site still serves from Hostinger's own addresses — this box only
+claims the one name.
+
+Two traps worth recording:
+
+* **Use the DNS records editor, not hPanel's "Subdomains" tool.** That tool
+  creates a folder on the shared hosting *and writes its own A record pointing
+  back at Hostinger*, which silently overrides the one you just added.
+* **No AAAA.** See the note in `nginx/leadportal.conf`: every site actually
+  served from this box is IPv4-only, so inbound IPv6 has never been exercised
+  here, and a client that resolves an AAAA prefers it — an unverified one is a
+  hang, not a fallback. nginx already listens on `[::]`, so adding one later is
+  a DNS change plus a test from a host with working IPv6.
+
+The sslip.io hostname is deliberately kept as a second name on the same
+certificate. This box does not control the spiderhunts DNS zone, so the public
+hostname can be taken away by someone editing records for the marketing site;
+the sslip name needs no records at all and is the way back in.
+
+To add or change a hostname later, edit `server_name` in both blocks of the
+vhost and extend the existing certificate — `--cert-name` pinned to the current
+lineage and `--expand`, so you get one certificate with two names rather than
+two lineages, only one of which nginx is serving:
 
 ```bash
-sed -i 's/leadportal\.169-58-34-205\.sslip\.io/leads.example.com/g' /etc/nginx/sites-available/leadportal
-certbot certonly --webroot -w /var/www/certbot -d leads.example.com
+certbot certonly --webroot -w /var/www/certbot \
+  --cert-name leadportal.169-58-34-205.sslip.io --expand \
+  -d leadportal.169-58-34-205.sslip.io -d <new-name>
 nginx -t && systemctl reload nginx
 ```
 
 Use `--webroot`, not `--nginx`: the nginx plugin rewrites config files, which on
 a box with ten vhosts is a blast radius worth avoiding.
+
+> `systemctl reload nginx` returns before the new config is actually serving —
+> old workers finish their connections first. A check fired immediately after a
+> reload can still be answered by the previous config, which during this change
+> meant a request for the new hostname falling through to the default server
+> (another Next.js site on this box) and returning its 404. Retry before
+> concluding anything is broken.
 
 ## Firewall
 

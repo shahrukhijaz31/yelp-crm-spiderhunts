@@ -366,7 +366,7 @@ unset the route refuses every request with a 503 rather than falling open.
 32MB per push.
 
 ```bash
-curl -sS https://leadportal.169-58-34-205.sslip.io/api/leads/ingest \
+curl -sS https://leads.spiderhunts-coworkingspace.com/api/leads/ingest \
   -H "Authorization: Bearer $INGEST_TOKEN" \
   -H "X-Batch: yelp-dentists-chicago" \
   -F file=@output/page1.csv -F file=@output/page2.csv
@@ -380,7 +380,7 @@ scraper project**; it lives here only so the endpoint and its caller cannot
 drift. Standard library only, no dependencies:
 
 ```bash
-export LEAD_PORTAL_URL=https://leadportal.169-58-34-205.sslip.io
+export LEAD_PORTAL_URL=https://leads.spiderhunts-coworkingspace.com
 export LEAD_PORTAL_TOKEN=...          # /etc/leadportal/ingest-token on the server
 python push_leads.py ./output --batch yelp-dentists-chicago
 ```

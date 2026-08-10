@@ -36,7 +36,26 @@ ENV_DIR="/etc/${SITE}"
 RECORDINGS_DIR_PATH="/var/lib/${SITE}/recordings"
 DB_NAME="lead_portal"
 DB_USER="leadportal"
-DOMAIN="leadportal.169-58-34-205.sslip.io"
+# The public hostname, a subdomain of the company's existing Hostinger-hosted
+# marketing site. Only an A record was added there; nothing about that site
+# changed, and it keeps serving from Hostinger's own addresses.
+DOMAIN="leads.spiderhunts-coworkingspace.com"
+
+# The original sslip.io name, kept as a second name on the same certificate.
+# It costs nothing and it is the way back in if the spiderhunts DNS zone is ever
+# edited by someone working on the marketing site — this box does not control
+# that zone, so the hostname the portal answers to can be taken away by a change
+# made somewhere else entirely.
+ALT_DOMAIN="leadportal.169-58-34-205.sslip.io"
+
+# The certificate LINEAGE name, which is a directory under /etc/letsencrypt/live
+# and is NOT the same thing as the hostname. It stays pinned to the sslip name
+# because that is the directory the live cert already occupies and the path
+# nginx/leadportal.conf points `ssl_certificate` at. Renaming it would leave the
+# vhost pointing at a directory that no longer exists, and nginx refuses to
+# start when `ssl_certificate` is missing — which on this box takes down all ten
+# sites, not just this one.
+CERT_NAME="$ALT_DOMAIN"
 WEBROOT="/var/www/certbot"
 BLUE_PORT=3031
 GREEN_PORT=3032
@@ -79,8 +98,13 @@ for slot_port in "blue:${BLUE_PORT}" "green:${GREEN_PORT}"; do
   fi
 done
 
-getent hosts "$DOMAIN" >/dev/null || die "${DOMAIN} does not resolve. sslip.io may be down."
-echo "  ${DOMAIN} resolves"
+# Both names have to resolve before certbot runs, because HTTP-01 validates
+# every -d on the command line and one missing record fails the whole issuance.
+for d in "$DOMAIN" "$ALT_DOMAIN"; do
+  getent hosts "$d" >/dev/null \
+    || die "${d} does not resolve. Check the DNS A record (or, for the sslip.io name, whether sslip.io is down)."
+  echo "  ${d} resolves"
+done
 
 # --- Service account -------------------------------------------------------
 # Matches the existing per-site convention (leadquasar, zayr, spideychat):
@@ -287,7 +311,7 @@ cat > "/etc/nginx/sites-available/${SITE}" <<EOF
 server {
     listen 80;
     listen [::]:80;
-    server_name ${DOMAIN};
+    server_name ${DOMAIN} ${ALT_DOMAIN};
     location /.well-known/acme-challenge/ { root ${WEBROOT}; }
     location / { return 200 'provisioning\n'; add_header Content-Type text/plain; }
 }
@@ -304,16 +328,29 @@ if ! nginx -t 2>&1; then
 fi
 systemctl reload nginx
 
-log "Requesting a Let's Encrypt certificate for ${DOMAIN}"
+log "Requesting a Let's Encrypt certificate for ${DOMAIN} and ${ALT_DOMAIN}"
 # webroot, not --nginx: the nginx plugin rewrites config files, and on a box
 # with ten vhosts that is a blast radius worth avoiding. This is the same
 # method the existing saleshandy-sslip site uses.
-if [[ ! -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then
-  certbot certonly --webroot -w "$WEBROOT" -d "$DOMAIN" \
+#
+# --expand rather than a bare re-issue, and --cert-name pinned, so re-running
+# this after adding a name extends the existing lineage instead of creating a
+# second one beside it. Two lineages for one vhost is how you end up renewing
+# the certificate nginx is not serving.
+if [[ ! -d "/etc/letsencrypt/live/${CERT_NAME}" ]]; then
+  certbot certonly --webroot -w "$WEBROOT" -d "$ALT_DOMAIN" -d "$DOMAIN" \
+    --cert-name "$CERT_NAME" \
     --non-interactive --agree-tos --register-unsafely-without-email \
     || die "Certificate issuance failed. The HTTP vhost is in place; fix and re-run."
+elif ! openssl x509 -in "/etc/letsencrypt/live/${CERT_NAME}/cert.pem" -noout -text 2>/dev/null \
+       | grep -q "DNS:${DOMAIN}"; then
+  log "Certificate exists but does not cover ${DOMAIN} — expanding it"
+  certbot certonly --webroot -w "$WEBROOT" -d "$ALT_DOMAIN" -d "$DOMAIN" \
+    --cert-name "$CERT_NAME" --expand \
+    --non-interactive --agree-tos --register-unsafely-without-email \
+    || die "Certificate expansion failed. The previous certificate is still in place."
 else
-  log "Certificate already exists"
+  log "Certificate already exists and covers both names"
 fi
 
 # --- nginx: the real vhost -------------------------------------------------

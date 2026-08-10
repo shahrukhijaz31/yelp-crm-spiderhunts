@@ -51,7 +51,10 @@ APP_ROOT="/var/www/vhosts/${SITE}"
 REPO_DIR="${APP_ROOT}/repo"
 ENV_FILE="/etc/${SITE}/env"
 UPSTREAM_FILE="/etc/nginx/conf.d/${SITE}-upstream.conf"
-DOMAIN="leadportal.169-58-34-205.sslip.io"
+# Only used for the post-flip health check below, which forces the connection to
+# 127.0.0.1 anyway — so this needs to be a name the certificate and `server_name`
+# both carry, not necessarily the one users type.
+DOMAIN="leads.spiderhunts-coworkingspace.com"
 GIT_REF="${1:-main}"
 
 declare -A SLOT_PORT=( [blue]=3031 [green]=3032 )

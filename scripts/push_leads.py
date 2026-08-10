@@ -11,7 +11,7 @@ already has.
 
 Configuration, by environment variable or flag:
 
-    LEAD_PORTAL_URL     https://leadportal.169-58-34-205.sslip.io
+    LEAD_PORTAL_URL     https://leads.spiderhunts-coworkingspace.com
     LEAD_PORTAL_TOKEN   the INGEST_TOKEN from /etc/lead-portal/env
 
 Semantics worth knowing before wiring this into a cron job: the endpoint
