@@ -7,6 +7,7 @@ import {
   ArrowDownToLine,
   BarChart3,
   CalendarDays,
+  Gauge,
   Inbox,
   PhoneOutgoing,
   Settings,
@@ -80,11 +81,19 @@ const QUEUE_ICONS: Record<LeadWorkState, LucideIcon> = {
 /** The workspaces an agent moves between all day. Order is a day's work. */
 const WORKSPACE: NavItem[] = [
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
+  // Every role, because it is only ever the reader's own record — see
+  // `app/(portal)/my-performance/page.tsx`. In Workspace rather than Data: it
+  // is about the person doing the work, not about the lead database.
+  { href: "/my-performance", label: "My performance", icon: Gauge },
 ];
 
-/** Bulk data movement, and the read-only view of it. Admin-only, all three. */
+/** Bulk data movement, and the read-only view of it. Admin-only, all four. */
 const DATA: NavItem[] = [
   { href: "/reports", label: "Reports", icon: BarChart3 },
+  // Admin-only by virtue of `/reports` being an admin prefix, which `canAccess`
+  // below applies to every item in this list. The page and its API refuse an
+  // agent independently — hiding a link is not what keeps anyone out.
+  { href: "/reports/team", label: "Team performance", icon: Gauge },
   { href: "/export", label: "Export", icon: ArrowDownToLine },
   { href: "/import", label: "Import", icon: Upload },
 ];
@@ -94,6 +103,16 @@ const ADMIN: NavItem[] = [
   { href: "/users", label: "Users", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+/**
+ * Every destination in the rail, for the "most specific match wins" rule in
+ * `isActive`. Derived rather than written out, so a nav item added above is
+ * automatically considered — a hand-kept second list is one that goes stale the
+ * first time somebody adds a nested route.
+ */
+const NAV_HREFS: readonly string[] = [...WORKSPACE, ...DATA, ...ADMIN].map(
+  (item) => item.href,
+);
 
 export default function AppSidebar({
   role,
@@ -107,8 +126,27 @@ export default function AppSidebar({
   const router = useRouter();
   const { workState, setWorkState, counts } = useLeadQueue();
 
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+  /**
+   * Which row is lit — the *most specific* item that matches, not every item
+   * whose href is a prefix of the path.
+   *
+   * That distinction arrived with `/reports/team`. A plain `startsWith` lights
+   * Reports and Team performance together on the team screen, which tells an
+   * admin they are in two places at once. Matching on a segment boundary also
+   * stops a future `/reports-archive` from lighting `/reports`.
+   */
+  const isActive = (href: string) => {
+    const matches = (candidate: string) =>
+      candidate === "/"
+        ? pathname === "/"
+        : pathname === candidate || pathname.startsWith(`${candidate}/`);
+
+    if (!matches(href)) return false;
+
+    return !NAV_HREFS.some(
+      (candidate) => candidate.length > href.length && matches(candidate),
+    );
+  };
 
   /**
    * Pick a queue, and make sure the leads workspace is on screen to show it.

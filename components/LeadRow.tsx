@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowUpRight, Star } from "lucide-react";
 
+import RowRecordingButton from "./RowRecordingButton";
 import { StatusChip } from "./StatusSelect";
 import WhatsAppLink from "./WhatsAppLink";
 import {
@@ -11,7 +12,8 @@ import {
   formatCallbackDate,
   websiteHref,
 } from "@/lib/leadUtils";
-import { formatMeetingTime } from "@/lib/meetings";
+import { formatMeetingTime, isMeetingLead } from "@/lib/meetings";
+import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
 
 /**
@@ -62,6 +64,8 @@ export default function LeadRow({
   today,
   href,
   onOpen,
+  recording,
+  onRecordingSaved,
 }: {
   lead: Lead;
   today: string;
@@ -69,6 +73,14 @@ export default function LeadRow({
   href: string;
   /** Open the lead over this list, without leaving it. */
   onOpen: () => void;
+  /**
+   * The call recording on this lead, if there is one this agent may see.
+   * Read-only here — the row shows that audio exists and offers to add or
+   * replace it; playing, and deleting, stay in the workspace.
+   */
+  recording: RecordingSummary | null;
+  /** A finished quick upload, written back into this row alone. */
+  onRecordingSaved: (recording: RecordingSummary) => void;
 }) {
   const state = callbackState(lead, today);
 
@@ -85,11 +97,14 @@ export default function LeadRow({
 
   return (
     <tr
-      // `relative` is what the row-wide link overlay is measured against, and
-      // `focus-within` as well as `hover`: tabbing to that link should light the
-      // row up the same way the cursor does, or a keyboard user cannot tell
-      // which lead they are about to open.
-      className="group relative border-b border-line align-middle transition-colors hover:bg-hover focus-within:bg-hover"
+      // `relative` is what the row-wide link overlay is measured against.
+      //
+      // The row's background — base, alternating and hover — is set in
+      // `globals.css` rather than here. It has to be: the frozen first cell
+      // paints its own opaque background, so a `hover:bg-hover` utility on the
+      // row would light every column except the one with the business name in
+      // it. The stylesheet names the row and that cell together.
+      className="group relative border-b border-line align-middle"
     >
       {/* pl-[18px] matches the header: 2px of urgency stripe plus 16px. */}
       <td data-urgency={urgency} className="py-2 pl-[18px] pr-3">
@@ -197,6 +212,26 @@ export default function LeadRow({
           is what the lead's own page is for. */}
       <td className="border-l border-line px-3 py-2">
         <StatusChip status={lead.status} />
+      </td>
+
+      {/* The one action left in a read-only row, and it is deliberately the
+          smallest thing in it: a 28px glyph that opens a file picker and posts
+          to the same endpoint the workspace does. Nothing else about the row
+          became editable — this is a shortcut for an agent who already knows
+          which file belongs to which call. See `RowRecordingButton` for why an
+          ineligible lead shows nothing at all. */}
+      {/* `relative` so a failed upload's message can be floated out of a cell
+          only wide enough for the control itself. */}
+      <td className="relative px-3 py-2">
+        <RowRecordingButton
+          leadId={lead.id}
+          leadName={lead.name}
+          recording={recording}
+          // Judged on the *saved* lead, the same way the workspace judges it:
+          // the upload posts immediately and the server reads the row.
+          eligible={isMeetingLead(lead)}
+          onSaved={onRecordingSaved}
+        />
       </td>
 
       <td className="whitespace-nowrap px-3 py-2">

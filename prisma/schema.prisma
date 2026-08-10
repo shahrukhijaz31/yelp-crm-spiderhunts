@@ -109,6 +109,10 @@ model Lead {
   /// uploaded. At most one — see `MeetingRecording`.
   recording MeetingRecording?
 
+  /// The log of who worked this lead and when. The lead itself keeps only the
+  /// current outcome; this keeps every one of them, with a name against it.
+  activity LeadActivity[]
+
   /// Indexes follow the queries the UI actually runs: the stat bar and filters
   /// group by status, the Callbacks/Meetings views range-scan on callbackDate,
   /// and the import view scopes by batch. There is deliberately no unique
@@ -190,6 +194,145 @@ model MeetingRecording {
   @@map("meeting_recordings")
 }
 
+/// What an agent did to a lead, as one of a small closed set of *acts*.
+///
+/// Deliberately not "every field that changed": these are the four things the
+/// business asks about at the end of a day, and each one maps to a decision an
+/// agent actually made. Typing in the notes box is not on the list, because
+/// nobody has ever wanted to know how many times a note was edited.
+enum LeadActivityKind {
+  /// A call outcome was saved — the same act that stamps `leads.first_called_at`
+  /// (see `updateLeadFields`). This is the atom every "calls" and "leads worked"
+  /// figure is counted from.
+  call_logged
+  /// A date was put in the diary with no time attached.
+  callback_scheduled
+  /// A date *and* a time — what the Book meeting dialog sends.
+  meeting_booked
+  /// A meeting was marked done.
+  meeting_completed
+
+  @@map("lead_activity_kind")
+}
+
+/// One thing one person did to one lead, at one instant.
+///
+/// **Why this table has to exist.** Nothing else in the schema records *who*
+/// worked a lead. `leads` carries the outcome (`status`, `first_called_at`,
+/// `updated_at`) but not the actor, and it is overwritten in place — the row
+/// only ever remembers the most recent edit, by nobody in particular. So
+/// "how many leads did Umar work today" is not a question the existing tables
+/// can answer at any price, and no amount of aggregation over `leads` will
+/// produce it. This is the minimum structure that makes per-agent reporting
+/// derivable from real data rather than guessed at.
+///
+/// It is an append-only log, and that is the second reason it is not columns on
+/// `leads`: a lead worked on Monday and again on Friday is two facts, and a
+/// column can only hold one of them. Rows are never updated and never deleted
+/// by the application.
+///
+/// **`status` is copied deliberately**, and it is not duplication of
+/// `leads.status`. That column is where the lead stands *now* and moves
+/// whenever anyone edits it; this is what the outcome *was* at this instant, so
+/// a report of last week's calls does not silently rewrite itself when someone
+/// corrects a status today. Reports read this column and never join back to the
+/// lead for an outcome.
+model LeadActivity {
+  id String @id @default(cuid())
+
+  /// Cascade: activity against a lead that no longer exists cannot be shown,
+  /// filtered or attributed to anything, and the lead is what gives it meaning.
+  leadId String @map("lead_id")
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Who did it. Restrict, matching `meeting_recordings` and `password_resets`:
+  /// accounts here are disabled rather than deleted, and a delete that quietly
+  /// took a month of someone's performance record with it would be exactly the
+  /// wrong default for a table whose whole job is attribution.
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  kind LeadActivityKind
+
+  /// The call outcome as saved, for `call_logged` rows. Null on the other
+  /// kinds, which are not outcomes.
+  status CallStatus?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Every report is "this person, over this window" or "everyone, over this
+  /// window", so the composite leads with the agent and the plain index on the
+  /// clock serves the team-wide roll-up. `leadId` supports counting *distinct
+  /// leads* worked, which is not the same as counting calls.
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@index([leadId, createdAt])
+  @@map("lead_activities")
+}
+
+/// A stretch of time somebody was signed in and working.
+///
+/// **Not the same row as `sessions`.** That table is a *browser* — one row per
+/// cookie, deleted at logout, and there are as many of them as the person has
+/// devices and tabs open. This is a *shift*: at most one open row per user at
+/// any moment, whatever they are browsing from, kept after it ends because the
+/// whole point is to still have it at the end of the month. Reusing `sessions`
+/// for both would mean either losing the record at logout (it is deleted) or
+/// counting a second browser as a second working day.
+///
+/// **One open session per user, and that is how multiple tabs are handled.**
+/// Signing in resumes the open session if there already is one rather than
+/// opening a second (`openOrResumeWorkSession`), so a second tab, a second
+/// window or a second browser adds no time at all — the clock is wall-clock
+/// presence, counted once. The invariant is enforced in that one function,
+/// inside a transaction, and the reconciliation sweep collapses any duplicate
+/// that a genuinely simultaneous double sign-in could still produce.
+///
+/// **Crashes are bounded by `lastSeenAt`.** The browser heartbeats while the
+/// portal is open; a session whose heartbeat stopped is closed at its last
+/// heartbeat rather than at the moment anyone noticed, so a closed laptop costs
+/// a few minutes of over-count and never a permanently running clock. Nothing
+/// depends on the logout button being pressed.
+///
+/// **`lastSeenAt` is also the hook for real activity tracking.** Today the
+/// heartbeat means "the portal is open", so the duration is authenticated
+/// session time, which is what was asked for. If idle detection is added later
+/// it changes what the heartbeat is *sent on*, and this table does not change.
+model WorkSession {
+  id String @id @default(cuid())
+
+  /// Cascade: a deleted account's shifts have nobody to be reported for.
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  startedAt DateTime @default(now()) @map("started_at")
+  /// Last heartbeat from an open portal tab. Bounds the session if it dies.
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  /// Null while the session is open — the one column that says "still working".
+  endedAt DateTime? @map("ended_at")
+
+  /// Whole seconds between `startedAt` and `endedAt`, written when the session
+  /// closes. Stored rather than computed on read because it is what every
+  /// report sums, and `SUM(duration_seconds)` over an indexed range beats
+  /// subtracting two timestamps a million times. Null while open, where the
+  /// live figure is `now() - started_at` and belongs to the clock, not the row.
+  durationSeconds Int? @map("duration_seconds")
+
+  /// How it ended, for reading the data later rather than for any decision the
+  /// code makes: `logout` is the button, `timeout` is a heartbeat that stopped.
+  endedReason String? @map("ended_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The two queries this table has: "the open session for this user"
+  /// (`endedAt IS NULL`, hit on every page load) and "sessions overlapping this
+  /// window" for the reports.
+  @@index([userId, endedAt])
+  @@index([userId, startedAt])
+  @@index([startedAt])
+  @@map("work_sessions")
+}
+
 /// Exactly two roles, and every user has one. ADMIN is the full portal; AGENT
 /// is the day job — the worklist and meetings — with export, import, reports,
 /// settings and user management withheld.
@@ -250,6 +393,12 @@ model User {
   /// Restrict on the far side is visible from here: a user holding recordings
   /// cannot be deleted out from under them.
   recordings MeetingRecording[]
+
+  /// What this person did, and when they were signed in to do it. Both are the
+  /// raw material of every performance figure in the portal; neither is ever
+  /// read for anyone but the caller unless the caller is an administrator.
+  activity     LeadActivity[]
+  workSessions WorkSession[]
 
   @@map("users")
 }

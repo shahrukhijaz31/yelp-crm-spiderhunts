@@ -111,7 +111,11 @@ export async function PATCH(
   }
 
   try {
-    const lead = await updateLeadFields(id, edits);
+    // `auth.id` — the user the session row in Postgres resolved to, not
+    // anything the body claimed. This is what attributes the save in
+    // `lead_activities`, so there is no way to record work under someone
+    // else's name: the endpoint never reads an author from the request.
+    const lead = await updateLeadFields(id, edits, auth.id);
     if (!lead) {
       return Response.json(
         {

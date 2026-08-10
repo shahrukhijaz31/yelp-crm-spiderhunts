@@ -67,6 +67,16 @@ npm run dev   # http://localhost:3000
   public URL, and playback is an authenticated range-streamed route, so no file
   is downloaded just to be listened to. The bytes live on disk under
   `RECORDINGS_DIR`; Postgres holds only the metadata.
+- **Performance tracking** — a work-session clock and a per-agent record of what
+  was actually worked. Signing in starts a shift in Postgres; the top bar counts
+  up from the row rather than from a browser timer, so a refresh does not reset
+  it. An agent sees their own figures — a "My day" band above the worklist and a
+  fuller `/my-performance` — and nothing else; admins get `/reports/team`, with
+  date and agent filters, KPI cards, a per-agent table and the shape of the
+  period. Both are counted by Postgres from `lead_activities` and
+  `work_sessions`; every number is a count of something an agent saved, there
+  are no targets or estimates, and nothing is counted in the browser.
+  See **Performance and work sessions** below.
 - **Themes** — dark (graphite + signal red) and light (cool slate), toggled from
   the nav bar and persisted to localStorage via next-themes. Colour lives in one
   place: every token is a `--c-*` variable defined twice in `app/globals.css`
@@ -108,6 +118,8 @@ three layers:
 | `POST /api/leads/upload`, `/api/users*` | yes | **403** |
 | Upload a call recording against a meeting | yes | yes |
 | Play / read / replace / delete a call recording | any | only their own uploads — **404** for anyone else's |
+| Team Performance (`/reports/team`, `GET /api/reports/team`) | yes | **403** |
+| Their own figures (`/my-performance`, `GET /api/performance/me`) | yes | yes — own row only, always |
 
 An agent who types an admin URL gets an Access Denied screen — not the login
 form, which they have already satisfied. There is deliberately no endpoint at
@@ -136,10 +148,19 @@ app/
   (portal)/import/page.tsx    CSV import          — ADMIN
   (portal)/export/page.tsx    CSV / XLSX / PDF    — ADMIN
   (portal)/reports/page.tsx   summary + full status breakdown — ADMIN
+  (portal)/reports/team/page.tsx
+                              team performance: KPIs, per-agent table — ADMIN
+  (portal)/my-performance/page.tsx
+                              the caller's own figures — every role, own row only
   (portal)/settings/page.tsx  placeholder for backend config  — ADMIN
   (portal)/users/page.tsx     accounts and roles              — ADMIN
   api/auth/login/route.ts     POST — verify a password, mint a session
-  api/auth/logout/route.ts    POST — delete the session row, clear the cookie
+  api/auth/logout/route.ts    POST — delete the session row, close the shift, clear the cookie
+  api/auth/logout/route.ts    (also closes the work session — see below)
+  api/performance/me/route.ts GET — the caller's own figures; takes no parameters
+  api/reports/team/route.ts   GET — every agent's figures       — ADMIN
+  api/work-session/heartbeat/route.ts
+                              POST — "this browser is still open"
   api/leads/route.ts          GET — every lead, from Postgres
   api/leads/[id]/route.ts     PATCH — persists one inline edit
   api/leads/upload/route.ts   POST — parses a CSV and merges it in, never wipes
@@ -179,6 +200,10 @@ lib/
   recordings.ts               call-recording queries and the permission policy
   recordingStorage.ts         the object store: a directory, addressed by key
   filters.ts                  filter model, matching predicate, active-chip list
+  leadActivity.ts             classifies a save into the acts it represents, and writes them
+  workSessions.ts             shifts: open/resume, heartbeat, logout, stale reconciliation
+  performanceRules.ts         ranges, shapes, rates, clock formats — pure, client-safe
+  performance.ts              the reporting aggregates; counted by Postgres, never in JS
 ```
 
 ## Database
@@ -258,6 +283,11 @@ generated client lands in `lib/generated/prisma` and is gitignored.
   table.
 - **Scraper ingest** — `POST /api/leads/ingest`, same parser, also merges.
   See below.
+- **Attribution** — the same `PATCH /api/leads/[id]` write also appends to
+  `lead_activities`, using the user the session row resolved to. That log and
+  `work_sessions` are the only source of the per-agent figures; both are
+  aggregated by Postgres in `lib/performance.ts`. See **Performance and work
+  sessions** below.
 
 ### Pagination: why the filtering moved to Postgres
 
@@ -451,6 +481,112 @@ disguised type, oversized, streaming, range and suffix-range, replace, delete,
 cross-agent refusal, signed-out refusal, and that the Meetings page still
 renders. It creates and removes its own users and recordings, and needs the app
 running (`npm run dev`, or `TEST_BASE_URL=… ` against any instance).
+
+## Performance and work sessions
+
+Two questions the lead tables could not answer on their own: **who** worked a
+lead, and **how long** was somebody here. Both needed a place to be recorded —
+`leads` holds the outcome but not the actor and is overwritten in place, and
+`sessions` is one row per browser cookie and is deleted at logout. So there are
+two new tables and no changes to any existing one.
+
+### What is counted, and what deliberately is not
+
+`lead_activities` is an append-only log written from the one endpoint that
+persists an agent's work, `PATCH /api/leads/:id`, using the user the *session
+row* resolved to — never anything the request body claims. A save becomes one or
+more of four acts (`lib/leadActivity.ts`):
+
+| Act | Written when |
+| --- | --- |
+| `call_logged` | the save carries a status and it is a called status — the same condition that stamps `first_called_at` |
+| `meeting_booked` | a meeting time was set, and a date ends up on the lead |
+| `callback_scheduled` | a date was set or changed with no time — the `else` of the rule above, so one save is never both |
+| `meeting_completed` | the meeting was marked done, on the transition only |
+
+Opening a lead, expanding a row, dialling the number, searching or paging reach
+no write and therefore produce no statistic. Setting a lead *back* to "Not
+called" is somebody undoing a mis-click and does not count as work. A
+notes-only save is bookkeeping, not a call.
+
+The outcome is copied onto the activity row rather than joined from the lead:
+`leads.status` is where a lead stands *now*, so reading it would let last week's
+numbers rewrite themselves whenever somebody corrects a status today.
+
+### Work sessions
+
+`work_sessions` is a **shift** — at most one open row per user at any moment,
+whatever they are browsing from, kept after it ends.
+
+- **Multiple tabs and browsers.** Signing in *resumes* the open shift instead of
+  opening a second one, so a second tab, window or device adds no time at all.
+  The invariant is enforced in `openOrResumeWorkSession` inside a transaction,
+  and the reconciliation sweep collapses any duplicate a simultaneous double
+  sign-in could slip past it.
+- **Crashes.** An open tab heartbeats once a minute (`POST
+  /api/work-session/heartbeat` — no body; whose session it is comes from the
+  session row). A shift whose heartbeat has stopped for five minutes is closed
+  **at its own last heartbeat**, not at the moment anybody noticed, so a closed
+  laptop costs minutes rather than a clock that runs forever. Reports do not
+  wait for the sweep: an un-swept shift is clamped to the same instant on read.
+- **Logout** closes the shift — but only when no other live authentication
+  session remains, so signing out of a phone does not stop the clock on the desk
+  someone is still sitting at. Sweeping happens opportunistically at login,
+  beside `pruneExpiredSessions`, because this app has no cron.
+- **Active time vs login time.** The heartbeat currently means "a portal tab is
+  open and visible", so a duration is authenticated session time. Real idle
+  detection changes only what the client beats *on*; neither the table nor any
+  query here would change.
+
+### The screens
+
+| | Who | Shows |
+| --- | --- | --- |
+| "My day" band, above the worklist | every role | leads worked, calls, callbacks, meetings, active time — the caller's own |
+| `/my-performance` | every role | the above plus the last 7 days, answer and interest rates, the running session clock |
+| `/reports/team` | **ADMIN** | KPI cards, a per-agent table, calls/meetings per day, conversion — with date and agent filters |
+
+The date filter offers today, yesterday, last 7 days, last 30 days and a custom
+range; the agent filter offers all agents or one. Both are read by
+`resolveRange`, which clamps rather than rejects — a reversed custom range is
+swapped, and an unknown preset falls back to today — so no report 400s over a
+date picker.
+
+### How an agent is kept out of the team report
+
+Not by hiding the nav item. Three things, of which only the first two matter:
+
+1. `apiAdmin()` on `GET /api/reports/team` and `requireRole("ADMIN")` on the
+   page, both resolving the caller from the session row in Postgres. An agent
+   with a valid session and curl gets a 403 and an Access Denied screen.
+2. `/reports` and `/api/reports` are admin prefixes in `lib/access.ts`, so the
+   policy for the screen and the policy for its endpoint are written together.
+3. The rail does not draw the link. Tidiness; removing it changes nothing.
+
+The personal endpoint is a different shape on purpose: `GET /api/performance/me`
+accepts **no parameters at all** — no `?userId=`, no body — and queries
+`auth.id`. There is nothing to tamper with, so an agent cannot ask it about a
+colleague however they edit the request. Two endpoints rather than one with a
+role branch inside it, because the branch is the bug.
+
+### Performance of the reports
+
+Everything is `count`/`sum` with `GROUP BY` over an indexed date range, and the
+per-agent rows and the team totals come back from one pass using `GROUPING
+SETS`. Nothing is read into the server to be counted there and nothing is sent
+to the browser to be counted there, so a response is one row per agent whether
+the tables hold a thousand activity rows or ten million. Team `leadsWorked` is a
+`COUNT(DISTINCT lead_id)` across everybody rather than the sum of the rows — two
+agents who called the same lead worked one lead between them.
+
+**There is no target anywhere on these screens.** Every figure is a count of a
+row somebody's save created. An earlier version carried a fixed
+`DAILY_LEAD_TARGET` and drew leads-worked as a progress bar against it; it was
+removed because it was the only number on the page that had not been measured,
+and a round number nobody in the system chose reads as one somebody did. If a
+target is wanted it needs an owner and a place to be set — a column on `users`
+or a settings row, edited by an administrator — so that "who decided 60?" has an
+answer.
 
 ## Expected CSV columns
 

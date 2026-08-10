@@ -3,9 +3,11 @@ import { connection } from "next/server";
 import AppShell from "@/components/AppShell";
 import { LeadQueueProvider } from "@/components/LeadQueueProvider";
 import { PortalStatsProvider } from "@/components/PortalStatsProvider";
+import { WorkSessionProvider } from "@/components/WorkSessionProvider";
 import { requireUser } from "@/lib/authz";
 import { leadStats, leadWorkCounts } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
+import { getActiveWorkSession } from "@/lib/workSessions";
 
 /**
  * The authenticated portal.
@@ -40,7 +42,19 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
   // Two aggregates, no rows: the nav bar's counters and the New/Called badges
   // in the rail. Both are `count(*)` over an indexed column, and neither
   // depends on the other, so they go together.
-  const [stats, workCounts] = await Promise.all([leadStats(today), leadWorkCounts()]);
+  // The third read is the open work session, if there is one. It is here rather
+  // than in the top bar for the same reason the counts are: the shell is what
+  // stays mounted across navigations, so the clock is started once and keeps
+  // running as an agent moves between screens instead of being re-read on each.
+  //
+  // Reading the *start instant* from Postgres rather than starting a timer in
+  // the browser is what makes the clock survive a refresh, agree between two
+  // tabs, and mean the same thing as the "active time" figure on the reports.
+  const [stats, workCounts, workSession] = await Promise.all([
+    leadStats(today),
+    leadWorkCounts(),
+    getActiveWorkSession(user.id),
+  ]);
 
   return (
     // One set of counts for the shell. Whichever screen learns a fresher set
@@ -49,9 +63,13 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
       {/* The queue lives out here because the control that changes it is in the
           sidebar and the screen that answers to it is in the route. */}
       <LeadQueueProvider initialCounts={workCounts}>
-        <AppShell today={today} user={user}>
-          {children}
-        </AppShell>
+        {/* Outside the shell so the heartbeat keeps beating whatever screen is
+            on, including the ones that draw no clock at all. */}
+        <WorkSessionProvider initialStartedAt={workSession?.startedAt ?? null}>
+          <AppShell today={today} user={user}>
+            {children}
+          </AppShell>
+        </WorkSessionProvider>
       </LeadQueueProvider>
     </PortalStatsProvider>
   );

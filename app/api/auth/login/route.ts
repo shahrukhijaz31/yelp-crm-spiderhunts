@@ -8,6 +8,7 @@ import {
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { createSession, pruneExpiredSessions } from "@/lib/session";
 import { findUserForLogin, markLoggedIn } from "@/lib/userDb";
+import { openOrResumeWorkSession, reconcileStaleWorkSessions } from "@/lib/workSessions";
 
 /**
  * POST /api/auth/login — exchange a username and password for a session.
@@ -170,9 +171,27 @@ export async function POST(request: Request): Promise<Response> {
 
   clearLoginFailures(username);
   await markLoggedIn(user.id);
+
+  /*
+   * Start the work session — the shift the "active time" figures are summed
+   * from. Awaited, not fired and forgotten, so the clock is running in Postgres
+   * before the browser is told to go to the portal; the timer the user then
+   * sees is read from that row rather than started by the page load, which is
+   * what makes it survive a refresh.
+   *
+   * `openOrResumeWorkSession` *resumes* an open session rather than opening a
+   * second one, so signing in from a second tab, window or device adds no time
+   * at all. It never throws — a clock that could not be started must not cost
+   * somebody their sign-in.
+   */
+  await openOrResumeWorkSession(user.id);
+
   // Opportunistic housekeeping — this app has no cron, and a login is a
   // natural, infrequent moment to clear out rows whose clocks have run out.
+  // Work sessions abandoned by a closed browser are reconciled on the same
+  // beat, and for the same reason.
   void pruneExpiredSessions();
+  void reconcileStaleWorkSessions();
 
   return Response.json({ ok: true, redirectTo }, { headers: { "Cache-Control": "no-store" } });
 }

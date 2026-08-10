@@ -16,6 +16,7 @@ import FilterToolbar from "./FilterToolbar";
 import HeadlineStrip from "./HeadlineStrip";
 import LeadOverlay from "./LeadOverlay";
 import LeadTable from "./LeadTable";
+import MyDayStrip from "./MyDayStrip";
 import Pagination from "./Pagination";
 import ViewTabs from "./ViewTabs";
 import { useLeadQueue } from "./LeadQueueProvider";
@@ -32,6 +33,7 @@ import {
   type LeadSortKey,
   type PageSize,
 } from "@/lib/leadQuery";
+import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
 import { WORKLIST_VIEW_HINTS, type WorklistView } from "@/lib/views";
 import {
@@ -146,10 +148,31 @@ export default function Worklist({
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
   const [meta, setMeta] = useState<LeadPageMeta>(initialMeta);
   const [busy, setBusy] = useState(false);
+
+  // Bumped whenever a save lands, so the "My day" band re-reads the agent's own
+  // figures. A counter rather than the figures themselves: this screen has no
+  // business knowing what they are or where they come from.
+  const [dayRevision, setDayRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  /*
+   * Which leads already have a call recording, keyed by lead id.
+   *
+   * One request, once, for the whole screen — and deliberately *not* part of
+   * the paged leads query above, which is re-asked on every tab, filter, sort
+   * and page change. Recordings only change when one is uploaded, and when that
+   * happens the answer is already in hand: the POST returns the saved summary,
+   * so the row updates from the response rather than from a re-read.
+   *
+   * The server decides what is in here (`GET /api/recordings` → the same
+   * `listRecordingsFor` the Meetings page uses), so an agent is only ever told
+   * about their own uploads and an admin about all of them. An empty map is a
+   * perfectly good answer: the column simply offers to upload.
+   */
+  const [recordings, setRecordings] = useState<Record<string, RecordingSummary>>({});
 
   /*
    * Which lead is open over this list, and where in the list it was.
@@ -332,6 +355,35 @@ export default function Worklist({
     setStats,
     setWorkCounts,
   ]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/recordings", { signal: controller.signal });
+        if (!response.ok) return;
+        const data = (await response.json()) as {
+          recordings?: Record<string, RecordingSummary>;
+        };
+        if (data.recordings) setRecordings(data.recordings);
+      } catch (caught) {
+        // Not worth an error banner: the list is entirely usable without this,
+        // and the only cost of it failing is that a lead with audio shows an
+        // upload arrow instead of the attached glyph. The upload itself would
+        // still work, and the server would still refuse a replace it should.
+        if (controller.signal.aborted) return;
+        console.error("Loading call recordings failed:", caught);
+      }
+    })();
+
+    return () => controller.abort();
+  }, []);
+
+  /** A quick upload from a row. One entry changes; nothing is re-fetched. */
+  const handleRecordingSaved = useCallback((saved: RecordingSummary) => {
+    setRecordings((current) => ({ ...current, [saved.leadId]: saved }));
+  }, []);
 
   /*
    * Page and page size live in the address bar so a reload, a bookmark or a
@@ -522,6 +574,11 @@ export default function Worklist({
         current.map((row) => (row.id === saved.id ? saved : row)),
       );
       refreshStats();
+      // A save is also the moment the agent's own day changed — the server has
+      // just written the activity row it is counted from. Bumping a counter
+      // rather than calling into the strip keeps this screen ignorant of how
+      // that band fetches its figures.
+      setDayRevision((current) => current + 1);
     },
     [refreshStats],
   );
@@ -583,6 +640,13 @@ export default function Worklist({
      * pager stay on screen however long the list is.
      */
     <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-4 px-4 py-5 sm:px-6">
+      {/* The agent's own day, above the workspace's. Their figures first
+          because they are the ones a person can do something about in the next
+          hour; the list's totals are the context underneath. Own row only —
+          this band never shows anybody else's numbers, and the endpoint behind
+          it cannot be asked for them. */}
+      <MyDayStrip revision={dayRevision} />
+
       <HeadlineStrip stats={stats} />
 
       <section className="panel flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -683,6 +747,8 @@ export default function Worklist({
             // and the criteria. `lastCriteria` already encodes the tab, the
             // applied filters, the sort and the date.
             datasetKey={`${lastCriteria}|${meta.page}|${meta.pageSize}`}
+            recordings={recordings}
+            onRecordingSaved={handleRecordingSaved}
           />
         </div>
 

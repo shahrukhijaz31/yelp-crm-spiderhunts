@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, SearchX } from "lucide-react";
 
 import LeadRow from "./LeadRow";
 import type { LeadSort, LeadSortKey } from "@/lib/leadQuery";
+import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
 
 /**
@@ -39,17 +40,22 @@ const COLUMNS: Array<{
   // name is what an agent is scanning for *and* the link into the lead's
   // workspace, so it gets both the room for a longer name before truncation
   // and a permanent seat on screen.
-  { label: "Business", width: "24%", sortKey: "name" },
+  { label: "Business", width: "23%", sortKey: "name" },
   // Wider than the number needs: it also carries the WhatsApp glyph, and the
   // cell never wraps, so a tight column would clip one or the other.
   { label: "Phone", width: "13%", sortKey: "phone" },
-  { label: "Address", width: "19%", sortKey: "address" },
+  { label: "Address", width: "17%", sortKey: "address" },
   // Truncates by design and carries the full value in a title tooltip.
-  { label: "Category", width: "11%", sortKey: "category" },
-  { label: "Website", width: "14%" },
+  { label: "Category", width: "10%", sortKey: "category" },
+  { label: "Website", width: "13%" },
   // Sized against their longest content: "Not interested" as a chip, and a
   // date with a time beside it.
   { label: "Status", width: "11%" },
+  // One 28px glyph, so this is the narrowest column in the table by some way —
+  // the quick upload is an action beside the status, not a feature of the list,
+  // and giving it a chip's worth of room would say otherwise. The four scraped
+  // columns each gave up a point to pay for it rather than the table growing.
+  { label: "Audio", width: "5%" },
   { label: "Booked", width: "8%" },
 ];
 
@@ -69,6 +75,8 @@ export default function LeadTable({
   hrefFor,
   onOpen,
   datasetKey,
+  recordings,
+  onRecordingSaved,
 }: {
   leads: Lead[];
   today: string;
@@ -91,6 +99,14 @@ export default function LeadTable({
    * filters. Changing it fades the new rows in.
    */
   datasetKey: string;
+  /**
+   * Call recordings the signed-in user may see, keyed by lead. Fetched once by
+   * `Worklist` for the whole screen rather than per row, and deliberately not
+   * part of the paged leads query — see `app/api/recordings/route.ts`.
+   */
+  recordings: Record<string, RecordingSummary>;
+  /** A quick upload that landed. Updates one entry in the map above. */
+  onRecordingSaved: (recording: RecordingSummary) => void;
 }) {
   return (
     // No panel of its own: the table is the body of the workspace surface,
@@ -98,7 +114,9 @@ export default function LeadTable({
     // rows scroll — the toolbar and the pager stay put, which is what makes a
     // long list feel like a window onto data rather than a long page.
     <div className="min-h-0 flex-1 overflow-auto">
-      <table className="lead-table lead-table-frozen w-full min-w-[1120px] table-fixed border-collapse">
+      {/* 60px more than before, which is what the Audio column needs to hold a
+          28px control between the same 12px gutters every other cell uses. */}
+      <table className="lead-table lead-table-frozen w-full min-w-[1180px] table-fixed border-collapse">
         <colgroup>
           {COLUMNS.map((column) => (
             <col key={column.label} style={{ width: column.width }} />
@@ -180,6 +198,8 @@ export default function LeadTable({
               today={today}
               href={hrefFor(lead, index)}
               onOpen={() => onOpen(index)}
+              recording={recordings[lead.id] ?? null}
+              onRecordingSaved={onRecordingSaved}
             />
           ))}
           {leads.length === 0 && (

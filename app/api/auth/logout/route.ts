@@ -1,5 +1,6 @@
 import { LOGIN_PATH } from "@/lib/access";
-import { destroySession } from "@/lib/session";
+import { destroySession, getSessionUser } from "@/lib/session";
+import { endWorkSessionForLogout } from "@/lib/workSessions";
 
 /**
  * POST /api/auth/logout — end the session for real.
@@ -15,9 +16,31 @@ import { destroySession } from "@/lib/session";
  *
  * Always 200, even with no session to destroy. Signing out is idempotent and
  * "you were not signed in" is not an error worth showing anyone.
+ *
+ * **The work session is closed here too**, and the order of the three steps is
+ * the whole design:
+ *
+ *   1. resolve who is signing out, while the cookie still means something;
+ *   2. destroy the authentication session, which is the part that must happen
+ *      whatever else does;
+ *   3. close the shift.
+ *
+ * Step 3 last, and after step 2, because `endWorkSessionForLogout` decides
+ * whether to stop the clock by counting the browsers that are *still* signed
+ * in — so this one has to be gone before it counts. An agent signing out of
+ * their phone while still working at their desk keeps their timer running;
+ * signing out of the last browser stops it and writes the duration.
+ *
+ * It cannot fail the logout: it swallows its own errors, and a shift left open
+ * by a database hiccup is closed by the next reconciliation sweep at its last
+ * heartbeat.
  */
 export async function POST(): Promise<Response> {
+  const user = await getSessionUser().catch(() => null);
+
   await destroySession();
+
+  if (user) await endWorkSessionForLogout(user.id);
 
   return Response.json(
     { ok: true, redirectTo: LOGIN_PATH },

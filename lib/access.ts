@@ -77,6 +77,20 @@ const PUBLIC_PATHS = new Set<string>([
  * listing the path here would either lock agents out of their own job or say
  * nothing useful.
  */
+/*
+ * Deliberately not here either: `/my-performance` and `/api/performance/me`.
+ * Those are a person's own figures, which every role is entitled to and no role
+ * may see for anyone else — a rule about *whose* row rather than about a path.
+ * It is kept where it can actually be enforced: the endpoint takes no user id
+ * at all and queries the session's own (see `app/api/performance/me/route.ts`).
+ *
+ * The team-wide view *is* a path rule, and `/reports` already covers the page
+ * side of it — `/reports/team` is prefixed by it, so `canAccess` hides the nav
+ * item and the page's own `requireRole` refuses an agent who types the URL.
+ * `/api/reports` is added so the endpoint behind that screen is described by
+ * the same policy as the screen; the enforcement is `apiAdmin()` inside the
+ * handler, which is what an agent with curl actually meets.
+ */
 const ADMIN_PREFIXES = [
   "/export",
   "/import",
@@ -84,6 +98,7 @@ const ADMIN_PREFIXES = [
   "/settings",
   "/users",
   "/api/leads/upload",
+  "/api/reports",
   "/api/users",
 ] as const;
 

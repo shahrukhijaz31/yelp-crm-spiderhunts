@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 
+import SessionTimer from "./SessionTimer";
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
 import { usePortalStats } from "./PortalStatsProvider";
@@ -28,7 +29,12 @@ const TITLES: Array<[string, string]> = [
   // tab sitting on a lead does not claim to be the list it came from.
   ["/leads", "Lead workspace"],
   ["/meetings", "Meetings"],
+  // Before `/reports`, because the first match wins and `/reports` is a prefix
+  // of this one. The two are different screens: Reports is the state of the
+  // lead list, this is the state of the people working it.
+  ["/reports/team", "Team performance"],
   ["/reports", "Reports"],
+  ["/my-performance", "My performance"],
   ["/export", "Export"],
   ["/import", "Import"],
   ["/users", "Users"],
@@ -103,6 +109,11 @@ export default function AppTopBar({
             due
           </span>
         </p>
+
+        {/* The shift clock, beside the two lead counts rather than anywhere
+            more prominent: it is the same kind of fact, and it is the one
+            number here that is about the person rather than the workspace. */}
+        <SessionTimer />
 
         <p className="hidden text-caption text-fg-3 2xl:block">{longDate(today)}</p>
 

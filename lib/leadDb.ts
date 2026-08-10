@@ -1,6 +1,7 @@
 import { identityKeys } from "./cleanLeads";
 import { weekBounds, type CategoryOption } from "./filters";
 import { Prisma } from "./generated/prisma/client";
+import { describeLeadActivity, recordLeadActivity } from "./leadActivity";
 import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
 import type { LeadPageMeta, LeadPageQuery, LeadSort, LeadSortKey } from "./leadQuery";
 import { normalisePhone, type LeadStats } from "./leadUtils";
@@ -542,10 +543,24 @@ export async function leadCategories(): Promise<CategoryOption[]> {
   return rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
-/** Apply an agent's inline edit. Returns the saved row, or null if it is gone. */
+/**
+ * Apply an agent's inline edit. Returns the saved row, or null if it is gone.
+ *
+ * `actorId` is the signed-in user, supplied by the route handler from the
+ * session — never from the request body, which has no say in whose work this
+ * is. When it is present the save is also *attributed*: the acts it represents
+ * are appended to `lead_activities` (see `lib/leadActivity.ts`), which is the
+ * only record anywhere of who worked which lead and therefore the source of
+ * every per-agent figure in the portal.
+ *
+ * Optional so that a caller with no user — a migration, a script, the scraper —
+ * can still write a lead without inventing an author for it. Every path a
+ * person's work travels does pass one.
+ */
 export async function updateLeadFields(
   id: string,
   changes: Partial<LeadEditableFields>,
+  actorId?: string,
 ): Promise<Lead | null> {
   // Only the keys actually present are written, so a PATCH carrying just
   // `{ status }` cannot blank out someone's notes.
@@ -603,7 +618,19 @@ export async function updateLeadFields(
     data.firstCalledAt = new Date();
   }
 
-  return toLead(await prisma.lead.update({ where: { id }, data }));
+  const saved = toLead(await prisma.lead.update({ where: { id }, data }));
+
+  // Attribution, after the lead is safely written and never in its way. The
+  // "before" values come from the row already read above, so classifying the
+  // save costs no extra query — and awaiting it means a save that returns has
+  // been counted, which is what lets an agent watch their own numbers move as
+  // they work. A failure inside is logged and swallowed there: reporting must
+  // not be the reason a call outcome is lost.
+  if (actorId) {
+    await recordLeadActivity(id, actorId, describeLeadActivity(toLead(row), changes));
+  }
+
+  return saved;
 }
 
 /*

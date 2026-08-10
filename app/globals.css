@@ -66,6 +66,37 @@
   --c-rail: #14171b;
   --c-hover: #1a1e23;
 
+  /*
+   * The alternating row tint: 60% of the way from the row surface to `hover`.
+   *
+   * Measured against hover on purpose, because hover is the one surface step
+   * in this palette that is known to read. The whole ramp here is gentle —
+   * `hover` is only a 1.12 luminance ratio above `surface` — so defining the
+   * banding against anything shallower puts it under the threshold. It was
+   * first cut as a 50% mix of surface and `rail`, which computed to 1.02:1:
+   * present in the stylesheet, invisible on a screen.
+   *
+   * At 60% the band is ~1.07:1 — enough to walk the eye down a long list —
+   * and hover still lands a further step beyond it, so a hovered even row is
+   * unambiguously lit rather than merely striped.
+   *
+   * This is the one number to turn if the banding wants to be stronger or
+   * quieter. Nothing else needs to move with it — but note it is written as
+   * "40% surface" rather than the equivalent "60% hover", and that ordering is
+   * deliberate: the build wraps every `color-mix` in an `@supports` guard and
+   * falls back to whichever colour is named *first*. Named the other way
+   * round, a browser that failed the guard would paint every even row at full
+   * `hover` — banding as loud as the hover state, and hover itself invisible.
+   * This way the same failure degrades to plain `surface`: no banding at all,
+   * which is merely the old behaviour rather than a broken table.
+   *
+   * Defined once, not per theme: `var()` resolves against whichever theme is
+   * on `<html>`, so light gets its own value from this same line — and the
+   * direction reverses for free, because on light `hover` is *darker* than
+   * `surface` rather than lighter.
+   */
+  --c-row-alt: color-mix(in srgb, var(--c-surface) 40%, var(--c-hover));
+
   /* Hairlines. `line` separates, `line-2` outlines something interactive. */
   --c-line: #1d2027;
   --c-line-2: #2a2e36;
@@ -1892,7 +1923,7 @@ select option {
 }
 
 /*
- * The worklist's business column is frozen. Eight columns need ~1460px, so on
+ * The worklist's business column is frozen. Nine columns need ~1460px, so on
  * anything narrower the table scrolls sideways — and scrolling the *name* of
  * the lead off the left edge is what makes a wide CRM table unusable, because
  * no other cell means anything without it.
@@ -1905,8 +1936,10 @@ select option {
   position: sticky;
   left: 0;
   z-index: 5;
-  background: var(--c-surface);
   box-shadow: 1px 0 0 0 var(--c-line);
+  /* Its background is set with the row's, further down. It used to be pinned
+     to `surface` here, which outranked anything the row said and would have
+     left the frozen column the one stripe-less column in a banded table. */
 }
 
 /* The header's frozen cell has to restate the rail fill, because the rule
@@ -1955,11 +1988,79 @@ select option {
     1px 0 0 0 var(--c-line);
 }
 
-/* The frozen cell paints its own background, so row hover has to be restated
-   for it — otherwise the first column stays inert while the row lights up. */
+/*
+ * ---------------------------------------------------------------------------
+ * Row surface: base, alternating, hover — one owner, three states
+ * ---------------------------------------------------------------------------
+ *
+ * Every rule names the row *and* its frozen first cell together. That pairing
+ * is the whole point: the first cell is `position: sticky`, so it has to paint
+ * an opaque background of its own or rows would scroll visibly underneath it —
+ * which means any background set on the `<tr>` alone stops at column two.
+ * Banding applied to the row would have striped seven columns and skipped the
+ * one carrying the business name.
+ *
+ * The three selectors are also deliberately matched in specificity, so it is
+ * source order — not an accidental extra pseudo-class — that decides which
+ * state wins. Base, then alternating, then hover. Moving one of these blocks
+ * changes the result.
+ */
+.lead-table-frozen tbody tr,
+.lead-table-frozen tbody tr > td:first-child {
+  background-color: var(--c-surface);
+  /* `base` (180ms) rather than the shared `fast` (120ms): the row is a large
+     area and the whole point is that it settles rather than snaps. Scoped to
+     this table so the export table keeps its own timing. */
+  transition:
+    background-color var(--duration-base) var(--ease-out-soft),
+    box-shadow var(--duration-base) var(--ease-out-soft);
+}
+
+/* The banding. See `--c-row-alt`, which is where its strength is set. */
+.lead-table-frozen tbody tr:nth-child(even),
+.lead-table-frozen tbody tr:nth-child(even) > td:first-child {
+  background-color: var(--c-row-alt);
+}
+
+/* Hover, and `focus-within` with it: tabbing to the row's link should light it
+   the same way the cursor does. `background-color`, not the `background`
+   shorthand — the shorthand would reset `background-image` and wipe the
+   overdue wash off the first cell of exactly the rows that most need it. */
+.lead-table-frozen tbody tr:hover,
+.lead-table-frozen tbody tr:hover > td:first-child,
+.lead-table-frozen tbody tr:focus-within,
+.lead-table-frozen tbody tr:focus-within > td:first-child {
+  background-color: var(--c-hover);
+}
+
+/*
+ * Drops the shared left-to-right accent wash `.lead-table tbody tr:hover`
+ * paints, for this table only — the export table keeps it.
+ *
+ * Two reasons. It is a gradient, and a flat lift was asked for; and it is a
+ * left-weighted accent, which is the same sentence the new 2px rail says more
+ * precisely. Running both put a soft red bloom directly behind a hard red bar.
+ */
+.lead-table-frozen tbody tr:hover,
+.lead-table-frozen tbody tr:focus-within {
+  background-image: none;
+}
+
+/*
+ * The hover rail: a 2px accent bar down the leading edge, stacked in front of
+ * the column divider in one declaration.
+ *
+ * 2px and in the same slot as the urgency stripe above, not 3px beside it.
+ * Those marks share one edge, so a second width would make the bar jump a
+ * pixel wider whenever a due row was hovered, and would give the row two
+ * competing left rules. One rail, one width: an un-marked row gains it on
+ * hover, and a due row simply keeps the one it already had.
+ */
 .lead-table-frozen tbody tr:hover > td:first-child,
 .lead-table-frozen tbody tr:focus-within > td:first-child {
-  background: var(--c-hover);
+  box-shadow:
+    inset 2px 0 0 0 var(--c-accent),
+    1px 0 0 0 var(--c-line);
 }
 
 /*
