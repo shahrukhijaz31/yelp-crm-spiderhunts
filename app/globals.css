@@ -984,6 +984,35 @@ select option {
 
   /* The third weight: no border, no fill until hovered. For anything that
      would be noise as an outlined button — Cancel, Reopen, Replace. */
+  /*
+   * The destructive confirm. Used in exactly one place — the second step of
+   * deleting a user — and it should stay that way.
+   *
+   * Solid `--c-danger` rather than the accent gradient the primary button
+   * wears. The accent is the *preferred* action (Save, Import, Sign in) and a
+   * delete must never inherit that invitation; the flat fill reads as a
+   * warning rather than as the thing you were meant to click. It is also why
+   * this variant has no hover lift: the primary button rises 1px to say "go
+   * on", which is precisely the wrong gesture here.
+   *
+   * It never appears unprompted. The first click is a ghost button; this is
+   * only rendered once somebody has asked for the confirmation.
+   */
+  .ui-btn-danger {
+    background-color: var(--c-danger);
+    border: 1px solid color-mix(in srgb, var(--c-danger) 70%, black);
+    color: #ffffff;
+    font-weight: 500;
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.16);
+  }
+  .ui-btn-danger:hover:not(:disabled) {
+    background-color: color-mix(in srgb, var(--c-danger) 88%, black);
+  }
+  .ui-btn-danger:active:not(:disabled) {
+    background-color: color-mix(in srgb, var(--c-danger) 78%, black);
+    box-shadow: inset 0 2px 5px -2px rgb(0 0 0 / 0.35);
+  }
+
   .ui-btn-ghost {
     color: var(--c-fg-3);
   }

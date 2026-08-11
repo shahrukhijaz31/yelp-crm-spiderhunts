@@ -241,6 +241,123 @@ export function editEndsAccess(edits: UserEdits): boolean {
   return edits.isActive === false || edits.role !== undefined || edits.password !== undefined;
 }
 
+/**
+ * Why a particular account cannot be deleted, with the numbers behind it.
+ *
+ * A distinct class from `UserInputError` because it is not bad input — the
+ * request was well formed and the caller was entitled to make it. The route
+ * turns this into a 409, and the message is written for the administrator
+ * reading it, so it says what is in the way and what to do instead.
+ */
+export class UserDeleteBlocked extends Error {
+  constructor(
+    message: string,
+    readonly footprint: UserFootprint,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * What an account has left behind that outlives it.
+ *
+ * These are exactly the three relations declared `onDelete: Restrict` in
+ * schema.prisma. Counting them here rather than letting Postgres raise a
+ * foreign-key violation is the difference between "this account has logged
+ * 1,412 calls" and "update or delete on table users violates foreign key
+ * constraint lead_activities_user_id_fkey".
+ *
+ * Everything *not* listed is `Cascade` and goes quietly with the row: sessions,
+ * work sessions, pending OTPs, monitor devices, and reset codes issued *for*
+ * this person. None of those mean anything once the account is gone.
+ */
+export interface UserFootprint {
+  /** Calls logged, callbacks set, meetings booked — the performance record. */
+  activity: number;
+  /** Call recordings they uploaded. The audio outlives the account. */
+  recordings: number;
+  /** Reset codes they issued for *other* people, as an administrator. */
+  resetsIssued: number;
+}
+
+export async function describeUserFootprint(id: string): Promise<UserFootprint> {
+  const [activity, recordings, resetsIssued] = await Promise.all([
+    prisma.leadActivity.count({ where: { userId: id } }),
+    prisma.meetingRecording.count({ where: { uploadedById: id } }),
+    prisma.passwordReset.count({ where: { issuedById: id } }),
+  ]);
+  return { activity, recordings, resetsIssued };
+}
+
+/**
+ * Delete an account outright.
+ *
+ * **This is deliberately narrow, and the narrowness is the feature.** The
+ * schema's standing position is that accounts are *disabled*, not deleted —
+ * `isActive` ends access instantly while the record of who did what to a lead
+ * survives — and three foreign keys enforce it (`onDelete: Restrict` on lead
+ * activity, recordings and issued resets). This function does not work around
+ * that. It removes accounts that have no history to protect: the ones created
+ * with a typo in the username, the duplicate, the person who never signed in.
+ *
+ * An account that *has* worked is refused, with the counts, and pointed at
+ * Disable. That is not an artificial limit — deleting such a row would either
+ * fail at the database or, if the constraints were loosened, silently destroy
+ * the attribution behind every performance figure that account appears in. A
+ * month of somebody's reported work would quietly change.
+ *
+ * Two more guards, in the order that costs least:
+ *
+ *   - the last active administrator cannot be removed, whoever asks, for the
+ *     same reason `updateUser` will not demote them — there is no way back
+ *     except a database console;
+ *   - the caller cannot delete themselves. That is enforced by the route,
+ *     which knows who is asking; this function takes an id and no identity.
+ *
+ * Returns false when the id names nobody, so a double-submitted delete reads
+ * as "already gone" rather than as an error.
+ */
+export async function deleteUser(id: string): Promise<boolean> {
+  const target = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, name: true, role: true, isActive: true },
+  });
+  if (!target) return false;
+
+  if (target.role === "ADMIN" && target.isActive && (await countAdmins()) <= 1) {
+    throw new UserInputError(
+      "This is the only active administrator. Promote someone else first.",
+    );
+  }
+
+  const footprint = await describeUserFootprint(id);
+  const blocking = [
+    footprint.activity > 0 && `${footprint.activity.toLocaleString()} logged ${footprint.activity === 1 ? "action" : "actions"} on leads`,
+    footprint.recordings > 0 && `${footprint.recordings} call ${footprint.recordings === 1 ? "recording" : "recordings"}`,
+    footprint.resetsIssued > 0 && `${footprint.resetsIssued} password ${footprint.resetsIssued === 1 ? "reset" : "resets"} issued for other people`,
+  ].filter((entry): entry is string => typeof entry === "string");
+
+  if (blocking.length > 0) {
+    throw new UserDeleteBlocked(
+      `${target.name} cannot be deleted: the account has ${humanList(blocking)}. ` +
+        "Deleting it would take that history with it. Disable the account instead — " +
+        "it ends access immediately and keeps the record intact.",
+      footprint,
+    );
+  }
+
+  // Everything still attached is `Cascade`: sessions, work sessions, pending
+  // verification codes, monitor devices, and reset codes issued *for* them.
+  await prisma.user.delete({ where: { id } });
+  return true;
+}
+
+/** `["a", "b", "c"]` -> `a, b and c`. */
+function humanList(items: string[]): string {
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 /** The reset dialog needs to name the person before it does anything to them. */
 export async function findUserForReset(id: string): Promise<PublicUser | null> {
   const user = await prisma.user.findUnique({ where: { id }, select: PUBLIC_FIELDS });

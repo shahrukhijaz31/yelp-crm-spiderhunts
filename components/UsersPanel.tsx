@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Trash2 } from "lucide-react";
 
 import ResetPasswordDialog from "./ResetPasswordDialog";
 import type { Role } from "@/lib/access";
@@ -51,6 +51,15 @@ export default function UsersPanel({
   const [settingPasswordId, setSettingPasswordId] = useState<string | null>(null);
   /** The row whose reset dialog is open, if any. */
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
+  /**
+   * The row whose delete confirmation is showing.
+   *
+   * Two steps rather than a `window.confirm`: the confirmation names the person
+   * and says plainly that it cannot be undone, which a browser dialog cannot do
+   * in the app's own voice. It is inline for the same reason "Set password" is —
+   * the action belongs to one row, and a modal would hide the list it is about.
+   */
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   async function patchUser(id: string, edits: Record<string, unknown>, describe: string) {
     setBusyId(id);
@@ -72,6 +81,40 @@ export default function UsersPanel({
       // The list is server-rendered, so a refresh is what makes the change
       // visible — and it re-reads it as the current user, which keeps the
       // screen honest if the caller's own access has changed underneath them.
+      router.refresh();
+    } catch {
+      setNotice({ tone: "error", message: "Could not reach the server. Try again." });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /**
+   * Remove an account for good.
+   *
+   * The server decides whether this is allowed, and it refuses far more often
+   * than it agrees: an account that has logged any work is blocked with a 409
+   * that explains what is in the way. That message is shown verbatim rather
+   * than replaced with something generic — it is written for the person reading
+   * it and already names the counts and the alternative.
+   */
+  async function removeUser(user: UserRow) {
+    setBusyId(user.id);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        setNotice({
+          tone: "error",
+          message: payload.message ?? "That account could not be deleted.",
+        });
+        return;
+      }
+
+      setDeleteTarget(null);
+      setNotice({ tone: "ok", message: `${user.name}'s account has been deleted.` });
       router.refresh();
     } catch {
       setNotice({ tone: "error", message: "Could not reach the server. Try again." });
@@ -261,6 +304,56 @@ export default function UsersPanel({
                     Set
                   </button>
                 </form>
+              )}
+
+              {/* Delete. Last in the row and the only ghost-to-danger control
+                  on the screen, because it is the one action here with no way
+                  back — every other one can be undone by doing it again.
+                  Refused on your own row before the request is even made; the
+                  API refuses it again for anyone who asks another way. */}
+              <button
+                type="button"
+                disabled={isSelf || busy}
+                onClick={() => setDeleteTarget(deleteTarget === user.id ? null : user.id)}
+                aria-expanded={deleteTarget === user.id}
+                title={
+                  isSelf
+                    ? "You cannot delete your own account"
+                    : `Delete ${user.name}'s account permanently`
+                }
+                className="ui-btn ui-btn-ghost ml-auto text-fg-3 hover:text-danger"
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                Delete
+              </button>
+
+              {deleteTarget === user.id && (
+                <div className="flex w-full flex-wrap items-center gap-3 border-t border-line pt-3">
+                  <p className="min-w-0 flex-1 text-caption text-fg-2">
+                    Delete <span className="font-medium text-fg">{user.name}</span>{" "}
+                    permanently? This cannot be undone.{" "}
+                    <span className="text-fg-4">
+                      An account that has logged any work will be refused — disable
+                      it instead, which ends access and keeps the record.
+                    </span>
+                  </p>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void removeUser(user)}
+                    className="ui-btn ui-btn-danger"
+                  >
+                    {busy ? "Deleting…" : "Delete permanently"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setDeleteTarget(null)}
+                    className="ui-btn ui-btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                </div>
               )}
             </li>
           );
