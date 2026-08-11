@@ -56,6 +56,26 @@ import { prisma } from "./prisma";
  * places: the email, and the salted scrypt hash in `code_hash`. No function
  * here returns it, no response body carries it, and no `console` call in this
  * file takes it as an argument.
+ *
+ * ---------------------------------------------------------------------------
+ * Two callers, one implementation
+ * ---------------------------------------------------------------------------
+ * The desktop Monitor (a separate Electron application on an agent's
+ * workstation) signs in through the same second factor, and it has no cookie
+ * jar. So every function below comes in two forms:
+ *
+ *   ...ForChallenge(token, …)   the actual logic. The caller says which pending
+ *                               sign-in it means by handing over the token.
+ *   the cookie wrapper          reads the token out of `OTP_COOKIE` and calls
+ *                               the above. Unchanged behaviour for the browser.
+ *
+ * That split is deliberately *all* there is to it. There is no second OTP
+ * implementation, no second table, no second set of limits and no second place
+ * a code is checked — the desktop client meets the identical five attempts,
+ * five minutes and single use, enforced by the identical lines. Where the
+ * browser keeps its challenge token in an HttpOnly cookie, the Monitor keeps it
+ * in the main process for the ninety seconds the screen is open; it names
+ * nobody and grants nothing either way.
  */
 
 /**
@@ -189,23 +209,77 @@ export async function clearPendingChallenge(): Promise<void> {
   const token = await readChallengeToken();
   const store = await cookies();
 
-  if (token) {
-    await prisma.loginOtp
-      .updateMany({
-        where: { challengeHash: hashChallenge(token), usedAt: null },
-        data: { expiresAt: new Date() },
-      })
-      .catch(() => {});
-  }
+  if (token) await clearPendingForChallenge(token);
 
   // `set` with an expiry in the past rather than `delete`, so the attributes
   // match the ones it was set with — the same reason `destroySession` does.
   store.set(OTP_COOKIE, "", { ...cookieOptions(), expires: new Date(0) });
 }
 
+/**
+ * Expire every live row behind a challenge, given the token directly.
+ *
+ * The cookie-free half of {@link clearPendingChallenge}, for callers that hold
+ * their own token. There is no cookie to clear on that path — the client
+ * discards the token itself — so this is only the database half.
+ */
+export async function clearPendingForChallenge(token: string): Promise<void> {
+  await prisma.loginOtp
+    .updateMany({
+      where: { challengeHash: hashChallenge(token), usedAt: null },
+      data: { expiresAt: new Date() },
+    })
+    .catch(() => {});
+}
+
 export type IssueResult =
   | { ok: true; challenge: PendingChallenge }
   | { ok: false; code: "email_failed" };
+
+/** As {@link IssueResult}, plus the challenge token the caller must keep. */
+export type IssueForChallengeResult =
+  | { ok: true; token: string; challenge: PendingChallenge }
+  | { ok: false; code: "email_failed" };
+
+/**
+ * Issue a code and hand the challenge token back to the caller.
+ *
+ * The whole of {@link issueLoginOtp} except the cookie: the mail goes out
+ * first (a failed send must change nothing), a brand-new token is minted every
+ * time so a token the client already held can never be adopted by a fresh
+ * sign-in, and anything still pending under `previousToken` is expired on the
+ * spot.
+ *
+ * The returned token is a credential for *finishing* this sign-in and nothing
+ * else — it names nobody, and the code is still required. Callers must treat it
+ * the way the browser treats the cookie: never persisted, never logged.
+ */
+export async function issueLoginOtpForChallenge(
+  user: { id: string; email: string },
+  previousToken?: string | null,
+): Promise<IssueForChallengeResult> {
+  const code = generateOtp();
+
+  const sent = await sendMail(buildOtpEmail(user.email, code, OTP_TTL_MINUTES));
+  if (!sent) return { ok: false, code: "email_failed" };
+
+  const token = randomBytes(CHALLENGE_BYTES).toString("base64url");
+  const challengeHash = hashChallenge(token);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
+  // Outside any transaction: scrypt takes ~100ms and a write lock has no
+  // business being held open for it.
+  const codeHash = await hashPassword(code);
+
+  if (previousToken) await clearPendingForChallenge(previousToken);
+
+  const row = await prisma.loginOtp.create({
+    data: { userId: user.id, challengeHash, codeHash, expiresAt },
+    select: { expiresAt: true, createdAt: true, attempts: true },
+  });
+
+  return { ok: true, token, challenge: describe(user.email, row, 1) };
+}
 
 /**
  * Start the OTP step for a user who has just proved their password.
@@ -223,41 +297,18 @@ export async function issueLoginOtp(user: {
   id: string;
   email: string;
 }): Promise<IssueResult> {
-  const code = generateOtp();
-
-  const sent = await sendMail(buildOtpEmail(user.email, code, OTP_TTL_MINUTES));
-  if (!sent) return { ok: false, code: "email_failed" };
-
-  const token = randomBytes(CHALLENGE_BYTES).toString("base64url");
-  const challengeHash = hashChallenge(token);
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + OTP_TTL_MS);
-  // Outside any transaction: scrypt takes ~100ms and a write lock has no
-  // business being held open for it.
-  const codeHash = await hashPassword(code);
-
   // Anything still pending under the *previous* cookie stops working now. A
   // second sign-in attempt from the same browser must not leave the first
   // attempt's code alive behind it.
   const previous = await readChallengeToken();
-  if (previous) {
-    await prisma.loginOtp
-      .updateMany({
-        where: { challengeHash: hashChallenge(previous), usedAt: null },
-        data: { expiresAt: now },
-      })
-      .catch(() => {});
-  }
 
-  const row = await prisma.loginOtp.create({
-    data: { userId: user.id, challengeHash, codeHash, expiresAt },
-    select: { expiresAt: true, createdAt: true, attempts: true },
-  });
+  const issued = await issueLoginOtpForChallenge(user, previous);
+  if (!issued.ok) return issued;
 
   const store = await cookies();
-  store.set(OTP_COOKIE, token, cookieOptions());
+  store.set(OTP_COOKIE, issued.token, cookieOptions());
 
-  return { ok: true, challenge: describe(user.email, row, 1) };
+  return { ok: true, challenge: issued.challenge };
 }
 
 interface PendingRow {
@@ -286,7 +337,11 @@ interface PendingRow {
 async function loadPending(): Promise<PendingRow | null> {
   const token = await readChallengeToken();
   if (!token) return null;
+  return loadPendingForChallenge(token);
+}
 
+/** {@link loadPending}, for a caller that holds its own challenge token. */
+async function loadPendingForChallenge(token: string): Promise<PendingRow | null> {
   const row = await prisma.loginOtp.findFirst({
     where: { challengeHash: hashChallenge(token), usedAt: null },
     orderBy: { createdAt: "desc" },
@@ -357,7 +412,24 @@ export type VerifyResult =
  * and the second updates zero rows and is refused.
  */
 export async function verifyLoginOtp(rawCode: string): Promise<VerifyResult> {
-  const row = await loadPending();
+  const token = await readChallengeToken();
+  if (!token) return { ok: false, code: "no_pending" };
+  return verifyLoginOtpForChallenge(token, rawCode);
+}
+
+/**
+ * {@link verifyLoginOtp} for a caller that holds its own challenge token.
+ *
+ * This is where the check actually happens for *both* clients — the cookie
+ * version above is a two-line lookup in front of it. Every limit, every failure
+ * mode and the single-use `updateMany` guard are here and nowhere else, so a
+ * desktop client cannot meet a weaker rule than a browser does.
+ */
+export async function verifyLoginOtpForChallenge(
+  token: string,
+  rawCode: string,
+): Promise<VerifyResult> {
+  const row = await loadPendingForChallenge(token);
   if (!row) return { ok: false, code: "no_pending" };
 
   const now = new Date();
@@ -436,8 +508,12 @@ export type ResendResult =
 export async function resendLoginOtp(): Promise<ResendResult> {
   const token = await readChallengeToken();
   if (!token) return { ok: false, code: "no_pending" };
+  return resendLoginOtpForChallenge(token);
+}
 
-  const row = await loadPending();
+/** {@link resendLoginOtp} for a caller that holds its own challenge token. */
+export async function resendLoginOtpForChallenge(token: string): Promise<ResendResult> {
+  const row = await loadPendingForChallenge(token);
   if (!row) return { ok: false, code: "no_pending" };
   if (!row.user.isActive) return { ok: false, code: "no_pending" };
   // A code that expired *recently* can still be replaced — that is the whole

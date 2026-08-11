@@ -14,7 +14,9 @@
     "db:seed:demo": "prisma db seed -- --demo",
     "db:studio": "prisma studio",
     "user:create": "tsx scripts/create-user.ts",
-    "test:recordings": "tsx scripts/test-recordings.ts"
+    "screenshots:retention": "tsx scripts/screenshot-retention.ts",
+    "test:recordings": "tsx scripts/test-recordings.ts",
+    "test:screenshots": "tsx scripts/test-screenshots.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

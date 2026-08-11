@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+#
+# Screenshot retention sweep for the Lead Portal.
+# Installed at /usr/local/bin/leadportal-screenshot-retention by provision.sh
+# and run once a day from root's crontab.
+#
+# WHAT IT DOES: nothing itself. It asks the running application to run its own
+# retention sweep, over loopback, with the shared token from /etc/leadportal/env.
+# The deletion logic lives in lib/screenshotRetention.ts and is reached through
+# POST /api/maintenance/screenshot-retention.
+#
+# WHY NOT DELETE FILES HERE: because a shell script deleting by filename is
+# exactly the thing the requirement forbids. `find -mtime +30 -delete` would
+# work off the mtime of a path, leaving `screenshots` rows pointing at files
+# that no longer exist, and would delete anything that happened to be under the
+# storage root. The application deletes by database row, using the server-stamped
+# `created_at`, and removes the row and the file as a pair.
+#
+# WHY THROUGH nginx AND NOT A SLOT PORT: blue/green means the live slot moves
+# (3031/3032, deploy/nginx/leadportal-upstream.conf is rewritten on every
+# deploy). Going through nginx means this always reaches whichever slot is
+# actually serving, and never a stale one — and only one of them, which is the
+# point: two instances sweeping at once would still be safe (every step is
+# idempotent) but there is no reason to make them.
+#
+# Exit codes: 0 swept, 1 anything else. The output is counts only — no user, no
+# device, no filename — so this log is not a record of who was photographed.
+
+set -uo pipefail
+
+ENV_FILE="${LEADPORTAL_ENV:-/etc/leadportal/env}"
+URL="${LEADPORTAL_RETENTION_URL:-https://leads.spiderhunts-coworkingspace.com/api/maintenance/screenshot-retention}"
+
+log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"; }
+die() { log "FAILED: $1"; exit 1; }
+
+[ -r "$ENV_FILE" ] || die "cannot read $ENV_FILE"
+
+# Parsed rather than sourced, for the reason leadportal-backup documents at
+# length: values in that file are quoted because some of them contain shell
+# control operators, and sourcing it has bitten this deployment before.
+TOKEN=$(grep -m1 '^SCREENSHOT_RETENTION_TOKEN=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
+[ -n "$TOKEN" ] || die "SCREENSHOT_RETENTION_TOKEN missing from $ENV_FILE"
+
+# The site's own certificate is a real one, but the hostname is resolved
+# publicly while this runs on the box itself; --resolve keeps the request on
+# loopback without disabling verification.
+SITE_HOST=$(printf '%s' "$URL" | sed -E 's#^https?://([^/]+).*#\1#')
+
+log "sweeping screenshots past the configured retention window"
+
+BODY=$(curl --silent --show-error --fail-with-body \
+  --max-time 900 \
+  --resolve "${SITE_HOST}:443:127.0.0.1" \
+  --header "Authorization: Bearer ${TOKEN}" \
+  --header "Content-Length: 0" \
+  --request POST "$URL" 2>&1)
+STATUS=$?
+
+if [ "$STATUS" -ne 0 ]; then
+  # The body is the app's JSON error envelope, which carries no personal data.
+  log "  ${BODY}"
+  die "retention request failed (curl exit ${STATUS})"
+fi
+
+# Counts only. Printed verbatim: the route returns
+# {"ok":true,"retentionDays":30,"examined":N,"filesDeleted":N,...}.
+log "  ${BODY}"
+log "done"

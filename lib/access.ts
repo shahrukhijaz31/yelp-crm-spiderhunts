@@ -70,6 +70,49 @@ const PUBLIC_PATHS = new Set<string>([
   "/api/auth/reset/complete",
   "/api/health",
   "/api/leads/ingest",
+  /*
+   * The SpiderHunts Monitor desktop application. "Public" here means what it
+   * means for `/api/leads/ingest`: exempt from the *cookie* check this proxy
+   * performs, because these callers are not browsers and have no session cookie
+   * to present. They are not unauthenticated.
+   *
+   * Each auth step carries its own credential — a password, then the emailed
+   * code against a challenge token, then a refresh token — and
+   * `/api/monitor/session` requires `Authorization: Bearer` and is gated by
+   * `monitorUser()` inside the handler, which resolves the token against
+   * `monitor_devices` and re-reads role and `isActive` from Postgres on every
+   * call. `/logout` needs no credential by design: revoking a token is safe for
+   * whoever holds it, and refusing an unauthenticated logout would only strand
+   * a client whose access token had already expired.
+   *
+   * Listed one by one rather than as a prefix, deliberately — each addition is
+   * a decision someone made, not something inherited from a wildcard.
+   */
+  "/api/monitor/auth/login",
+  "/api/monitor/auth/verify",
+  "/api/monitor/auth/resend",
+  "/api/monitor/auth/refresh",
+  "/api/monitor/auth/logout",
+  "/api/monitor/session",
+  /*
+   * The screenshot upload. Bearer-authenticated by `monitorDevice()` inside the
+   * handler, which resolves the token against `monitor_devices` and re-reads
+   * role and `isActive` from Postgres — so "public" here means the same thing
+   * it means above: exempt from the cookie check, not exempt from
+   * authentication. It is also the only write endpoint on this list.
+   */
+  "/api/monitor/screenshots",
+  /*
+   * The screenshot retention sweep, called by the box's own cron
+   * (`deploy/leadportal-screenshot-retention`). Same shape as the ingest route:
+   * not a browser, no session cookie, its own bearer token checked inside the
+   * handler — and a 503 rather than an open door when that token is unset.
+   *
+   * It takes no parameters, so there is nothing a caller could point it at: the
+   * only deletion it can perform is the server's own configured retention
+   * window against the server's own `created_at`.
+   */
+  "/api/maintenance/screenshot-retention",
 ]);
 
 /**

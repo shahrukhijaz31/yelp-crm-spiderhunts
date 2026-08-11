@@ -90,6 +90,11 @@ ReadWritePaths=/var/www/vhosts/leadportal/%i/.next
 # one directory, which is also what lets a rollback keep the recordings.
 ReadWritePaths=/var/lib/leadportal/recordings
 
+# Desktop screenshots (SCREENSHOTS_DIR), on exactly the same terms. Writable
+# rather than merely creatable, because the retention sweep runs inside this
+# process and has to be able to *delete* here as well as write.
+ReadWritePaths=/var/lib/leadportal/screenshots
+
 # The box has 47GB, but a runaway render should kill this process rather than
 # pressure the nine other tenants.
 MemoryMax=1G

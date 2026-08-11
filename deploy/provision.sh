@@ -34,6 +34,11 @@ ENV_DIR="/etc/${SITE}"
 # release and a rollback cannot bring it back. /var/lib is where state that
 # outlives the code belongs.
 RECORDINGS_DIR_PATH="/var/lib/${SITE}/recordings"
+# Desktop screenshots from SpiderHunts Monitor, for the same reason and in the
+# same place. The volume is not comparable — several images per agent per hour,
+# all day — which is why retention (below) is provisioned alongside it rather
+# than left as something to remember later.
+SCREENSHOTS_DIR_PATH="/var/lib/${SITE}/screenshots"
 DB_NAME="lead_portal"
 DB_USER="leadportal"
 # The public hostname, a subdomain of the company's existing Hostinger-hosted
@@ -135,10 +140,15 @@ chown -R root:root "${APP_ROOT}/repo"
 # Call recordings: written by the app user, readable by nobody else. 0750 on
 # the parent as well, because the filenames alone say how many client calls
 # have been recorded and when.
-log "Creating ${RECORDINGS_DIR_PATH}"
-mkdir -p "$RECORDINGS_DIR_PATH"
+#
+# Screenshots the same way, and for a stronger version of the same reason: a
+# directory listing there is a record of when somebody's screen was
+# photographed, which is not something the rest of the box needs to be able to
+# read.
+log "Creating ${RECORDINGS_DIR_PATH} and ${SCREENSHOTS_DIR_PATH}"
+mkdir -p "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH"
 chown -R "${DB_USER}:${DB_USER}" "/var/lib/${SITE}"
-chmod 750 "/var/lib/${SITE}" "$RECORDINGS_DIR_PATH"
+chmod 750 "/var/lib/${SITE}" "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH"
 
 # --- Database on the EXISTING cluster --------------------------------------
 log "Configuring database on the existing PostgreSQL 17 cluster"
@@ -189,6 +199,22 @@ else
 fi
 INGEST_TOKEN="$(cat "$INGEST_TOKEN_FILE")"
 
+# Shared secret for POST /api/maintenance/screenshot-retention, which the
+# nightly cron job below calls. Its own file for the same reasons, and generated
+# here rather than typed by hand so that a box which has been provisioned has a
+# working retention sweep without anyone remembering to configure one — the
+# route refuses every request while this is unset, so a missing token means
+# screenshots accumulate forever.
+RETENTION_TOKEN_FILE="${ENV_DIR}/screenshot-retention-token"
+if [[ ! -f "$RETENTION_TOKEN_FILE" ]]; then
+  openssl rand -hex 32 > "$RETENTION_TOKEN_FILE"
+  chmod 600 "$RETENTION_TOKEN_FILE"
+  log "Generated screenshot retention token"
+else
+  log "Reusing existing screenshot retention token"
+fi
+SCREENSHOT_RETENTION_TOKEN="$(cat "$RETENTION_TOKEN_FILE")"
+
 if [[ ! -f "${ENV_DIR}/env" ]]; then
   log "Writing ${ENV_DIR}/env"
   cat > "${ENV_DIR}/env" <<EOF
@@ -216,6 +242,17 @@ INGEST_TOKEN="${INGEST_TOKEN}"
 # be destroyed by the next release and unrecoverable by a rollback. The unit
 # file grants write access to exactly this path.
 RECORDINGS_DIR="${RECORDINGS_DIR_PATH}"
+# Where desktop screenshots from SpiderHunts Monitor are written. Outside the
+# release tree for the same reason as recordings, and on a path the unit file
+# grants write access to.
+SCREENSHOTS_DIR="${SCREENSHOTS_DIR_PATH}"
+# How long screenshots are kept. The server owns this number; nothing on an
+# agent's workstation can change it. Unset it and the sweep uses 30 days.
+SCREENSHOT_RETENTION_DAYS=30
+# Bearer token for POST /api/maintenance/screenshot-retention, called once a day
+# by /usr/local/bin/${SITE}-screenshot-retention. With this unset the route
+# refuses every request, so screenshots would simply never be deleted.
+SCREENSHOT_RETENTION_TOKEN="${SCREENSHOT_RETENTION_TOKEN}"
 # SMTP for the sign-in verification code. Signing in is password + a 6-digit
 # code emailed to the address on the user's record, so the login route refuses
 # every attempt while these are unset — it fails closed rather than falling back
@@ -243,6 +280,20 @@ else
   if ! grep -q '^RECORDINGS_DIR=' "${ENV_DIR}/env"; then
     printf 'RECORDINGS_DIR="%s"\n' "$RECORDINGS_DIR_PATH" >> "${ENV_DIR}/env"
     log "Added RECORDINGS_DIR to the existing ${ENV_DIR}/env"
+  fi
+  # The screenshot block, added with the Monitor's scheduler. One key at a time,
+  # so an operator who has already chosen a retention window keeps it.
+  if ! grep -q '^SCREENSHOTS_DIR=' "${ENV_DIR}/env"; then
+    printf 'SCREENSHOTS_DIR="%s"\n' "$SCREENSHOTS_DIR_PATH" >> "${ENV_DIR}/env"
+    log "Added SCREENSHOTS_DIR to the existing ${ENV_DIR}/env"
+  fi
+  if ! grep -q '^SCREENSHOT_RETENTION_DAYS=' "${ENV_DIR}/env"; then
+    printf 'SCREENSHOT_RETENTION_DAYS=%s\n' "30" >> "${ENV_DIR}/env"
+    log "Added SCREENSHOT_RETENTION_DAYS to the existing ${ENV_DIR}/env"
+  fi
+  if ! grep -q '^SCREENSHOT_RETENTION_TOKEN=' "${ENV_DIR}/env"; then
+    printf 'SCREENSHOT_RETENTION_TOKEN="%s"\n' "$SCREENSHOT_RETENTION_TOKEN" >> "${ENV_DIR}/env"
+    log "Added SCREENSHOT_RETENTION_TOKEN to the existing ${ENV_DIR}/env"
   fi
   # The SMTP block, added when email OTP was introduced. Appended one key at a
   # time so an operator who has already filled in a value keeps it, and with
@@ -316,6 +367,44 @@ cat > "/etc/logrotate.d/${SITE}-backup" <<EOF
   # explicitly whose privileges to use. Without this the rule silently skips
   # every run and the log grows forever. \`su root root\` is what cloud-init and
   # postgresql-common already use here.
+  su root root
+}
+EOF
+
+# --- Nightly screenshot retention -------------------------------------------
+# The server owns retention, not the agent's workstation — so it is scheduled
+# here, on the same crontab the backup uses, rather than left to a timer inside
+# the application. A `setInterval` in the Node process would run once per PM2
+# worker and once per blue/green slot; cron runs it once.
+#
+# 04:30 is after the 03:45 dump has finished, on purpose: a sweep that deleted a
+# month of screenshots *before* the night's backup would mean the only copy of
+# them disappearing from both places on the same night.
+#
+# The script itself deletes nothing. It calls the application, which deletes by
+# database row and server-stamped `created_at` — never by filename.
+log "Installing nightly screenshot retention"
+install -m 750 "$(dirname "$0")/leadportal-screenshot-retention" \
+  "/usr/local/bin/${SITE}-screenshot-retention"
+
+RETENTION_CRON="30 4 * * * /usr/local/bin/${SITE}-screenshot-retention >> /var/log/${SITE}-screenshot-retention.log 2>&1"
+if crontab -l 2>/dev/null | grep -qF "${SITE}-screenshot-retention"; then
+  log "Screenshot retention cron entry already present, leaving it alone"
+else
+  { crontab -l 2>/dev/null || true; \
+    printf '\n# Lead Portal: delete screenshots past SCREENSHOT_RETENTION_DAYS (file + row).\n'; \
+    printf '%s\n' "$RETENTION_CRON"; } | crontab -
+  log "Added nightly screenshot retention at 04:30"
+fi
+
+cat > "/etc/logrotate.d/${SITE}-screenshot-retention" <<EOF
+/var/log/${SITE}-screenshot-retention.log {
+  weekly
+  rotate 8
+  compress
+  missingok
+  notifempty
+  create 640 root adm
   su root root
 }
 EOF

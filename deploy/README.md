@@ -218,6 +218,34 @@ ssh leadportal 'tail -5 /var/log/leadportal-backup.log'
 ssh leadportal '/usr/local/bin/leadportal-backup'             # run one now
 ```
 
+### Screenshot retention
+
+`/usr/local/bin/leadportal-screenshot-retention`, from
+`deploy/leadportal-screenshot-retention`, installed by `provision.sh` and run
+from the same crontab at **04:30 nightly** — after the 03:45 dump, deliberately,
+so a sweep never removes a month of screenshots *before* the night's backup has
+copied them.
+
+It deletes nothing itself. It POSTs to `/api/maintenance/screenshot-retention`
+over loopback with `SCREENSHOT_RETENTION_TOKEN`, and the application deletes by
+database row and server-stamped `created_at` — file and row together. A shell
+`find -mtime +30 -delete` would work off path mtimes and leave rows pointing at
+files that no longer exist.
+
+Cron rather than a timer inside the app because the app runs as two PM2 workers
+and two blue/green slots; a module-level `setInterval` would run in all of them.
+
+```bash
+ssh leadportal 'tail -5 /var/log/leadportal-screenshot-retention.log'
+ssh leadportal '/usr/local/bin/leadportal-screenshot-retention'   # run one now
+ssh leadportal 'du -sh /var/lib/leadportal/screenshots'           # how much is stored
+```
+
+`SCREENSHOT_RETENTION_DAYS` in `/etc/leadportal/env` is the window (30 by
+default). With `SCREENSHOT_RETENTION_TOKEN` unset the endpoint returns 503 and
+**screenshots are never deleted** — visible as a growing directory rather than as
+data loss.
+
 **Restore — rehearse into a scratch database first.** A backup that has never
 been restored is a guess. This was run against the first real dump: 1,964 leads,
 2 users, 2 sessions, matching live exactly.

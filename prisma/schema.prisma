@@ -324,6 +324,11 @@ model WorkSession {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  /// Screenshots captured during this shift. The relation is what makes
+  /// "show me what this agent was doing between 2pm and 4pm" a query rather
+  /// than a join against two timestamps.
+  screenshots Screenshot[]
+
   /// The two queries this table has: "the open session for this user"
   /// (`endedAt IS NULL`, hit on every page load) and "sessions overlapping this
   /// window" for the reports.
@@ -404,7 +409,194 @@ model User {
   /// sign-in that has passed the password step but not yet finished.
   loginOtps LoginOtp[]
 
+  /// Workstations running the SpiderHunts Monitor desktop application that
+  /// this agent has connected. Not sessions — see `MonitorDevice`.
+  monitorDevices MonitorDevice[]
+
+  /// Desktop screenshots captured by those workstations.
+  screenshots Screenshot[]
+
   @@map("users")
+}
+
+/// A workstation running the SpiderHunts Monitor desktop application.
+///
+/// **Why this is not a row in `sessions`.** It was the obvious first idea, and
+/// it is wrong for a specific, load-bearing reason: `endWorkSessionForLogout`
+/// decides whether to stop an agent's shift clock by *counting the live rows in
+/// `sessions`*. A desktop client that stays connected all day would be one of
+/// them, so signing out of the browser would never close the shift, and every
+/// agent's day would run until the staleness sweep or midnight. The clock would
+/// be quietly, permanently wrong — in the direction of over-reporting hours.
+/// Keeping the desktop credential in its own table means `sessions` still
+/// contains exactly what that function believes it contains: browsers.
+///
+/// The same separation answers the second requirement: connecting the Monitor
+/// must not start a shift, and cannot, because nothing on this path calls
+/// `completeSignIn`. The Monitor *observes* the work session (`getWorkClock`)
+/// and never opens, extends or closes one. The portal remains the only thing
+/// that decides whether an agent is working.
+///
+/// **Two tokens, one row.** A short-lived access token is what every request
+/// carries; a long-lived refresh token buys a new pair. Both are 32 random
+/// bytes stored only as their SHA-256 — the identical construction `sessions`
+/// uses, and for the identical reason: a database dump yields nothing
+/// replayable. There is no JWT and therefore no signing secret to distribute or
+/// rotate, which keeps the promise `.env.example` makes that authentication
+/// adds no environment variables.
+///
+/// **Refresh rotates.** Every refresh writes a new pair and the old refresh
+/// token stops working immediately, so a token captured from disk is useful
+/// only until the device next refreshes — and the rotation is what makes a
+/// stolen copy detectable rather than silently permanent.
+model MonitorDevice {
+  id String @id @default(cuid())
+
+  /// Whose workstation. Cascade: a deleted account's devices can authenticate
+  /// as nobody. Role is *not* copied here — it is read from `users` on every
+  /// single request, exactly as the web session does, so an agent promoted or
+  /// demoted is treated correctly on their next call rather than at next login.
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 hex of the current access token. Nullable and unique: null once
+  /// the device is revoked or its access token has been superseded, unique so
+  /// one token can never resolve to two devices.
+  accessTokenHash String?   @unique @map("access_token_hash")
+  /// Short — minutes, not hours. A leaked access token expires on its own.
+  accessExpiresAt DateTime? @map("access_expires_at")
+
+  /// SHA-256 hex of the current refresh token. Replaced on every refresh.
+  refreshTokenHash String   @unique @map("refresh_token_hash")
+  /// Hard ceiling on the device's connection. Never extended by a refresh, so a
+  /// workstation nobody has touched for a month must sign in again.
+  refreshExpiresAt DateTime @map("refresh_expires_at")
+
+  /// Set when the agent signs out of the Monitor, or when an administrator
+  /// disables the account. A revoked row is kept rather than deleted so a
+  /// replayed token finds "revoked" instead of no row at all.
+  revokedAt DateTime? @map("revoked_at")
+
+  /// Enough to recognise a workstation in a list. The hostname is supplied by
+  /// the client and is a label only — nothing is ever authorized by it.
+  deviceName String? @map("device_name")
+  platform   String?
+  appVersion String? @map("app_version")
+
+  /// Last authenticated request from this device. Not a heartbeat for the work
+  /// session — that stays entirely the portal's business.
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  /// When this workstation last had a screenshot **accepted**, and the whole of
+  /// the upload rate limit's state (`lib/screenshotRateLimit.ts`).
+  ///
+  /// A column here rather than a derived read of `screenshots`, because the
+  /// limit has to be claimed *before* anything is stored — no file, no row —
+  /// and because a single conditional `UPDATE` against this one column is
+  /// atomic across every application instance without a lock, a queue or Redis.
+  /// Two processes racing the same device: one matches the `WHERE`, the other
+  /// updates zero rows and is refused.
+  ///
+  /// Written from the server's clock only. Nothing a client sends can move it,
+  /// which is what stops a workstation with a doctored `capturedAt` — or a
+  /// doctored anything — from buying itself extra uploads.
+  lastScreenshotAt DateTime? @map("last_screenshot_at")
+
+  /// Screenshots this workstation uploaded. Nullable on the far side — see the
+  /// note on `Screenshot.deviceId`.
+  screenshots Screenshot[]
+
+  /// "This user's devices" for revocation, and the clock for the housekeeping
+  /// sweep. Token lookups already ride the two unique indexes.
+  @@index([userId])
+  @@index([refreshExpiresAt])
+  @@map("monitor_devices")
+}
+
+/// One desktop screenshot, captured by a workstation during a work session.
+///
+/// **The image is not here.** Only its metadata is: the bytes live under the
+/// storage root (`lib/screenshotStorage.ts`) addressed by `storageKey`, for
+/// exactly the reasons `MeetingRecording` gives — a few hundred kilobytes of
+/// bytea per screenshot, several times an hour, per agent, would be carried by
+/// every backup and every `pg_dump`, and would arrive in application memory on
+/// any careless `SELECT *`. Screenshots are the highest-volume thing this
+/// application will ever store; they belong on a filesystem.
+///
+/// **Everything identifying is server-derived.** `userId` comes from the
+/// monitor device the request authenticated as, and `workSessionId` from the
+/// portal's own view of that user's open shift — neither is read from the
+/// upload. An agent cannot file a screenshot against someone else's account or
+/// someone else's shift, because there is no field in the request that says who
+/// it belongs to.
+model Screenshot {
+  id String @id @default(cuid())
+
+  /// Whose desktop this is. Cascade: a deleted account's screenshots have
+  /// nobody to be shown for, and keeping images of a person whose record has
+  /// been erased is the wrong default for a monitoring system.
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The shift it was taken during. Required, not optional: a screenshot with
+  /// no work session is a screenshot taken while the agent was not working, and
+  /// the upload route refuses to create one. Cascade for the same reason as
+  /// above — `work_sessions` rows are only ever deleted with their user.
+  workSessionId String      @map("work_session_id")
+  workSession   WorkSession @relation(fields: [workSessionId], references: [id], onDelete: Cascade)
+
+  /// Which workstation uploaded it, for auditability.
+  ///
+  /// Nullable with `SetNull`, deliberately. Device rows are disposable — they
+  /// are revoked on sign-out and *deleted* by the housekeeping sweep once their
+  /// refresh ceiling has passed — and a screenshot must outlive the laptop it
+  /// came from. Cascade here would mean an agent signing out and their tokens
+  /// ageing out silently deleted a month of evidence; Restrict would mean the
+  /// sweep could never delete a device again.
+  deviceId String?        @map("monitor_device_id")
+  device   MonitorDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  /// When the shutter fired on the workstation, as the client reported it.
+  /// Clamped server-side to a window around the server's own clock — see
+  /// `lib/screenshotRules.ts`. `createdAt` is when the server received it, and
+  /// the two together are what expose a workstation with a wrong clock.
+  capturedAt DateTime @map("captured_at")
+
+  /// Path of the object beneath the storage root, e.g.
+  /// `2026/08/11/<user id>/<timestamp>-<random>.jpg`. Unique, so two rows can
+  /// never point at one file and have a delete of the first orphan the second.
+  storageKey String @unique @map("storage_key")
+
+  /// Real pixels, read out of the JPEG itself rather than taken from the
+  /// client's claim (`lib/screenshotRules.ts`).
+  width  Int
+  height Int
+
+  /// Bytes actually written, measured server-side.
+  fileSize Int @map("file_size")
+
+  /// Sniffed from the magic bytes. `image/jpeg` today; the column exists so a
+  /// later format needs no migration.
+  format String
+
+  /// The workstation's display identifier.
+  ///
+  /// **A string, not an integer.** Electron's `Display.id` is a 64-bit value in
+  /// practice — the panel on the first workstation this was tested against
+  /// reports `2528732444`, which overflows Postgres `integer`. It is an opaque
+  /// label that is only ever compared for equality, so it is stored as text and
+  /// the question does not arise again.
+  displayId String @map("display_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The queries the viewer will run: one agent's screenshots newest first,
+  /// everything from one shift, and a time range across everybody.
+  @@index([userId, capturedAt])
+  @@index([workSessionId, capturedAt])
+  @@index([capturedAt])
+  @@map("screenshots")
 }
 
 /// A one-time credential an administrator hands to someone who cannot sign in.
