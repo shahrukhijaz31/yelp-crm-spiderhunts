@@ -216,6 +216,19 @@ INGEST_TOKEN="${INGEST_TOKEN}"
 # be destroyed by the next release and unrecoverable by a rollback. The unit
 # file grants write access to exactly this path.
 RECORDINGS_DIR="${RECORDINGS_DIR_PATH}"
+# SMTP for the sign-in verification code. Signing in is password + a 6-digit
+# code emailed to the address on the user's record, so the login route refuses
+# every attempt while these are unset — it fails closed rather than falling back
+# to password-only sessions.
+#
+# SMTP_PASSWORD IS DELIBERATELY EMPTY. It is the Hostinger mailbox password and
+# has no business in a version-controlled script; fill it in here, on the box,
+# then \`systemctl restart leadportal@blue leadportal@green\`.
+SMTP_HOST=smtp.hostinger.com
+SMTP_PORT=465
+SMTP_USER=leads@spiderhunts-coworkingspace.com
+SMTP_FROM=leads@spiderhunts-coworkingspace.com
+SMTP_PASSWORD=
 EOF
   chmod 600 "${ENV_DIR}/env"
 else
@@ -231,6 +244,25 @@ else
     printf 'RECORDINGS_DIR="%s"\n' "$RECORDINGS_DIR_PATH" >> "${ENV_DIR}/env"
     log "Added RECORDINGS_DIR to the existing ${ENV_DIR}/env"
   fi
+  # The SMTP block, added when email OTP was introduced. Appended one key at a
+  # time so an operator who has already filled in a value keeps it, and with
+  # SMTP_PASSWORD left empty for exactly the same reason it is empty above.
+  if ! grep -q '^SMTP_HOST=' "${ENV_DIR}/env"; then
+    {
+      printf 'SMTP_HOST=%s\n' "smtp.hostinger.com"
+      printf 'SMTP_PORT=%s\n' "465"
+      printf 'SMTP_USER=%s\n' "leads@spiderhunts-coworkingspace.com"
+      printf 'SMTP_FROM=%s\n' "leads@spiderhunts-coworkingspace.com"
+      printf 'SMTP_PASSWORD=\n'
+    } >> "${ENV_DIR}/env"
+    warn "Added the SMTP block to ${ENV_DIR}/env — set SMTP_PASSWORD before anyone tries to sign in."
+  fi
+fi
+
+# Sign-in is impossible without this, so say so every run rather than only on
+# the run that added the key.
+if ! grep -qE '^SMTP_PASSWORD=.+' "${ENV_DIR}/env"; then
+  warn "SMTP_PASSWORD is empty in ${ENV_DIR}/env. Verification codes cannot be sent, and NOBODY WILL BE ABLE TO SIGN IN until it is set."
 fi
 
 printf 'PORT=%s\n' "$BLUE_PORT"  > "${ENV_DIR}/slot-blue.env"

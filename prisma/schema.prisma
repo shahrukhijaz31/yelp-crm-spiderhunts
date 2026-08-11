@@ -400,6 +400,10 @@ model User {
   activity     LeadActivity[]
   workSessions WorkSession[]
 
+  /// Second-factor codes issued to this account's registered email during a
+  /// sign-in that has passed the password step but not yet finished.
+  loginOtps LoginOtp[]
+
   @@map("users")
 }
 
@@ -448,6 +452,73 @@ model PasswordReset {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_resets")
+}
+
+/// A sign-in that has cleared the password step and is waiting on an emailed
+/// code. It is *not* a session and grants nothing — see `lib/loginOtp.ts`.
+///
+/// **Why a separate table rather than a half-built `sessions` row.** A row in
+/// `sessions` is, by definition of every guard in the app, an authenticated
+/// browser: `getSessionUser` looks up exactly that table and hands back a user.
+/// Putting a "not finished yet" row in it would mean every one of those guards
+/// had to learn a second state, and the first one that forgot would be an
+/// authentication bypass. This table is unreachable from `getSessionUser` at
+/// all, so a pending row cannot become access by omission.
+///
+/// **The browser holds a challenge token, never the user id.** The pending
+/// cookie is 32 random bytes whose SHA-256 is `challengeHash` here — the same
+/// construction `sessions` uses, and for the same reason: a database dump
+/// yields nothing replayable, and the client cannot name whose sign-in it is
+/// resuming. That cookie is deliberately a *browser-session* cookie with no
+/// expiry attribute, so closing the browser mid-verification discards it; the
+/// five-minute `expiresAt` here is what actually enforces the window.
+///
+/// **The code is not stored.** `codeHash` is the salted scrypt output
+/// `lib/password.ts` writes, exactly as `password_resets` does. Six digits is
+/// only ~20 bits, which is precisely why the other three columns exist:
+/// `attempts` caps guessing at five, `expiresAt` closes the window at five
+/// minutes, and `usedAt` makes redemption single-use. Rate limiting, not
+/// entropy, is what makes a 6-digit code safe, and all three limits are checked
+/// server-side on every attempt.
+///
+/// A resend writes a *new* row and pulls the previous row's `expiresAt` back to
+/// now (`issueLoginOtp`), so "send me another" is never "now two codes work".
+/// The rows share one `challengeHash` for the life of the pending sign-in,
+/// which is what lets the cooldown be read off the newest row's `createdAt`.
+model LoginOtp {
+  id String @id @default(cuid())
+
+  /// Whose sign-in this is. Cascade: a pending code for a deleted account can
+  /// unlock nothing and must not outlive them.
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 hex of the pending-verification cookie. Not unique — a resend adds
+  /// a row under the same challenge.
+  challengeHash String @map("challenge_hash")
+
+  /// scrypt hash of the six digits, in `lib/password.ts` format.
+  codeHash String @map("code_hash")
+
+  /// Five minutes from issue, enforced on the server on every attempt.
+  expiresAt DateTime @map("expires_at")
+
+  /// Incorrect guesses so far. At `OTP_MAX_ATTEMPTS` the row is expired on the
+  /// spot and a new code has to be requested.
+  attempts Int @default(0)
+
+  /// Stamped once, on the verification that creates the session. Kept rather
+  /// than deleted, so a replayed code finds "already used" instead of no row.
+  usedAt DateTime? @map("used_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Verification and resend both look up "the newest live row for this
+  /// challenge"; the sweep ranges over the clock.
+  @@index([challengeHash, createdAt])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("login_otps")
 }
 
 /// A signed-in browser.

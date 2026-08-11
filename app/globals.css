@@ -2522,6 +2522,35 @@ select option {
  * None of it carries information that is not also carried by colour, weight or
  * text, so removing all of it costs a reduced-motion user nothing at all.
  */
+/*
+ * The "still running" dot on the work-session clock.
+ *
+ * A solid dot with one expanding ring behind it. Three seconds, not one: this
+ * sits in the top bar of every screen for a whole shift, and anything faster
+ * becomes a thing an agent has to actively ignore while reading the list
+ * behind it. The ring is the only moving element in the bar.
+ *
+ * The solid dot is a separate element and never animates, so under
+ * `prefers-reduced-motion` — where the ring stops below — the indicator is
+ * still there and still means "running". The state survives; only the motion
+ * goes.
+ */
+@keyframes pulse-ring {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+.pulse-ring {
+  animation: pulse-ring 3s var(--ease-out-soft) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /*
    * Everything decorative stops — the ambient drift, the login blooms, the
@@ -2542,6 +2571,7 @@ select option {
   .pop-in,
   .table-body-enter,
   .row-saved > td,
+  .pulse-ring,
   .skeleton {
     animation: none !important;
   }

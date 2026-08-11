@@ -16,10 +16,12 @@ import {
   contactRate,
   conversionRate,
   formatDuration,
+  formatWorkClock,
   leadsPerHour,
   RANGE_KEYS,
   RANGE_LABELS,
   type AgentPerformance,
+  type AgentWorkTime,
   type DateRange,
   type PerformanceReport,
   type RangeKey,
@@ -299,6 +301,13 @@ export default function TeamPerformancePanel({
         </div>
       </section>
 
+      {/* --- work time --------------------------------------------------- */}
+      {/* Its own section, below the range-driven table and deliberately not
+          part of it. These three windows are fixed: "how long has Ahmed worked
+          today" is a question with one answer, and routing it through a filter
+          that might say "yesterday" would make the column headings lie. */}
+      <WorkTimeTable rows={report.workTime} busy={busy} />
+
       {/* --- shape of the period ----------------------------------------- */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <section className={`panel px-5 py-4 lg:col-span-2 ${busy ? "opacity-60" : ""}`}>
@@ -342,6 +351,140 @@ export default function TeamPerformancePanel({
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Work time per agent: today, this week, this month, and the shift running now.
+ *
+ * The live column is the reason this is a client component rather than a static
+ * table. The server sends `currentSessionStartedAt` — an instant — and the
+ * clock is counted forward from it here, so an admin watching this screen sees
+ * the same number the agent sees in their own top bar rather than a figure
+ * frozen at whenever the page was loaded. Sending a duration instead would be
+ * stale before it rendered.
+ *
+ * `Today` includes the running session, exactly as the agent's own total does.
+ * The two are the same query over the same rows, which is what lets an admin
+ * and an agent compare notes and agree.
+ */
+function WorkTimeTable({ rows, busy }: { rows: AgentWorkTime[]; busy: boolean }) {
+  // One tick a minute, not one a second: this table shows hours and minutes, so
+  // a per-second interval would re-render nine rows sixty times to change
+  // nothing. `null` until the first tick keeps the server render and the first
+  // client paint identical.
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => setNowMs(Date.now());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
+
+  const ranked = useMemo(
+    () => [...rows].sort((a, b) => b.todaySeconds - a.todaySeconds || a.name.localeCompare(b.name)),
+    [rows],
+  );
+
+  return (
+    <section className={`panel overflow-hidden ${busy ? "opacity-60" : ""}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-3">
+        <h2 className="text-caption font-medium text-fg-2">Work time</h2>
+        <p className="text-meta text-fg-4">
+          From signed-in sessions. Fixed windows — not affected by the filters above.
+        </p>
+      </div>
+
+      <div className="w-full overflow-x-auto">
+        <table className="w-full min-w-[640px]">
+          <thead>
+            <tr className="border-b border-line">
+              <th scope="col" className="eyebrow px-5 py-2 text-left">Agent</th>
+              <NumericHead>Current session</NumericHead>
+              <NumericHead>Today</NumericHead>
+              <NumericHead>This week</NumericHead>
+              <NumericHead>This month</NumericHead>
+            </tr>
+          </thead>
+          <tbody>
+            {ranked.map((row) => {
+              const startedMs = row.currentSessionStartedAt
+                ? new Date(row.currentSessionStartedAt).getTime()
+                : null;
+              const currentSeconds =
+                startedMs === null || nowMs === null
+                  ? null
+                  : Math.max(0, Math.floor((nowMs - startedMs) / 1000));
+
+              // The server's `todaySeconds` stopped moving when the response was
+              // built and already contains the running session up to that
+              // instant. For somebody still working, add only the seconds
+              // *since* `asOf` — adding the session itself would count it
+              // twice, which is precisely the bug this feature had.
+              const sinceAsOf =
+                nowMs === null || row.currentSessionStartedAt === null
+                  ? 0
+                  : Math.max(0, Math.floor((nowMs - new Date(row.asOf).getTime()) / 1000));
+
+              return (
+                <tr
+                  key={row.userId}
+                  className="border-b border-line/60 transition-colors last:border-0 hover:bg-hover/50"
+                >
+                  <td className="px-5 py-3">
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span aria-hidden="true" className="relative flex h-1.5 w-1.5 shrink-0">
+                        {startedMs !== null && (
+                          <span className="pulse-ring absolute inset-0 rounded-full bg-success" />
+                        )}
+                        <span
+                          className={`relative h-1.5 w-1.5 rounded-full ${
+                            startedMs !== null ? "bg-success" : "bg-fg-4/40"
+                          }`}
+                        />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-ui font-medium text-fg">
+                          {row.name}
+                        </span>
+                        <span className="block truncate text-meta text-fg-4">
+                          {row.role === "ADMIN" ? "Administrator" : "Agent"}
+                          {startedMs !== null ? " · working now" : ""}
+                        </span>
+                      </span>
+                    </span>
+                  </td>
+                  <Numeric>
+                    {currentSeconds === null ? (
+                      <span className="text-fg-4">—</span>
+                    ) : (
+                      <span className="text-fg">{formatWorkClock(currentSeconds)}</span>
+                    )}
+                  </Numeric>
+                  <Numeric>
+                    <span className="font-semibold text-fg">
+                      {formatWorkClock(row.todaySeconds + sinceAsOf)}
+                    </span>
+                  </Numeric>
+                  <Numeric>{formatWorkClock(row.weekSeconds)}</Numeric>
+                  <Numeric>{formatWorkClock(row.monthSeconds)}</Numeric>
+                </tr>
+              );
+            })}
+            {ranked.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-5 py-8 text-center text-ui text-fg-3">
+                  No accounts to report on.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

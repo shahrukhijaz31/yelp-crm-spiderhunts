@@ -1,5 +1,5 @@
 import { Prisma } from "./generated/prisma/client";
-import { HEARTBEAT_SECONDS } from "./performanceRules";
+import { HEARTBEAT_SECONDS, type WorkClock } from "./performanceRules";
 import { prisma } from "./prisma";
 
 /**
@@ -147,6 +147,15 @@ export interface ActiveWorkSession {
   startedAt: string;
 }
 
+/*
+ * `WorkClock` — the shape the on-screen clock reads — lives in
+ * `lib/performanceRules.ts` with the rest of the client-safe vocabulary,
+ * because the provider that consumes it is a client component and this module
+ * imports Prisma. Re-exported here so server callers name it from the module
+ * that produces it.
+ */
+export type { WorkClock };
+
 /**
  * Start a shift, or adopt the one already running.
  *
@@ -237,6 +246,71 @@ export async function getActiveWorkSession(
 }
 
 /**
+ * The on-screen clock: today's finished work, plus the shift still running.
+ *
+ * This is what makes signing out and back in stop looking like a reset. The
+ * *current session* legitimately restarts at zero on a new login — that is what
+ * a session is, and each one is its own permanent row — but the day's total
+ * must not, and it does not, because it is a sum over every session that
+ * started today rather than a property of the one in progress.
+ *
+ * Both halves are clamped to today, so a night shift that began yesterday
+ * evening contributes only the part after midnight and the figure means
+ * "worked today" rather than "worked since I last signed in".
+ *
+ * Two queries, deliberately not one:
+ *
+ *   - the completed sum is an aggregate over an indexed range and returns a
+ *     single number;
+ *   - the open session is a one-row lookup on `(user_id, ended_at)`.
+ *
+ * Combining them into a single statement would mean either an `OUTER JOIN`
+ * against a one-row subquery or a `GROUPING SETS` — more SQL to read, no fewer
+ * round trips worth counting, and a result shape that no longer says on its
+ * face that the two halves do not overlap.
+ */
+export async function getWorkClock(userId: string): Promise<WorkClock> {
+  const now = new Date();
+  const todayStart = startOfToday();
+
+  const [completed, active] = await Promise.all([
+    // Closed sessions only — `ended_at IS NOT NULL`. This is the half of the
+    // total that has stopped moving, and excluding the open one here is what
+    // lets the client add the live figure without counting it twice.
+    prisma
+      .$queryRaw<{ seconds: number }[]>(Prisma.sql`
+        SELECT coalesce(sum(${overlapSecondsSql(todayStart, now)}), 0)::int AS seconds
+        FROM work_sessions ws
+        WHERE ws.user_id = ${userId}
+          AND ws.ended_at IS NOT NULL
+          AND ws.started_at < ${utc(now)}
+          AND ws.ended_at > ${utc(todayStart)}
+      `)
+      .catch(() => [{ seconds: 0 }]),
+    getActiveWorkSession(userId),
+  ]);
+
+  return {
+    startedAt: active?.startedAt ?? null,
+    completedSecondsToday: completed[0]?.seconds ?? 0,
+    serverNow: now.toISOString(),
+    todayStart: todayStart.toISOString(),
+  };
+}
+
+/**
+ * Local midnight, on the server's clock.
+ *
+ * The same day boundary `todayIso()` and the reports use, so "today" means one
+ * thing across the whole application — the figure in the top bar and the figure
+ * on the admin report are the same day or the pair is untrustworthy.
+ */
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+}
+
+/**
  * The heartbeat: "this browser is still open".
  *
  * Scoped by `userId` and nothing else — the caller is the session user, so
@@ -248,21 +322,29 @@ export async function getActiveWorkSession(
  * the feature survive its own deployment: everyone already signed in when this
  * shipped has no open row, and their clock starts at their next heartbeat
  * rather than requiring them to sign out and back in.
+ *
+ * Returns the whole {@link WorkClock}, not just the session: the beat is
+ * already a round trip, so it is also how the day's total and the server's own
+ * clock are refreshed. Anything running long enough to drift is corrected once
+ * a minute without a second request.
  */
-export async function heartbeatWorkSession(
-  userId: string,
-): Promise<ActiveWorkSession | null> {
+export async function heartbeatWorkSession(userId: string): Promise<WorkClock> {
   const active = await getActiveWorkSession(userId);
-  if (!active) return openOrResumeWorkSession(userId);
 
-  await prisma.workSession
-    .update({ where: { id: active.id }, data: { lastSeenAt: new Date() } })
-    .catch(() => {
-      // Bookkeeping. A missed beat costs nothing: the next one lands, and the
-      // grace window is five of them wide.
-    });
+  if (!active) {
+    await openOrResumeWorkSession(userId);
+  } else {
+    await prisma.workSession
+      .update({ where: { id: active.id }, data: { lastSeenAt: new Date() } })
+      .catch(() => {
+        // Bookkeeping. A missed beat costs nothing: the next one lands, and the
+        // grace window is five of them wide.
+      });
+  }
 
-  return active;
+  // Read after writing, so the answer reflects the session this beat may have
+  // just opened rather than the state from before it.
+  return getWorkClock(userId);
 }
 
 /**

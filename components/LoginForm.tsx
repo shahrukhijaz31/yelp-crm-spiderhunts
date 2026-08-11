@@ -6,9 +6,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertCircle, Eye, EyeOff, Loader2, LockKeyhole } from "lucide-react";
 
+import OtpVerificationPanel from "./OtpVerificationPanel";
 import PasswordRecoveryPanel from "./PasswordRecoveryPanel";
 import ThemeToggle from "./ThemeToggle";
 import { AUTH_ERROR_MESSAGES, signIn } from "@/lib/auth";
+import type { PendingChallenge } from "@/lib/otpRules";
 
 /**
  * The sign-in screen.
@@ -86,7 +88,23 @@ function validate(username: string, password: string): FieldErrors {
   return errors;
 }
 
-export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
+export default function LoginForm({
+  callbackUrl,
+  pendingChallenge,
+}: {
+  callbackUrl?: string;
+  /**
+   * A sign-in already past the password step, resolved on the server from the
+   * pending cookie (`app/login/page.tsx`).
+   *
+   * This is what makes refreshing the verification screen work: the step the
+   * user is on is a fact about the server's state, not React state a reload
+   * destroys. It carries no code and no identity — only a masked address and
+   * two clocks — and it grants nothing: the code is still required, and is
+   * still checked from scratch.
+   */
+  pendingChallenge?: PendingChallenge | null;
+}) {
   const router = useRouter();
   const usernameId = useId();
   const passwordId = useId();
@@ -107,6 +125,16 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
    * without a code.
    */
   const [recovering, setRecovering] = useState(false);
+  /**
+   * The OTP step, on the same screen and for the same reasons as recovery: the
+   * brand column, the theme control and the entrance animation stay put, and
+   * there is no `/verify` URL for anyone to arrive at cold with no pending
+   * sign-in behind them.
+   *
+   * Seeded from the server so a refresh mid-verification lands back on the
+   * boxes rather than on an empty password form.
+   */
+  const [challenge, setChallenge] = useState<PendingChallenge | null>(pendingChallenge ?? null);
 
   const errors = validate(username, password);
   const showErrors = checked ? errors : {};
@@ -133,12 +161,28 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
     try {
       const result = await signIn({ username: username.trim(), password, callbackUrl });
       if (result.ok) {
-        // `replace`, not `push`: the login page should not be a Back
-        // destination once you are through it. `refresh` as well, because the
-        // portal layout is server-rendered per user — without it the router
-        // could paint a shell built before the session existed.
-        router.replace(result.redirectTo);
-        router.refresh();
+        // The password is dropped from state either way: it has done its one
+        // job, and neither branch below can use it again.
+        setPassword("");
+        setRevealed(false);
+        setChecked(false);
+
+        if (!result.otpRequired) {
+          // Administrators, who skip the second factor — a session already
+          // exists, so this is the same navigation the form did before OTP.
+          //
+          // `replace`, not `push`: the login page should not be a Back
+          // destination once you are through it. `refresh` as well, because the
+          // portal layout is server-rendered per user — without it the router
+          // could paint a shell built before the session existed.
+          router.replace(result.redirectTo);
+          router.refresh();
+          return;
+        }
+
+        // Agents: the password was right, and that is all it was. No session
+        // exists yet; a code is in the post and the screen moves to the boxes.
+        setChallenge(result.challenge);
         return;
       }
       setFormError(AUTH_ERROR_MESSAGES[result.code]);
@@ -255,7 +299,31 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             </span>
           </div>
 
-          {recovering ? (
+          {challenge ? (
+            <div {...rise(0.02)}>
+              <OtpVerificationPanel
+                challenge={challenge}
+                callbackUrl={callbackUrl}
+                onBack={() => {
+                  // The pending code has already been cancelled server-side by
+                  // the panel. Come back to a clean, empty form.
+                  setChallenge(null);
+                  setPassword("");
+                  setChecked(false);
+                  setFormError(null);
+                }}
+                onDone={(redirectTo) => {
+                  // `replace`, not `push`: the login page should not be a Back
+                  // destination once you are through it. `refresh` as well,
+                  // because the portal layout is server-rendered per user —
+                  // without it the router could paint a shell built before the
+                  // session existed.
+                  router.replace(redirectTo);
+                  router.refresh();
+                }}
+              />
+            </div>
+          ) : recovering ? (
             <div {...rise(0.02)}>
               <PasswordRecoveryPanel
                 onBack={() => {

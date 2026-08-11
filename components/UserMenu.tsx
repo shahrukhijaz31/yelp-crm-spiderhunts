@@ -6,7 +6,9 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, KeyRound, LogOut } from "lucide-react";
 
+import { useWorkSession } from "./WorkSessionProvider";
 import { LOGIN_PATH, type SessionUser } from "@/lib/access";
+import { formatWorkClock } from "@/lib/performanceRules";
 
 /**
  * The signed-in user, at the right-hand end of the top bar.
@@ -163,6 +165,22 @@ export default function UserMenu({ user }: { user: SessionUser }) {
 
           <div aria-hidden="true" className="my-1 h-px bg-line" />
 
+          {/*
+           * The current session, in the one place it is genuinely wanted.
+           *
+           * It is not in the top bar, where it sat beside the day's total and
+           * the two were indistinguishable — see the note in `SessionTimer`.
+           * Here it is directly above Sign out, which is the moment somebody
+           * actually asks "how long has this session been": they have opened
+           * this menu in order to leave. The rest of the day it costs nothing,
+           * because the menu is shut.
+           *
+           * A row of text, not a menu item: there is nothing to activate, so it
+           * takes no `role="menuitem"` and no focus stop. Keyboard users tab
+           * straight from the trigger to Change password as before.
+           */}
+          <SessionRow />
+
           <Link
             ref={itemRef}
             href="/account/password"
@@ -191,6 +209,52 @@ export default function UserMenu({ user }: { user: SessionUser }) {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * The running shift: how long, and since when.
+ *
+ * Reads the same `WorkSessionProvider` the top bar does, so the figure here and
+ * the day's total there are two views of one clock rather than two clocks. The
+ * start instant comes from the `work_sessions` row in Postgres — the browser
+ * only counts forward from it, which is why this survives a refresh and agrees
+ * between tabs.
+ *
+ * Renders nothing when no session is running. There is no state in which this
+ * should show a stopped clock: a person reading this menu is signed in, and if
+ * the row is somehow missing, saying nothing is better than saying zero.
+ */
+function SessionRow() {
+  const { startedAt, currentSessionSeconds } = useWorkSession();
+
+  if (!startedAt || currentSessionSeconds === null) return null;
+
+  const since = new Date(startedAt).toLocaleTimeString("en-GB", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3 px-2 py-1.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span aria-hidden="true" className="relative flex h-1.5 w-1.5 shrink-0">
+            <span className="pulse-ring absolute inset-0 rounded-full bg-success" />
+            <span className="relative h-1.5 w-1.5 rounded-full bg-success" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-caption text-fg-2">Current session</span>
+            <span className="block truncate text-meta text-fg-4">Signed in at {since}</span>
+          </span>
+        </span>
+        <span className="tnum shrink-0 font-mono text-caption font-medium text-fg">
+          {formatWorkClock(currentSessionSeconds)}
+        </span>
+      </div>
+
+      <div aria-hidden="true" className="my-1 h-px bg-line" />
+    </>
   );
 }
 

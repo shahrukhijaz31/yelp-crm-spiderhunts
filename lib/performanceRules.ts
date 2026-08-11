@@ -202,6 +202,45 @@ export interface ActivityDay {
   meetings: number;
 }
 
+/**
+ * One agent's work time over the three windows an administrator actually asks
+ * about, plus whatever is running right now.
+ *
+ * Deliberately **not** driven by the report's date filter. "How long has Ahmed
+ * worked today / this week / this month" is a fixed question with fixed
+ * windows, and answering it through a control that might be set to "yesterday"
+ * would mean the column headings lie. The filtered, range-driven figures are
+ * the `activeSeconds` on {@link AgentPerformance}; these three sit apart from
+ * them on purpose.
+ */
+export interface AgentWorkTime {
+  userId: string;
+  name: string;
+  role: Role;
+  /** Local midnight to now. */
+  todaySeconds: number;
+  /** The last 7 days including today. */
+  weekSeconds: number;
+  /** The last 30 days including today. */
+  monthSeconds: number;
+  /**
+   * When the running session began, or null. The client counts from this so an
+   * admin watching the screen sees the same clock the agent does, rather than a
+   * figure frozen at whenever the page was loaded.
+   */
+  currentSessionStartedAt: string | null;
+  /**
+   * The server instant these sums describe.
+   *
+   * `todaySeconds` already includes the running session up to *this* moment, so
+   * a client that wants a live figure adds the time since `asOf` — never the
+   * whole session, which is already in there. Same no-overlap discipline as
+   * {@link WorkClock}: the number and its anchor travel together so the
+   * addition cannot double-count.
+   */
+  asOf: string;
+}
+
 export interface PerformanceReport {
   range: DateRange;
   agents: AgentPerformance[];
@@ -212,6 +251,11 @@ export interface PerformanceReport {
    */
   totals: PerformanceMetrics;
   daily: ActivityDay[];
+  /**
+   * Work time over today / this week / this month, per agent. Independent of
+   * `range` — see {@link AgentWorkTime} for why those windows are fixed.
+   */
+  workTime: AgentWorkTime[];
 }
 
 /** Today and the last seven days, which is what the agent's own screens show. */
@@ -290,6 +334,32 @@ export function formatDuration(totalSeconds: number): string {
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
 
+/**
+ * `9258` -> `02h 34m` — the work clock as it appears in the shell.
+ *
+ * Hours and minutes only, zero-padded, and **no seconds**. A figure in the top
+ * bar that changes every second is one an agent's eye is dragged back to all
+ * day; at a minute's resolution it updates rarely enough to be glanceable and
+ * is still precise enough for the only question anyone asks of it. The seconds
+ * are on `/my-performance`, which is where somebody goes when they actually
+ * want to watch the clock.
+ *
+ * Zero-padded because these two numbers sit in a row and change width
+ * otherwise, which makes the whole bar shuffle sideways on the hour.
+ */
+export function formatWorkClock(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
+}
+
+/** `9258` -> `02h 34m 18s`. The same clock with seconds, for the one screen that watches it. */
+export function formatWorkClockLong(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  return `${formatWorkClock(seconds)} ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
 /** `13362` -> `03:42:42` — the running clock, where every digit is stable. */
 export function formatClock(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds));
@@ -299,4 +369,40 @@ export function formatClock(totalSeconds: number): string {
     seconds % 60,
   ];
   return parts.map((part) => String(part).padStart(2, "0")).join(":");
+}
+
+/**
+ * Everything the on-screen clock needs, read from the database in one go.
+ *
+ * The shape exists to make one class of bug impossible. "Today's total" and
+ * "the session running right now" overlap — the open shift is part of both —
+ * and any version of this that hands the client two numbers which each already
+ * contain the open session will double-count it the moment the client adds them
+ * together. So the split here is on a line that cannot overlap:
+ *
+ *   completedSecondsToday   **closed sessions only**, clamped to today
+ *   startedAt               when the open one began, or null
+ *
+ * The client's sum is then `completed + (now - startedAt)`, and the open
+ * session appears in it exactly once, by construction rather than by care.
+ *
+ * `serverNow` is the third field for a reason the brief is explicit about: the
+ * persisted timestamps are the server's, so the *displayed* clock has to be
+ * measured against the server's clock too. A workstation whose time is ten
+ * minutes fast would otherwise show a ten-minute session the instant somebody
+ * signed in. The client keeps the difference and subtracts it — see
+ * `WorkSessionProvider`.
+ */
+export interface WorkClock {
+  /** ISO instant the current shift began, or null when none is running. */
+  startedAt: string | null;
+  /**
+   * Seconds worked today in sessions that have **already ended**. Deliberately
+   * excludes the running one, which the client adds live.
+   */
+  completedSecondsToday: number;
+  /** The server's clock at the moment this was read, for skew correction. */
+  serverNow: string;
+  /** Local midnight, so the client clamps a shift that began yesterday. */
+  todayStart: string;
 }

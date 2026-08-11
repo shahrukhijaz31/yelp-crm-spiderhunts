@@ -46,7 +46,7 @@ export default function MyDayStrip({
 }: {
   revision?: number;
 }) {
-  const { elapsedSeconds } = useWorkSession();
+  const { todayTotalSeconds } = useWorkSession();
   const [performance, setPerformance] = useState<PersonalPerformance | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -93,19 +93,21 @@ export default function MyDayStrip({
   const today = performance.today;
 
   /*
-   * The live figure, not the stored one.
+   * The live total comes from `WorkSessionProvider`, not from the performance
+   * response, and the difference is a bug that was here:
    *
-   * `today.activeSeconds` is what Postgres summed when the request was answered
-   * and stops moving between polls; the open session's own clock is ticking in
-   * `WorkSessionProvider`. Adding the seconds elapsed *since the response* to
-   * the server's total keeps the two in step without polling once a second —
-   * the server stays the source of truth for everything already banked, and the
-   * browser only ever contributes the sliver since it last asked.
+   *   `today.activeSeconds` already includes the session running right now —
+   *   the server clamps an open session to `now` when it sums the day. Adding
+   *   a live figure on top of it counted the open session twice, so the day's
+   *   time ran at roughly double speed and the number was wrong all day.
+   *
+   * The provider's total cannot have that problem by construction: the server
+   * hands it *closed* sessions only, and the open one is added exactly once
+   * there. This component just reads it. The fallback to the server figure is
+   * for the moment before the first client tick, where nothing is ticking yet
+   * and the stored total is exactly right.
    */
-  const liveActiveSeconds =
-    elapsedSeconds === null
-      ? today.activeSeconds
-      : today.activeSeconds + secondsSince(performance.todayIso, elapsedSeconds);
+  const activeSeconds = todayTotalSeconds ?? today.activeSeconds;
 
   return (
     <section
@@ -131,7 +133,7 @@ export default function MyDayStrip({
           <Figure icon={PhoneOutgoing} value={today.calls} label="Calls" />
           <Figure icon={CalendarClock} value={today.callbacks} label="Callbacks" />
           <Figure icon={CalendarCheck} value={today.meetingsBooked} label="Meetings" />
-          <Figure icon={Timer} text={formatDuration(liveActiveSeconds)} label="Active" />
+          <Figure icon={Timer} text={formatDuration(activeSeconds)} label="Active" />
         </div>
 
         <Link
@@ -144,23 +146,6 @@ export default function MyDayStrip({
       </div>
     </section>
   );
-}
-
-/**
- * How much of the running session falls inside today.
- *
- * A shift that began yesterday evening is still open this morning, and the
- * whole of its elapsed time is not today's work. `elapsedSeconds` counts from
- * the session's start; this trims it to the part on or after local midnight, so
- * the live sliver added to the server's total covers the same window the server
- * was counting.
- */
-function secondsSince(todayIso: string, elapsedSeconds: number): number {
-  const [year, month, day] = todayIso.split("-").map(Number);
-  const midnight = new Date(year, (month ?? 1) - 1, day ?? 1).getTime();
-  const sessionStart = Date.now() - elapsedSeconds * 1000;
-  const countFrom = Math.max(midnight, sessionStart);
-  return Math.max(0, Math.floor((Date.now() - countFrom) / 1000));
 }
 
 function Figure({

@@ -15,7 +15,8 @@ import { useWorkSession } from "./WorkSessionProvider";
 import {
   contactRate,
   conversionRate,
-  formatClock,
+  formatWorkClock,
+  formatWorkClockLong,
   formatDuration,
   type ActivityDay,
   type PersonalPerformance,
@@ -49,7 +50,7 @@ export default function MyPerformancePanel({
   performance: PersonalPerformance;
   name: string;
 }) {
-  const { startedAt, elapsedSeconds } = useWorkSession();
+  const { startedAt, currentSessionSeconds, todayTotalSeconds } = useWorkSession();
   const { today, week, daily } = performance;
 
   return (
@@ -63,7 +64,11 @@ export default function MyPerformancePanel({
       </header>
 
       {/* --- the active session ------------------------------------------ */}
-      <ActiveSessionCard startedAt={startedAt} elapsedSeconds={elapsedSeconds} />
+      <ActiveSessionCard
+        startedAt={startedAt}
+        currentSessionSeconds={currentSessionSeconds}
+        todayTotalSeconds={todayTotalSeconds}
+      />
 
       {/* --- today ------------------------------------------------------- */}
       <section aria-labelledby="today-heading" className="flex flex-col gap-3">
@@ -101,9 +106,13 @@ export default function MyPerformancePanel({
           />
           <Metric
             icon={Timer}
-            text={formatDuration(today.activeSeconds)}
+            // The live total, falling back to the server's sum before the first
+            // client tick. Same value as the card above and the top bar — one
+            // number, read from one place, so the page cannot disagree with
+            // itself about how long somebody has worked.
+            text={formatDuration(todayTotalSeconds ?? today.activeSeconds)}
             label="Active time"
-            hint="signed in today"
+            hint="every session today"
           />
         </div>
       </section>
@@ -143,69 +152,88 @@ export default function MyPerformancePanel({
 }
 
 /**
- * The running shift.
+ * The two work-time figures, side by side, and the reason they differ.
  *
- * The only thing on this page the server cannot render: the seconds move. It
- * still is not a browser timer in any meaningful sense — the *start instant*
- * comes from the `work_sessions` row in Postgres and the browser only counts
- * from it, which is why a refresh does not reset it and two tabs agree. When
- * there is no open session it says so plainly rather than showing a stopped
- * clock at zero.
+ * This card exists because "my time reset" is the natural reading of a single
+ * clock that starts again at every sign-in. It does start again — a work
+ * session *is* one login-to-logout stretch, and each one is its own permanent
+ * row — but the day's total does not, and showing them together is what makes
+ * that legible rather than something an agent has to be told.
+ *
+ * Neither number is a browser timer. Both come from `work_sessions` in
+ * Postgres: the session's start instant and the sum of today's finished
+ * sessions. The browser only counts forward from them, which is why a refresh,
+ * a navigation into the lead workspace and a second tab all agree.
  */
 function ActiveSessionCard({
   startedAt,
-  elapsedSeconds,
+  currentSessionSeconds,
+  todayTotalSeconds,
 }: {
   startedAt: string | null;
-  elapsedSeconds: number | null;
+  currentSessionSeconds: number | null;
+  todayTotalSeconds: number | null;
 }) {
   if (!startedAt) {
     return (
       <section className="panel px-5 py-4">
-        <p className="eyebrow">Active session</p>
+        <p className="eyebrow">Work time</p>
         <p className="mt-2 text-ui text-fg-3">
           No session is running. Signing in starts one.
         </p>
+        {todayTotalSeconds !== null && todayTotalSeconds > 0 && (
+          <p className="mt-1.5 text-meta text-fg-4">
+            {formatWorkClock(todayTotalSeconds)} recorded today so far.
+          </p>
+        )}
       </section>
     );
   }
 
-  const since = new Date(startedAt);
-  const loggedInAt = since.toLocaleTimeString("en-GB", {
+  const loggedInAt = new Date(startedAt).toLocaleTimeString("en-GB", {
     hour: "numeric",
     minute: "2-digit",
   });
 
   return (
-    <section className="panel edge-accent relative isolate overflow-hidden px-5 py-4">
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(22rem_12rem_at_100%_0%,var(--c-wash-accent),transparent_70%)]"
-      />
-      <p className="flex items-center gap-2">
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
-        <span className="eyebrow">Active session</span>
-      </p>
-      <p className="display-num mt-2 text-[34px] leading-none tnum text-fg">
-        {elapsedSeconds === null ? "—" : formatClock(elapsedSeconds)}
-      </p>
-      <p className="mt-2 text-meta text-fg-3">
-        Signed in at {loggedInAt}. The clock is read from the session recorded in
-        the database, so it survives a refresh.
-      </p>
+    <section className="panel relative isolate grid grid-cols-1 gap-px overflow-hidden bg-line sm:grid-cols-2">
+      {/* Current session — the one that restarts. Carries the wash and the
+          live dot, because it is the figure that is actually moving. */}
+      <div className="relative isolate overflow-hidden bg-surface px-5 py-4">
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(22rem_12rem_at_100%_0%,var(--c-wash-accent),transparent_70%)]"
+        />
+        <p className="flex items-center gap-2">
+          <span className="relative flex h-1.5 w-1.5 shrink-0" aria-hidden="true">
+            <span className="pulse-ring absolute inset-0 rounded-full bg-success" />
+            <span className="relative h-1.5 w-1.5 rounded-full bg-success" />
+          </span>
+          <span className="eyebrow">Current session</span>
+        </p>
+        <p className="display-num tnum mt-2 text-[34px] leading-none text-fg">
+          {currentSessionSeconds === null ? "—" : formatWorkClockLong(currentSessionSeconds)}
+        </p>
+        <p className="mt-2 text-meta text-fg-3">
+          Started at {loggedInAt}, when you signed in.
+        </p>
+      </div>
+
+      {/* Today's total — the one that does not. */}
+      <div className="bg-surface px-5 py-4">
+        <p className="eyebrow">Today&rsquo;s total</p>
+        <p className="display-num tnum mt-2 text-[34px] leading-none text-fg">
+          {todayTotalSeconds === null ? "—" : formatWorkClockLong(todayTotalSeconds)}
+        </p>
+        <p className="mt-2 text-meta text-fg-3">
+          Every session you have worked today, this one included. Signing out and
+          back in starts a new session; it does not reset this.
+        </p>
+      </div>
     </section>
   );
 }
 
-/**
- * Seven days of calls, as bars.
- *
- * Bars rather than a line: these are counts of separate days, not samples of a
- * continuous quantity, and a line between them would draw a Tuesday afternoon
- * that never existed. Scaled to the busiest day in the window, so the shape of
- * a quiet week is still readable — an axis fixed to some round number would
- * flatten every real week into nothing.
- */
 function DailyChart({ days }: { days: ActivityDay[] }) {
   const peak = Math.max(1, ...days.map((day) => day.calls));
 

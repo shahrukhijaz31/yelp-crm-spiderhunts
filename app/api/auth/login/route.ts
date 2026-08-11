@@ -1,34 +1,53 @@
 import { safeCallbackUrl } from "@/lib/access";
+import { completeSignIn } from "@/lib/completeSignIn";
+import { issueLoginOtp, pruneExpiredLoginOtps } from "@/lib/loginOtp";
 import {
   checkLoginAllowed,
   clearLoginFailures,
   clientIp,
   recordLoginFailure,
 } from "@/lib/loginThrottle";
+import { isMailConfigured } from "@/lib/mail";
 import { hashPassword, verifyPassword } from "@/lib/password";
-import { createSession, pruneExpiredSessions } from "@/lib/session";
-import { findUserForLogin, markLoggedIn } from "@/lib/userDb";
-import { openOrResumeWorkSession, reconcileStaleWorkSessions } from "@/lib/workSessions";
+import { pruneExpiredSessions } from "@/lib/session";
+import { findUserForLogin } from "@/lib/userDb";
+import { reconcileStaleWorkSessions } from "@/lib/workSessions";
 
 /**
- * POST /api/auth/login — exchange a username and password for a session.
+ * POST /api/auth/login — check a username and password, then either email a
+ * code or (for administrators) finish the sign-in.
  *
- * The one route that turns an anonymous request into an identified one, so it
- * is the one route where the details matter most:
+ * **An AGENT is not signed in by this route.** Their path ends at
+ * `issueLoginOtp`, and the session is minted by `POST /api/auth/otp/verify`
+ * once the emailed code comes back.
+ *
+ * **An ADMIN currently is**, via the clearly-marked bypass block below — the
+ * second factor is switched off for that role at the client's request, and the
+ * block is written so that switching it back on means deleting the block and
+ * nothing else.
+ *
+ * Everything before that fork is untouched, because everything before it was
+ * already right:
  *
  *   - Wrong username and wrong password are the same answer, `invalid`, with
  *     the same timing. A login form that answers faster for accounts that do
  *     not exist is an account enumeration endpoint.
- *   - A brand-new session token is minted here and only here, so a token the
- *     client already held can never be promoted to an authenticated one
- *     (session fixation).
  *   - Failures are counted (`lib/loginThrottle`) before any password work is
  *     done, so a locked-out attacker cannot even make the server spend scrypt
  *     time.
+ *   - Disabled and must-change-password accounts are refused *after* the
+ *     password check, so a clear answer reaches only someone who already knew
+ *     the password.
  *
- * The response carries no user data. The client reloads and the server renders
- * the portal for whoever the session says they are; sending the role back here
- * would invite someone to treat that JSON as authoritative.
+ * What the split buys, on the agent path, is that a correct password produces
+ * no authority at all. The pending state it leaves behind is a row in
+ * `login_otps` and a browser-session cookie that names nobody
+ * (`lib/loginOtp.ts`); no guard in the app reads either, so there is no version
+ * of "half signed in" that any protected page or route can be tricked into
+ * honouring.
+ *
+ * The response still carries no user data — only the masked address the code
+ * went to, and the two clocks the screen counts down from.
  */
 
 /** Burned when the account does not exist, so both paths cost the same scrypt run. */
@@ -153,45 +172,124 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  try {
-    await createSession(user.id, {
-      userAgent: request.headers.get("user-agent"),
-      ipAddress: ip,
-    });
-  } catch (error) {
-    console.error("POST /api/auth/login: could not create session:", error);
+  /*
+   * The password is right. Everything that used to happen here — the session,
+   * `markLoggedIn`, the work-session clock, the housekeeping — has moved to
+   * `POST /api/auth/otp/verify`, so that none of it can happen to somebody who
+   * has a password and not the mailbox.
+   *
+   * The throttle record is cleared at this point rather than at the end, and
+   * that is deliberate: the identifier window exists to stop password guessing,
+   * and the password has just been guessed correctly. Leaving it armed would
+   * mean an agent who mistyped their password four times could be locked out
+   * *between* the two steps of their own successful sign-in. Guessing at the
+   * code is bounded by its own, tighter limits (five attempts, five minutes,
+   * one use) inside `lib/loginOtp.ts`.
+   */
+  clearLoginFailures(username);
+
+  /* ======================================================================= *
+   * ADMIN OTP BYPASS — administrators sign in on the password alone.
+   *
+   * Turned off for admins at the client's request, and written as one
+   * self-contained block so it can be switched back on by deleting it (or
+   * commenting it out) and nothing else. Everything the second factor needs is
+   * still here and still working: the table, the routes, the email, the screen.
+   * Only this early return stands between an ADMIN and the OTP step, and the
+   * AGENT path below is untouched.
+   *
+   * TO REQUIRE OTP FOR ADMINISTRATORS AGAIN: comment out or delete this whole
+   * block, from the `if` to the closing brace. Nothing else changes — the OTP
+   * path below already handles every role, and the client already handles a
+   * response with `otpRequired: true` for any account.
+   *
+   * Note what this deliberately does NOT do: it does not weaken anything for
+   * agents, and it does not give an administrator a *different* session. Both
+   * roles land in `completeSignIn`, so an admin session is minted, clocked and
+   * expired exactly as it has always been — the only difference is how many
+   * factors were checked on the way in.
+   * ======================================================================= */
+  if (user.role === "ADMIN") {
+    try {
+      await completeSignIn(user.id, {
+        userAgent: request.headers.get("user-agent"),
+        ipAddress: ip,
+      });
+    } catch (error) {
+      console.error("POST /api/auth/login: could not create session:", error);
+      return Response.json(
+        {
+          error: "database_unavailable",
+          message: "Signed in, but the session could not be saved. Try again.",
+        },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    // The same opportunistic housekeeping the OTP route runs, because for an
+    // administrator this *is* the end of the sign-in.
+    void pruneExpiredSessions();
+    void reconcileStaleWorkSessions();
+    void pruneExpiredLoginOtps();
+
+    // `otpRequired: false` is stated rather than left to be inferred from a
+    // missing `challenge`: the client branches on this one field, so the two
+    // outcomes of this route are told apart by a value that is always present.
+    return Response.json(
+      { ok: true, otpRequired: false, redirectTo },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  /* ===================== end ADMIN OTP BYPASS ============================ */
+
+  /*
+   * Checked here rather than at the top of the route, and only on the path that
+   * actually needs to send something: without SMTP no code can be sent, and
+   * this route must never fall back to issuing a session on the password alone.
+   * It fails closed for the accounts that require a code — and leaves an
+   * administrator able to sign in and fix the mail settings, which is the one
+   * account you want working when mail is down.
+   */
+  if (!isMailConfigured()) {
+    console.error("POST /api/auth/login: SMTP is not configured; sign-in refused.");
     return Response.json(
       {
-        error: "database_unavailable",
-        message: "Signed in, but the session could not be saved. Try again.",
+        error: "email_failed",
+        message: "Verification codes cannot be sent right now. Contact your administrator.",
       },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
 
-  clearLoginFailures(username);
-  await markLoggedIn(user.id);
+  const issued = await issueLoginOtp({ id: user.id, email: user.email }).catch(
+    (error: unknown) => {
+      console.error("POST /api/auth/login: could not issue a verification code:", error);
+      return { ok: false, code: "email_failed" } as const;
+    },
+  );
+
+  if (!issued.ok) {
+    return Response.json(
+      {
+        error: "email_failed",
+        message: "We could not send your verification code. Try again in a moment.",
+      },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   /*
-   * Start the work session — the shift the "active time" figures are summed
-   * from. Awaited, not fired and forgotten, so the clock is running in Postgres
-   * before the browser is told to go to the portal; the timer the user then
-   * sees is read from that row rather than started by the page load, which is
-   * what makes it survive a refresh.
+   * `otpRequired` is stated rather than implied. The client has one code path
+   * for "the password was accepted", and it is this one — there is no branch in
+   * which a 200 from this route means a session exists, so a client that
+   * ignored the flag would still hold nothing.
    *
-   * `openOrResumeWorkSession` *resumes* an open session rather than opening a
-   * second one, so signing in from a second tab, window or device adds no time
-   * at all. It never throws — a clock that could not be started must not cost
-   * somebody their sign-in.
+   * `redirectTo` is echoed back so the verification screen can carry the
+   * original destination through to the second step. It has already been
+   * sanitised above and is sanitised again when it comes back.
    */
-  await openOrResumeWorkSession(user.id);
-
-  // Opportunistic housekeeping — this app has no cron, and a login is a
-  // natural, infrequent moment to clear out rows whose clocks have run out.
-  // Work sessions abandoned by a closed browser are reconciled on the same
-  // beat, and for the same reason.
-  void pruneExpiredSessions();
-  void reconcileStaleWorkSessions();
-
-  return Response.json({ ok: true, redirectTo }, { headers: { "Cache-Control": "no-store" } });
+  return Response.json(
+    { ok: true, otpRequired: true, redirectTo, challenge: issued.challenge },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

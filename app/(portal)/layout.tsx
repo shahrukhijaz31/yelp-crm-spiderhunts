@@ -7,7 +7,7 @@ import { WorkSessionProvider } from "@/components/WorkSessionProvider";
 import { requireUser } from "@/lib/authz";
 import { leadStats, leadWorkCounts } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
-import { getActiveWorkSession } from "@/lib/workSessions";
+import { getWorkClock } from "@/lib/workSessions";
 
 /**
  * The authenticated portal.
@@ -42,18 +42,22 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
   // Two aggregates, no rows: the nav bar's counters and the New/Called badges
   // in the rail. Both are `count(*)` over an indexed column, and neither
   // depends on the other, so they go together.
-  // The third read is the open work session, if there is one. It is here rather
-  // than in the top bar for the same reason the counts are: the shell is what
-  // stays mounted across navigations, so the clock is started once and keeps
-  // running as an agent moves between screens instead of being re-read on each.
+  // The third read is the work clock: when the open shift began, and how many
+  // seconds of *finished* shifts today already amount to. It is here rather than
+  // in the top bar for the same reason the counts are — the shell stays mounted
+  // across navigations, so the clock is read once and keeps running as an agent
+  // moves between screens instead of being re-read on each.
   //
-  // Reading the *start instant* from Postgres rather than starting a timer in
-  // the browser is what makes the clock survive a refresh, agree between two
-  // tabs, and mean the same thing as the "active time" figure on the reports.
-  const [stats, workCounts, workSession] = await Promise.all([
+  // Reading both from Postgres rather than starting a timer in the browser is
+  // what makes the figures survive a refresh, agree between two tabs, and mean
+  // the same thing as the "active time" on the admin report. It is also what
+  // makes signing out and back in stop looking like a reset: the *session*
+  // restarts, because it is a new session, but the day's total is a sum over
+  // every session that started today and carries straight on.
+  const [stats, workCounts, workClock] = await Promise.all([
     leadStats(today),
     leadWorkCounts(),
-    getActiveWorkSession(user.id),
+    getWorkClock(user.id),
   ]);
 
   return (
@@ -65,7 +69,7 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
       <LeadQueueProvider initialCounts={workCounts}>
         {/* Outside the shell so the heartbeat keeps beating whatever screen is
             on, including the ones that draw no clock at all. */}
-        <WorkSessionProvider initialStartedAt={workSession?.startedAt ?? null}>
+        <WorkSessionProvider initialClock={workClock}>
           <AppShell today={today} user={user}>
             {children}
           </AppShell>

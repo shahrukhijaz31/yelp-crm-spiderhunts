@@ -52,10 +52,20 @@ export const LOGIN_PATH = "/login";
  * not unauthenticated in any meaningful sense — the code *is* the credential,
  * it is checked server-side against a hash on every call, and neither endpoint
  * ever issues a session (see `lib/passwordReset.ts`).
+ *
+ * The three OTP endpoints are public for the same reason and with the same
+ * caveat: somebody halfway through signing in has, by design, no session yet.
+ * They are gated on the pending challenge cookie instead, which names nobody
+ * and is resolved server-side (`lib/loginOtp.ts`) — `verify` is the one that
+ * mints the session, and it only does so for a code that matches a live,
+ * unspent, unexhausted row.
  */
 const PUBLIC_PATHS = new Set<string>([
   LOGIN_PATH,
   "/api/auth/login",
+  "/api/auth/otp/verify",
+  "/api/auth/otp/resend",
+  "/api/auth/otp/cancel",
   "/api/auth/reset/verify",
   "/api/auth/reset/complete",
   "/api/health",

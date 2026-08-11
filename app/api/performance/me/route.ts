@@ -1,6 +1,6 @@
 import { apiUser } from "@/lib/authz";
 import { personalPerformanceSummary } from "@/lib/performance";
-import { getActiveWorkSession } from "@/lib/workSessions";
+import { getWorkClock } from "@/lib/workSessions";
 
 /**
  * GET /api/performance/me — the caller's own numbers, and nobody else's.
@@ -26,15 +26,16 @@ export async function GET(): Promise<Response> {
   if (auth instanceof Response) return auth;
 
   try {
-    const [performance, session] = await Promise.all([
+    const [performance, clock] = await Promise.all([
       personalPerformanceSummary(auth.id),
-      // Returned alongside so the "active time" figure and the running clock
-      // beside it are read in one request and cannot disagree.
-      getActiveWorkSession(auth.id),
+      // Returned alongside so the day's figures and the running clock beside
+      // them are read in one request and cannot describe two different
+      // instants. The clock's two halves do not overlap — see `WorkClock`.
+      getWorkClock(auth.id),
     ]);
 
     return Response.json(
-      { performance, session },
+      { performance, clock },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

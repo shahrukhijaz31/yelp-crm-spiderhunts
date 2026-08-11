@@ -7,6 +7,7 @@ import {
   ZERO_METRICS,
   type ActivityDay,
   type AgentPerformance,
+  type AgentWorkTime,
   type DateRange,
   type PerformanceMetrics,
   type PerformanceReport,
@@ -263,7 +264,87 @@ export async function teamPerformance(
     activeSeconds: seconds.get(null) ?? 0,
   };
 
-  return { range, agents, totals, daily };
+  return { range, agents, totals, daily, workTime: await agentWorkTime(userId) };
+}
+
+/**
+ * Work time per agent over today, the week and the month — the admin view of
+ * the same `work_sessions` rows the agent's own clock is read from.
+ *
+ * **One statement for three windows.** Each is a `FILTER`ed `sum` over the same
+ * scan, so the widest range (30 days) is walked once and produces all three
+ * figures rather than three round trips producing three chances to disagree.
+ * Every window is clamped by `overlapSecondsSql`, so a shift that straddles
+ * midnight contributes only its part of each window and the day total is never
+ * larger than the week's.
+ *
+ * Open sessions are included and bounded by their own last heartbeat, exactly
+ * as everywhere else — an admin looking at this while somebody is working sees
+ * time that is still accruing, not a figure that waits for them to sign out.
+ *
+ * `currentSessionStartedAt` comes back so the client can run the same live
+ * clock the agent sees. Sent as an instant rather than a duration for the usual
+ * reason: a duration computed here is stale by the time it renders.
+ */
+export async function agentWorkTime(userId: string | null): Promise<AgentWorkTime[]> {
+  const today = resolveRange("today");
+  const week = resolveRange("last7");
+  const month = resolveRange("last30");
+  const scope = userId ? Prisma.sql`AND ws.user_id = ${userId}` : Prisma.empty;
+
+  const [rows, users] = await Promise.all([
+    prisma.$queryRaw<
+      {
+        user_id: string;
+        today_seconds: number;
+        week_seconds: number;
+        month_seconds: number;
+        current_started_at: Date | null;
+      }[]
+    >(Prisma.sql`
+      SELECT
+        ws.user_id,
+        coalesce(sum(${overlapSecondsSql(today.from, today.to)}), 0)::int AS today_seconds,
+        coalesce(sum(${overlapSecondsSql(week.from, week.to)}), 0)::int   AS week_seconds,
+        coalesce(sum(${overlapSecondsSql(month.from, month.to)}), 0)::int AS month_seconds,
+        -- The open shift, if any. A min() over a set the one-open-session
+        -- invariant keeps to a single row; an aggregate rather than a subquery
+        -- so this stays one pass.
+        min(ws.started_at) FILTER (WHERE ws.ended_at IS NULL)             AS current_started_at
+      FROM work_sessions ws
+      WHERE ws.started_at < ${utc(month.to)}
+        AND coalesce(ws.ended_at, ${NOW_UTC_SQL}) > ${utc(month.from)}
+      ${scope}
+      GROUP BY ws.user_id
+    `),
+    prisma.user.findMany({
+      where: userId ? { id: userId } : {},
+      select: { id: true, name: true, role: true },
+      orderBy: [{ name: "asc" }],
+    }),
+  ]);
+
+  const byUser = new Map(rows.map((row) => [row.user_id, row]));
+  // Stamped once, after the query, so every row shares one anchor and the live
+  // figures the client derives cannot disagree with each other by a round trip.
+  const asOf = new Date().toISOString();
+
+  // Every account, including the ones who have not signed in this month — an
+  // agent with no hours is the most useful row on a work-time report, and
+  // dropping them for having no sessions would hide exactly that.
+  return users.map((user) => {
+    const row = byUser.get(user.id);
+    return {
+      userId: user.id,
+      name: user.name,
+      role: user.role as Role,
+      todaySeconds: row?.today_seconds ?? 0,
+      weekSeconds: row?.week_seconds ?? 0,
+      monthSeconds: row?.month_seconds ?? 0,
+      currentSessionStartedAt: row?.current_started_at?.toISOString() ?? null,
+      asOf,
+    };
+  });
 }
 
 /**
