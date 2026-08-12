@@ -1,3 +1,4 @@
+import { activityPolicy } from "@/lib/activityPolicy";
 import { monitorUser } from "@/lib/monitorAuth";
 import { capturePolicy } from "@/lib/screenshotPolicy";
 import { getActiveWorkSession, getWorkClock } from "@/lib/workSessions";
@@ -74,6 +75,7 @@ export async function GET(request: Request): Promise<Response> {
   // Read after the database work, and never allowed to fail it: this is
   // environment parsing with a documented fallback for every value.
   const policy = capturePolicy();
+  const activity = activityPolicy();
 
   return Response.json(
     {
@@ -110,6 +112,30 @@ export async function GET(request: Request): Promise<Response> {
       screenshotPolicy: {
         minIntervalSeconds: policy.minIntervalSeconds,
         maxIntervalSeconds: policy.maxIntervalSeconds,
+      },
+      /**
+       * The activity cadence and the idle threshold, in seconds, plus the rate
+       * the server calibrates its percentage against.
+       *
+       * Here for the same reason the screenshot cadence is: the server owns
+       * these numbers (`lib/activityPolicy.ts`), and a workstation that held
+       * them would be a monitored machine deciding how it is monitored. The
+       * client reads them fresh on every poll, so a change takes effect
+       * everywhere within a minute without a client release.
+       *
+       * `expectedEventsPerMinute` is sent so the Monitor can show the agent the
+       * same figure the portal will store. It is **not** an input: the server
+       * recomputes the percentage from the raw counts on submission and
+       * discards anything the client proposes (`lib/activity.ts`).
+       *
+       * This stage adds no client behaviour — the Monitor is unchanged, and
+       * these fields simply sit unread until the keyboard/mouse hooks land in a
+       * later stage.
+       */
+      activityPolicy: {
+        intervalSeconds: activity.intervalSeconds,
+        idleThresholdSeconds: activity.idleThresholdSeconds,
+        expectedEventsPerMinute: activity.expectedEventsPerMinute,
       },
       /** For clock-skew correction on a workstation whose time is wrong. */
       serverNow: clock.serverNow,

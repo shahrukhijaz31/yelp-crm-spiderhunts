@@ -62,7 +62,7 @@ model Lead {
   url        String?
 
   // --- Agent-owned fields ---
-  status       CallStatus @default(not_called)
+  status        CallStatus @default(not_called)
   /// When this lead was first *worked* — stamped the moment an agent saves a
   /// call outcome, and never cleared or moved afterwards.
   ///
@@ -81,10 +81,10 @@ model Lead {
   /// *When* it was last worked is `updatedAt`, which already tracks exactly
   /// that; the Called list orders by it rather than carrying a second
   /// timestamp that would have to be kept in step by hand.
-  firstCalledAt DateTime? @map("first_called_at")
-  notes        String     @default("")
+  firstCalledAt DateTime?  @map("first_called_at")
+  notes         String     @default("")
   /// Date only: the UI works in `YYYY-MM-DD` strings and never has a time here.
-  callbackDate DateTime?  @map("callback_date") @db.Date
+  callbackDate  DateTime?  @map("callback_date") @db.Date
 
   // --- Meeting detail, layered on top of callbackDate (see lib/meetings.ts) ---
   /// 24-hour `HH:MM`. A string, not a `time` column: it is a label on the
@@ -305,11 +305,11 @@ model WorkSession {
   userId String @map("user_id")
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  startedAt DateTime @default(now()) @map("started_at")
+  startedAt  DateTime  @default(now()) @map("started_at")
   /// Last heartbeat from an open portal tab. Bounds the session if it dies.
-  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
   /// Null while the session is open — the one column that says "still working".
-  endedAt DateTime? @map("ended_at")
+  endedAt    DateTime? @map("ended_at")
 
   /// Whole seconds between `startedAt` and `endedAt`, written when the session
   /// closes. Stored rather than computed on read because it is what every
@@ -328,6 +328,18 @@ model WorkSession {
   /// "show me what this agent was doing between 2pm and 4pm" a query rather
   /// than a join against two timestamps.
   screenshots Screenshot[]
+
+  /// Keyboard/mouse activity observed *during* this shift. Note the direction
+  /// of the dependency: an interval describes a session, and a session knows
+  /// nothing about intervals. Nothing in `lib/activity.ts` writes to this table
+  /// from the activity side — the shift's start, end and duration stay exactly
+  /// what the portal decided they were.
+  activityIntervals ActivityInterval[]
+
+  /// Manual corrections an administrator has made to this shift. Kept even
+  /// after the correction has been applied — the row above holds the current
+  /// value, these hold every value it has ever had and who changed it.
+  adjustments TimeAdjustment[]
 
   /// The two queries this table has: "the open session for this user"
   /// (`endedAt IS NULL`, hit on every page load) and "sessions overlapping this
@@ -388,16 +400,16 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  sessions Session[]
+  sessions             Session[]
   /// Reset codes issued *for* this account, and (the second relation) the ones
   /// this administrator issued for other people.
-  passwordResets       PasswordReset[] @relation("PasswordResetSubject")
-  passwordResetsIssued PasswordReset[] @relation("PasswordResetIssuer")
+  passwordResets       PasswordReset[]    @relation("PasswordResetSubject")
+  passwordResetsIssued PasswordReset[]    @relation("PasswordResetIssuer")
   /// Call recordings this person uploaded. The back-reference exists so that
   /// "who uploaded this" is a join rather than a second lookup, and so the
   /// Restrict on the far side is visible from here: a user holding recordings
   /// cannot be deleted out from under them.
-  recordings MeetingRecording[]
+  recordings           MeetingRecording[]
 
   /// What this person did, and when they were signed in to do it. Both are the
   /// raw material of every performance figure in the portal; neither is ever
@@ -415,6 +427,16 @@ model User {
 
   /// Desktop screenshots captured by those workstations.
   screenshots Screenshot[]
+
+  /// Aggregate keyboard/mouse activity observed during this person's shifts.
+  /// Counts only — see `ActivityInterval` for what is deliberately absent.
+  activityIntervals ActivityInterval[]
+
+  /// Manual time corrections: the ones made *to* this person's shifts, and (the
+  /// second relation) the ones this administrator made to other people's. The
+  /// second is `Restrict` on the far side, which is why it is visible from here.
+  timeAdjustments     TimeAdjustment[] @relation("TimeAdjustmentSubject")
+  timeAdjustmentsMade TimeAdjustment[] @relation("TimeAdjustmentAdmin")
 
   @@map("users")
 }
@@ -597,6 +619,164 @@ model Screenshot {
   @@index([workSessionId, capturedAt])
   @@index([capturedAt])
   @@map("screenshots")
+}
+
+/// A minute of keyboard and mouse activity, as counts and nothing else.
+///
+/// **What is deliberately not here.** No keystrokes, no typed text, no key
+/// names, no mouse coordinates, no clipboard, no window titles, no URLs. Two
+/// integers — how many keyboard events and how many mouse events — and the
+/// window they were observed in. That is not a limitation of the current
+/// implementation that a later one might lift: it is the whole design, and the
+/// columns below are the only place activity data has to go, so there is nowhere
+/// for a keystroke to be stored even if something tried to send one.
+///
+/// **It describes a shift; it does not make one.** `work_sessions` remains the
+/// sole authority on when somebody was working — its start, its end, its
+/// duration and its open/stale state are decided by the portal and by nothing
+/// here. An interval is an observation *inside* a shift that already existed,
+/// and `lib/activity.ts` refuses a submission that has no open shift to attach
+/// to rather than inventing one. Total tracked time is therefore summed from
+/// `work_sessions`, never from these rows; these say how much of that time had
+/// input in it.
+///
+/// **`activity_percentage` is computed by the server.** The desktop client may
+/// send one and it is ignored — see `lib/activityRules.ts`. It is a share of a
+/// configured expected-events rate, it is called activity because that is what
+/// it measures, and it is not a measure of productivity.
+///
+/// **`client_key` is the idempotency key**, and the unique constraint below is
+/// the whole of the duplicate protection. The Monitor generates one per interval
+/// and reuses it when retrying after a network failure; the second insert
+/// violates `(work_session_id, client_key)` and the route answers with the row
+/// that already exists. No queue, no dedupe table, no scheduled reconciliation —
+/// one index does it, and it does it correctly under concurrency because it is
+/// the database that enforces it.
+///
+/// It is scoped to the work session rather than being globally unique on
+/// purpose: it is a value a client chose, so it must not be able to collide with
+/// — or overwrite — another agent's interval. A key can only ever match a row
+/// inside the shift the server itself resolved for the authenticated device.
+model ActivityInterval {
+  id String @id @default(cuid())
+
+  /// Whose activity. Server-derived from the authenticated monitor device;
+  /// there is no user id in the request body that reaches this column. Cascade,
+  /// matching `screenshots` — monitoring data about a deleted account has
+  /// nobody to be shown for.
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The shift this happened during. Resolved server-side from the portal's own
+  /// view of the agent's open session, exactly as a screenshot's is. Required,
+  /// not optional: activity outside a work session is activity that was not
+  /// being tracked, and the API refuses it.
+  workSessionId String      @map("work_session_id")
+  workSession   WorkSession @relation(fields: [workSessionId], references: [id], onDelete: Cascade)
+
+  /// The observed window, in UTC. Client-reported and then validated against
+  /// the server's clock *and* against the shift's own bounds — an interval that
+  /// claims to have happened before the shift started, or hours from now, is
+  /// refused rather than clamped, because unlike a screenshot's `captured_at`
+  /// there is no salvageable artefact behind it.
+  startedAt DateTime @map("started_at")
+  endedAt   DateTime @map("ended_at")
+
+  /// Whole seconds. Stored rather than derived for the reason
+  /// `work_sessions.duration_seconds` is: every report sums it, and summing an
+  /// integer column beats subtracting two timestamps a million times. Written
+  /// from `ended_at - started_at` in one place, so the three cannot disagree.
+  durationSeconds Int @map("duration_seconds")
+
+  /// Aggregate event counts for the window. Counts, not events.
+  keyboardActivityCount Int @map("keyboard_activity_count")
+  mouseActivityCount    Int @map("mouse_activity_count")
+
+  /// 0–100, computed by the server. See `lib/activityRules.ts`.
+  activityPercentage Int @map("activity_percentage")
+
+  /// The client's idempotency key for this interval. See the note above.
+  clientKey String @map("client_key")
+
+  /// When the server received it. `started_at` is when the activity happened;
+  /// the two together are what expose a workstation submitting late or with a
+  /// wrong clock, exactly as they do for screenshots.
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The duplicate protection. Scoped to the shift — see the note above.
+  @@unique([workSessionId, clientKey])
+  /// The three shapes of query this table actually has: one agent over a window
+  /// (every report and the agent's own screen), everything in one shift (the
+  /// session detail), and a range across everybody (the admin dashboard).
+  @@index([userId, startedAt])
+  @@index([workSessionId, startedAt])
+  @@index([startedAt])
+  @@index([createdAt])
+  @@map("activity_intervals")
+}
+
+/// One manual correction an administrator made to a work session, kept forever.
+///
+/// **Why the correction is applied to the session rather than layered over it.**
+/// The alternative — leaving `work_sessions` untouched and storing a delta that
+/// every report adds back — was considered and rejected. It would mean every one
+/// of the aggregate queries in `lib/performance.ts` and `lib/timeTracking.ts`
+/// growing a join and a correction term, and the first one written without it
+/// would report an uncorrected figure that looks exactly like a corrected one.
+/// So the shift row holds the current truth and this table holds the history:
+/// one place to read a number, one place to read how it got that way.
+///
+/// **Nothing is silently overwritten.** The row records the whole before and the
+/// whole after, not just the field that moved, so a correction can be read
+/// without joining back to a session that may have been corrected again since.
+/// Rows are never updated and never deleted by the application.
+///
+/// **Only an administrator can create one**, enforced by `apiAdmin()` at the
+/// route. There is no agent-facing path that writes here or to `work_sessions`.
+model TimeAdjustment {
+  id String @id @default(cuid())
+
+  /// The administrator who made the change. Restrict, matching
+  /// `password_resets.issued_by_user_id` and for the identical reason: the
+  /// record of who altered somebody else's recorded hours must not be removable
+  /// by deleting an account. `describeUserFootprint` counts these so the refusal
+  /// says so in words rather than as a foreign-key violation.
+  adminId String @map("admin_user_id")
+  admin   User   @relation("TimeAdjustmentAdmin", fields: [adminId], references: [id], onDelete: Restrict)
+
+  /// Whose time was corrected. Cascade, because `work_sessions` cascades with
+  /// its user and this row points at one — the audit trail for a shift cannot
+  /// outlive the shift it describes.
+  userId String @map("user_id")
+  user   User   @relation("TimeAdjustmentSubject", fields: [userId], references: [id], onDelete: Cascade)
+
+  workSessionId String      @map("work_session_id")
+  workSession   WorkSession @relation(fields: [workSessionId], references: [id], onDelete: Cascade)
+
+  /// The shift exactly as it was before the change.
+  previousStartedAt       DateTime  @map("previous_started_at")
+  previousEndedAt         DateTime? @map("previous_ended_at")
+  previousDurationSeconds Int?      @map("previous_duration_seconds")
+
+  /// And exactly as it was left.
+  newStartedAt       DateTime  @map("new_started_at")
+  newEndedAt         DateTime? @map("new_ended_at")
+  newDurationSeconds Int?      @map("new_duration_seconds")
+
+  /// Required, and required to be non-empty by the route. A correction with no
+  /// stated reason is indistinguishable from tampering six months later.
+  reason String
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// "What has been corrected for this agent" (the detail screen), "for this
+  /// shift" (the session row's own history), and "recently, by anyone" (the
+  /// audit list).
+  @@index([userId, createdAt])
+  @@index([workSessionId])
+  @@index([adminId, createdAt])
+  @@index([createdAt])
+  @@map("time_adjustments")
 }
 
 /// A one-time credential an administrator hands to someone who cannot sign in.

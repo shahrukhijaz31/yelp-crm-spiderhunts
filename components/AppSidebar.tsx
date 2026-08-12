@@ -7,6 +7,8 @@ import {
   ArrowDownToLine,
   BarChart3,
   CalendarDays,
+  ClipboardList,
+  Clock,
   Gauge,
   Inbox,
   Monitor,
@@ -86,6 +88,11 @@ const WORKSPACE: NavItem[] = [
   // `app/(portal)/my-performance/page.tsx`. In Workspace rather than Data: it
   // is about the person doing the work, not about the lead database.
   { href: "/my-performance", label: "My performance", icon: Gauge },
+  // Every role, and their own record only — same rule as My performance above,
+  // and enforced the same way: the page and its endpoint query the session's own
+  // id and take none from the request. The administrator's view of everybody is
+  // a different screen in the Data group.
+  { href: "/time-tracking", label: "My time", icon: Clock },
 ];
 
 /** Bulk data movement, and the read-only view of it. Admin-only, all four. */
@@ -95,6 +102,11 @@ const DATA: NavItem[] = [
   // below applies to every item in this list. The page and its API refuse an
   // agent independently — hiding a link is not what keeps anyone out.
   { href: "/reports/team", label: "Team performance", icon: Gauge },
+  // Both admin-only by virtue of the `/reports` prefix, which `canAccess`
+  // applies to every item in this list. Time tracking is the live board; the
+  // timesheet is the period report behind it.
+  { href: "/reports/time", label: "Time tracking", icon: Clock },
+  { href: "/reports/timesheets", label: "Timesheets", icon: ClipboardList },
   { href: "/export", label: "Export", icon: ArrowDownToLine },
   { href: "/import", label: "Import", icon: Upload },
 ];

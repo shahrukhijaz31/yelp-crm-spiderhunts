@@ -150,8 +150,16 @@ app/
   (portal)/reports/page.tsx   summary + full status breakdown — ADMIN
   (portal)/reports/team/page.tsx
                               team performance: KPIs, per-agent table — ADMIN
+  (portal)/reports/time/page.tsx
+                              live employee monitoring board            — ADMIN
+  (portal)/reports/time/[userId]/page.tsx
+                              one employee's tracking, plus corrections — ADMIN
+  (portal)/reports/timesheets/page.tsx
+                              period totals and a day-by-day sheet      — ADMIN
   (portal)/my-performance/page.tsx
                               the caller's own figures — every role, own row only
+  (portal)/time-tracking/page.tsx
+                              the caller's own tracked time — every role, own row only
   (portal)/settings/page.tsx  placeholder for backend config  — ADMIN
   (portal)/users/page.tsx     accounts and roles              — ADMIN
   api/auth/login/route.ts     POST — verify a password, mint a session
@@ -159,6 +167,17 @@ app/
   api/auth/logout/route.ts    (also closes the work session — see below)
   api/performance/me/route.ts GET — the caller's own figures; takes no parameters
   api/reports/team/route.ts   GET — every agent's figures       — ADMIN
+  api/time-tracking/me/route.ts
+                              GET — the caller's own tracking; takes no parameters
+  api/monitor/activity/route.ts
+                              POST — the Monitor reports one activity interval
+  api/reports/time/route.ts   GET — the live monitoring board   — ADMIN
+  api/reports/time/[userId]/route.ts
+                              GET — one employee's tracking     — ADMIN
+  api/reports/timesheets/route.ts
+                              GET — timesheet and period report — ADMIN
+  api/time-adjustments/route.ts
+                              GET/POST — manual corrections and their audit trail — ADMIN
   api/work-session/heartbeat/route.ts
                               POST — "this browser is still open"
   api/leads/route.ts          GET — every lead, from Postgres
@@ -204,6 +223,10 @@ lib/
   workSessions.ts             shifts: open/resume, heartbeat, logout, stale reconciliation
   performanceRules.ts         ranges, shapes, rates, clock formats — pure, client-safe
   performance.ts              the reporting aggregates; counted by Postgres, never in JS
+  activityPolicy.ts           interval, idle threshold, calibration — server-owned, from env
+  activityRules.ts            activity validation, the percentage formula, shapes — pure
+  activity.ts                 writes one interval; derives user and shift server-side
+  timeTracking.ts             the time/activity aggregates and manual corrections
 ```
 
 ## Database
@@ -587,6 +610,162 @@ and a round number nobody in the system chose reads as one somebody did. If a
 target is wanted it needs an owner and a place to be set — a column on `users`
 or a settings row, edited by an administrator — so that "who decided 60?" has an
 answer.
+
+## Time and activity tracking
+
+Hubstaff-shaped employee monitoring, built on the two systems that already
+existed rather than beside them: the **work session** is still the only thing
+that decides when somebody was working, and the **screenshot** pipeline is
+untouched. One new table records aggregate keyboard/mouse activity; a second
+records manual corrections. No existing table changed.
+
+### Tracked, active, idle — the definition everything rests on
+
+```
+tracked = overlap of the window with the agent's work sessions   (work_sessions)
+active  = duration of the intervals in it that saw any input     (activity_intervals)
+idle    = tracked − active
+```
+
+**Tracked time is never summed from activity intervals**, and that is not a
+stylistic preference. Intervals arrive from a desktop client that may be closed,
+uninstalled or offline, so hours computed from them would silently under-report
+an agent who worked all day with the Monitor shut. The portal knows when
+somebody was signed in and working; that is what a timesheet is made of.
+Intervals describe what happened *inside* that time and can only be a subset of
+it — which is also why `idle` includes any stretch no interval covered at all.
+The portal will not claim input it never observed.
+
+A consequence worth stating plainly: an employee with no Monitor installed has
+their **hours counted in full** and their activity shown as "no data", never as
+0%.
+
+> `activeSeconds` on the *performance* report (`lib/performanceRules.ts`) is an
+> older name meaning "seconds signed in". Time tracking calls that `trackedSeconds`
+> and reserves "active" for input. The two live in separate modules and never
+> appear in one payload.
+
+### The activity percentage
+
+```
+observed   = keyboardActivityCount + mouseActivityCount
+expected   = ACTIVITY_EXPECTED_EVENTS_PER_MINUTE × (durationSeconds ÷ 60)
+percentage = round(min(100, observed ÷ expected × 100))
+```
+
+Computed **by the server**, from the raw counts and the server's own configured
+rate. A percentage in the request body is discarded, so a workstation cannot
+report itself as busy — only as having had events, and those are bounded.
+
+**It measures keyboard and mouse input and nothing else.** A fifteen-minute call
+that ends in a booked meeting scores near zero, and that is the metric working
+rather than failing. Every screen that shows it says so in words beside it, and
+none of them ranks anybody by it.
+
+**Nothing about the input itself is stored** — no keystrokes, no typed text, no
+key names, no mouse coordinates, no clipboard, no window titles, no URLs. Two
+integers per interval. There is nowhere in the schema for anything else to go.
+
+### What the Monitor sends
+
+`POST /api/monitor/activity`, bearer-authenticated by the **existing** device
+credential (`monitorDevice()`), AGENT-only, with role and `isActive` re-read from
+Postgres on every call.
+
+```json
+{ "startedAt": "…", "endedAt": "…",
+  "keyboardActivityCount": 40, "mouseActivityCount": 20,
+  "clientKey": "an idempotency token" }
+```
+
+There is **no `userId` and no `workSessionId` in that shape.** The user comes
+from the device the token resolved to; the shift comes from the portal's own
+`getActiveWorkSession`. A body carrying those fields is sending fields nothing
+reads — which is stronger than ignoring them, because there is no check to
+forget.
+
+- **No open shift → 409, and no shift is created.** Nothing on this path writes
+  to `work_sessions` at all. The Monitor cannot start, extend or end anybody's
+  working day.
+- **Retries are safe.** The unique index on `(work_session_id, client_key)` *is*
+  the duplicate protection: a resend answers `200 {duplicate: true}` with the row
+  already stored, a first delivery answers `201`. First write wins, visibly. No
+  queue, and it holds under concurrency because Postgres enforces it.
+- **Timestamps are validated, not clamped.** Refused if the window ends in the
+  future, is more than 15 minutes old, is shorter than 10s or longer than twice
+  the configured interval, or starts before the shift it would attach to. Unlike
+  a screenshot's `capturedAt` — where the image is genuine and only its label is
+  wrong — an interval *is* its timestamps, so clamping would invent time and add
+  it to somebody's record.
+
+### The screens
+
+| | Who | Shows |
+| --- | --- | --- |
+| `/time-tracking` | every role | the caller's own: live session clock, today/week tracked, active, idle, activity %, recent sessions and intervals, today's screenshot count |
+| `/reports/time` | **ADMIN** | live board — employees, working/inactive/offline, today and this week, activity %, last input, current shift |
+| `/reports/time/:id` | **ADMIN** | one employee: sessions, intervals, meetings from the existing lead log, screenshot count, corrections — and the Correct button |
+| `/reports/timesheets` | **ADMIN** | daily/weekly/monthly/custom: per-employee totals and a day-by-day sheet, with employee, activity and status filters |
+
+`/time-tracking` is not an admin path for the same reason `/my-performance` is
+not: it is a rule about *whose* row, not about a path. `GET /api/time-tracking/me`
+accepts no parameters and queries `auth.id`, so there is nothing to tamper with.
+
+**Agents see no screenshots, including their own** — the rule `lib/access.ts`
+already states, unchanged. Their page shows a count and capture times, which is
+the part that makes the monitoring honest to the person being monitored.
+
+Every admin endpoint aggregates in Postgres: one row per employee, or one per
+employee per worked day. No screen streams activity rows to a browser to add
+them up there.
+
+### Manual corrections
+
+`POST /api/time-adjustments`, ADMIN only, on **finished** sessions only — an open
+shift is still being written by the agent's own heartbeat, and two writers on one
+row is not a race worth having.
+
+The correction is applied to the `work_sessions` row and an immutable
+`time_adjustments` record is written **in the same transaction**: admin, agent,
+session, the whole previous state, the whole new state, a required reason, and
+the time. There is no ordering or crash that leaves a shift altered with no
+record of who altered it, and nothing in the application updates or deletes an
+audit row.
+
+The alternative — leaving the session untouched and layering a delta that every
+report adds back — was rejected: it would mean a correction term in every
+aggregate query, and the first one written without it would report an
+uncorrected figure that looks exactly like a corrected one.
+
+Agents cannot reach any of this. There is no agent-facing endpoint anywhere in
+this feature that writes to `work_sessions` or `activity_intervals`.
+
+### Configuration
+
+Three environment variables — `ACTIVITY_INTERVAL_SECONDS`,
+`ACTIVITY_IDLE_THRESHOLD_SECONDS`, `ACTIVITY_EXPECTED_EVENTS_PER_MINUTE` — read
+at call time with a documented fallback and a warn-once, exactly as the
+screenshot policy is (`lib/activityPolicy.ts`). They ride to the workstation on
+the poll it already makes, `GET /api/monitor/session`.
+
+There is no UI for them, deliberately. An agent must not be able to change how
+their own activity is measured, and a root-owned `/etc/leadportal/env` cannot be
+reached from any request whatever the caller's role. The idle threshold in
+particular **stops nobody's clock** — it decides a label and the active/idle
+split, and an idle agent is still on the clock because they are still at work.
+
+### Testing it
+
+```
+npm run dev             # in one terminal
+npm run test:activity   # in another
+```
+
+72 checks against the real routes and the real database: submission, automatic
+attribution, the ignored-identity fields, every authentication refusal, the
+409-not-a-new-shift rule, retries, eleven kinds of implausible value, both
+permission directions, and the correction audit trail. It creates throwaway
+accounts (`acttest-*`) and removes everything it made, including after a failure.
 
 ## Expected CSV columns
 

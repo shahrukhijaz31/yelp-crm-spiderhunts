@@ -103,6 +103,19 @@ const PUBLIC_PATHS = new Set<string>([
    */
   "/api/monitor/screenshots",
   /*
+   * The activity report. Identical in kind to the screenshot upload above and
+   * exempt for the identical reason: `monitorDevice()` inside the handler
+   * resolves the bearer token against `monitor_devices` and re-reads role and
+   * `isActive` from Postgres on every call, so "public" means exempt from the
+   * cookie check and nothing else.
+   *
+   * It is the second write endpoint on this list. What it can write is one row
+   * in `activity_intervals`, attributed to the device's own user and to that
+   * user's currently-open shift — both server-derived. It cannot create,
+   * extend or close a work session; see `lib/activity.ts`.
+   */
+  "/api/monitor/activity",
+  /*
    * The screenshot retention sweep, called by the box's own cron
    * (`deploy/leadportal-screenshot-retention`). Same shape as the ingest route:
    * not a browser, no session cookie, its own bearer token checked inside the
@@ -156,6 +169,20 @@ const PUBLIC_PATHS = new Set<string>([
  * listed among the public paths above for the reason given there — prefix
  * matching here is on the whole path, so the two never meet.
  */
+/*
+ * `/api/time-adjustments` is the manual time-correction endpoint, and it is the
+ * only path on this list that *writes* to `work_sessions`. It is named
+ * separately rather than nested under `/api/reports` because a correction is
+ * not a report: reading somebody's hours and rewriting them are different
+ * powers, and the policy should not have to be inferred from a URL prefix that
+ * was chosen for a screen.
+ *
+ * Deliberately not here: `/time-tracking` and `/api/time-tracking/me`, which
+ * are an agent's own tracking record — the same rule, and the same reasoning,
+ * as `/my-performance` above. The endpoint takes no user id and queries the
+ * session's own; the admin view of the same data is `/reports/time`, a
+ * different screen behind a different endpoint, admin-only at both ends.
+ */
 const ADMIN_PREFIXES = [
   "/export",
   "/import",
@@ -166,6 +193,7 @@ const ADMIN_PREFIXES = [
   "/api/leads/upload",
   "/api/reports",
   "/api/screenshots",
+  "/api/time-adjustments",
   "/api/users",
 ] as const;
 
