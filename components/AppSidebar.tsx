@@ -16,6 +16,7 @@ import {
   PanelLeftOpen,
   PhoneOutgoing,
   Settings,
+  Target,
   Upload,
   Users,
   type LucideIcon,
@@ -140,6 +141,18 @@ const DATA: NavItem[] = [
   // below applies to every item in this list. The page and its API refuse an
   // agent independently — hiding a link is not what keeps anyone out.
   { href: "/reports/team", label: "Team performance", icon: Gauge },
+  /*
+   * Agent productivity — output against configured targets, with the Monitor's
+   * activity figure as one small component of it. Beside Team performance
+   * because it is the same question asked with a judgement attached: that
+   * screen reports what happened, this one scores it against what was expected.
+   *
+   * Admin-only by the `/reports` prefix, like everything else in this group,
+   * and *only* meaningful for administrators — agents are never shown a
+   * productivity score, including their own, so there is no agent-facing
+   * counterpart to this the way `/my-performance` is one for Team performance.
+   */
+  { href: "/reports/productivity", label: "Productivity", icon: Target },
   // Both admin-only by virtue of the `/reports` prefix, which `canAccess`
   // applies to every item in this list. Time tracking is the live board; the
   // timesheet is the period report behind it.

@@ -438,7 +438,82 @@ model User {
   timeAdjustments     TimeAdjustment[] @relation("TimeAdjustmentSubject")
   timeAdjustmentsMade TimeAdjustment[] @relation("TimeAdjustmentAdmin")
 
+  /// The productivity configuration, when this administrator was the last to
+  /// change it. A back-reference to one row at most — see
+  /// {@link ProductivitySettings}, which is a singleton.
+  productivitySettings ProductivitySettings[]
+
   @@map("users")
+}
+
+/// The targets and weights the productivity score is calculated against.
+///
+/// **Why this is a table and not an environment variable.** Every other
+/// server-owned number in this application — the activity cadence, the idle
+/// threshold, the screenshot rate limit — lives in `process.env`, and
+/// `lib/activityPolicy.ts` argues at length that this is right: an agent must
+/// not be able to change how they are measured, and a root-owned env file
+/// cannot be reached from any request at all.
+///
+/// That argument still holds for *activity*, and it is exactly why this is a
+/// different thing. Those numbers are a calibration nobody is meant to tune;
+/// these are a management decision that the brief requires an administrator to
+/// be able to make from the portal, which means there has to be a write path,
+/// which means it cannot be an environment variable. What makes that safe is
+/// the same thing that makes `time_adjustments` safe: the write is behind
+/// `apiAdmin()`, and the row records who made it.
+///
+/// **One row, forever.** The id defaults to the literal `default` and the only
+/// write path is an upsert on it, so there is no "which configuration is
+/// current" question to answer and no way to accumulate a second one. Reports
+/// read this row as it stands *now*, including reports about last month — see
+/// the note on `lib/productivityRules.ts`. Keeping a history of weights and
+/// resolving each report against the configuration in force at the time was
+/// considered and rejected: it makes two reports of the same period disagree
+/// for reasons invisible on the screen, and the brief asks for the simple and
+/// predictable behaviour.
+///
+/// **No agent data is stored here and none is derived from it.** Productivity
+/// is computed on read from `lead_activities`, `work_sessions` and
+/// `activity_intervals`; there is deliberately no table of scores, because a
+/// stored score is a copy of data that already exists and would be wrong the
+/// moment a target changed.
+model ProductivitySettings {
+  /// Always `default`. The singleton's whole enforcement mechanism.
+  id String @id @default("default")
+
+  /// Per-agent, per-worked-day expectations. Whole positive numbers; the
+  /// activity target is a percentage. Validated in `lib/productivityRules.ts`,
+  /// which is the only thing that writes here.
+  callsTarget     Int @default(50) @map("calls_target")
+  leadsTarget     Int @default(40) @map("leads_target")
+  meetingsTarget  Int @default(5) @map("meetings_target")
+  followUpsTarget Int @default(30) @map("follow_ups_target")
+  activityTarget  Int @default(80) @map("activity_target")
+
+  /// Percentage points, and they must total exactly 100. Stored as whole
+  /// numbers rather than fractions so the configuration screen, the breakdown
+  /// on the agent detail view and the row in the database all show the same
+  /// figure with no rounding between them.
+  callsWeight     Int @default(30) @map("calls_weight")
+  leadsWeight     Int @default(25) @map("leads_weight")
+  meetingsWeight  Int @default(25) @map("meetings_weight")
+  activityWeight  Int @default(10) @map("activity_weight")
+  followUpsWeight Int @default(10) @map("follow_ups_weight")
+
+  /// Who last changed it, for the same reason `time_adjustments` records an
+  /// admin: a number that decides how people are appraised should not be
+  /// anonymous. `SetNull` rather than `Restrict` — this is a label on a
+  /// configuration row, not an audit trail of a correction, and it must not be
+  /// the reason an account cannot be removed.
+  updatedById String? @map("updated_by_user_id")
+  updatedBy   User?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// No indexes. One row, read by primary key.
+  @@map("productivity_settings")
 }
 
 /// A workstation running the SpiderHunts Monitor desktop application.

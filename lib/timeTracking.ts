@@ -86,19 +86,28 @@ import {
  * session ended.
  */
 
-/** An interval is "active" when it saw at least one event of either kind. */
-const HAD_INPUT = Prisma.sql`(ai.keyboard_activity_count + ai.mouse_activity_count) > 0`;
+/**
+ * An interval is "active" when it saw at least one event of either kind.
+ *
+ * Exported so `lib/productivity.ts` measures activity with this expression
+ * rather than a second copy of it. Both assume the interval table is aliased
+ * `ai`, which every query in both files does.
+ */
+export const HAD_INPUT = Prisma.sql`(ai.keyboard_activity_count + ai.mouse_activity_count) > 0`;
 
 /**
  * The duration-weighted mean activity percentage, as SQL.
  *
  * Weighted by duration for the reason `weightedActivity` gives: intervals are
  * not all the same length, and an unweighted mean would let a 10-second one
- * count as much as a full minute. Null — not zero — when there is nothing to
+ * count as much as a full minute. Exported for the same reason
+ * {@link HAD_INPUT} is: the productivity report needs the identical figure, and
+ * a second definition of "the activity percentage" is exactly the kind of thing
+ * that drifts and then makes two admin screens disagree about one agent. Null — not zero — when there is nothing to
  * average, so "never tracked" and "tracked and idle" stay distinguishable all
  * the way to the screen.
  */
-const WEIGHTED_ACTIVITY_SQL = Prisma.sql`
+export const WEIGHTED_ACTIVITY_SQL = Prisma.sql`
   round(
     sum(ai.activity_percentage * ai.duration_seconds)::numeric
     / nullif(sum(ai.duration_seconds), 0)

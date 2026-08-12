@@ -1,15 +1,33 @@
+import { connection } from "next/server";
+
 import AccessDenied from "@/components/AccessDenied";
+import ProductivitySettingsPanel from "@/components/ProductivitySettingsPanel";
 import { requireRole } from "@/lib/authz";
+import { readProductivityConfig } from "@/lib/productivity";
 
 /**
- * Settings — ADMIN only. Still a placeholder for the configuration that lands
- * next, but it is the page that will hold the API key and the data-source
- * switch, so it is administrator territory from the start rather than being
- * opened up and locked down later.
+ * Settings — ADMIN only, and now with something real on it.
+ *
+ * The productivity targets and weights live here rather than on a configuration
+ * screen of their own, because this application already has the page for
+ * administrator-owned configuration and the brief is explicit about not
+ * inventing a second mechanism. They are the *only* settings that are stored in
+ * the database: the activity cadence, the idle threshold and the screenshot
+ * limits stay environment variables (`lib/activityPolicy.ts`,
+ * `lib/screenshotPolicy.ts`) precisely because nobody — not even an
+ * administrator — should be able to change how activity is measured from a
+ * browser. Targets are a management decision; a calibration is not.
+ *
+ * The guard is the first statement, and `apiAdmin()` guards the endpoint behind
+ * the form independently.
  */
 export default async function SettingsPage() {
   const { allowed } = await requireRole("ADMIN", "/settings");
   if (!allowed) return <AccessDenied />;
+
+  await connection();
+
+  const productivityConfig = await readProductivityConfig();
 
   const PLANNED = [
     {
@@ -32,10 +50,12 @@ export default async function SettingsPage() {
         <header>
           <h1 className="page-title">Settings</h1>
           <p className="mt-3 page-intro">
-            Nothing to configure yet — the portal runs on in-memory data. This
-            is where the backend configuration lands next.
+            Administrator configuration. Agents cannot reach this page or the
+            endpoints behind it.
           </p>
         </header>
+
+        <ProductivitySettingsPanel initialConfig={productivityConfig} />
 
         <ul className="panel flex flex-col gap-px overflow-hidden bg-line">
           {PLANNED.map((item) => (
