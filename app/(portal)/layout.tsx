@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { connection } from "next/server";
 
 import AppShell from "@/components/AppShell";
@@ -7,6 +8,7 @@ import { WorkSessionProvider } from "@/components/WorkSessionProvider";
 import { requireUser } from "@/lib/authz";
 import { leadStats, leadWorkCounts } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
+import { NAV_MODE_COOKIE, readNavMode } from "@/lib/navPreference";
 import { getWorkClock } from "@/lib/workSessions";
 
 /**
@@ -39,6 +41,16 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
 
   const user = await requireUser();
   const today = todayIso();
+
+  /*
+   * How wide the reader keeps their sidebar. A display preference and nothing
+   * else: it is read only to pick a CSS class, it names nobody, and it gates
+   * nothing — an unrecognised value falls back to the automatic layout rather
+   * than erroring (`readNavMode`). It is read here, on the server, so the rail
+   * paints at the right width on the first frame instead of snapping to it
+   * after hydration.
+   */
+  const navMode = readNavMode((await cookies()).get(NAV_MODE_COOKIE)?.value);
   // Two aggregates, no rows: the nav bar's counters and the New/Called badges
   // in the rail. Both are `count(*)` over an indexed column, and neither
   // depends on the other, so they go together.
@@ -70,7 +82,7 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
         {/* Outside the shell so the heartbeat keeps beating whatever screen is
             on, including the ones that draw no clock at all. */}
         <WorkSessionProvider initialClock={workClock}>
-          <AppShell today={today} user={user}>
+          <AppShell today={today} user={user} navMode={navMode}>
             {children}
           </AppShell>
         </WorkSessionProvider>

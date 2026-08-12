@@ -12,6 +12,8 @@ import {
   Gauge,
   Inbox,
   Monitor,
+  PanelLeftClose,
+  PanelLeftOpen,
   PhoneOutgoing,
   Settings,
   Upload,
@@ -21,6 +23,7 @@ import {
 
 import { useLeadQueue } from "./LeadQueueProvider";
 import { canAccess, type Role } from "@/lib/access";
+import { NAV_MODE_CLASSES, type NavMode } from "@/lib/navPreference";
 import {
   LEAD_WORK_STATES,
   LEAD_WORK_STATE_LABELS,
@@ -44,6 +47,13 @@ import {
  * below that, and off-canvas behind a button on a tablet or phone. The old bar
  * had no answer for narrow screens except hiding links.
  *
+ * Those widths are the default rather than the rule — the control in the footer
+ * collapses and expands the rail by hand, and that choice then holds at every
+ * width. `mode` carries it in, and `NAV_MODE_CLASSES` is where each mode's
+ * effect on a label, a heading and a row is written down. A label removed by
+ * the icon rail goes `sr-only` rather than `hidden`: it stays in the accessible
+ * name, so the rail is still navigable by screen reader.
+ *
  * **The active state** is a filled rounded rect, not a red underline. An
  * underline says "this is the page you are on"; a filled row says "you are
  * inside this section", which is what a workspace means. The accent appears
@@ -60,6 +70,21 @@ interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
+  /**
+   * Which roles this row is drawn for. Absent means everybody who can reach it.
+   *
+   * A second filter beside `canAccess`, because the two answer different
+   * questions. `canAccess` is the access policy and can only say "administrators
+   * only" — it is a list of admin prefixes, and there is deliberately no such
+   * thing as an agent-only *path* in this application. This says something
+   * weaker and purely visual: the row is not useful to that role, so it is not
+   * drawn for them.
+   *
+   * Nothing here is a permission, in either direction. A page listed for agents
+   * only is still reachable by an administrator who types the URL, and should
+   * be — see the note on My performance below.
+   */
+  roles?: readonly Role[];
 }
 
 /**
@@ -84,15 +109,28 @@ const QUEUE_ICONS: Record<LeadWorkState, LucideIcon> = {
 /** The workspaces an agent moves between all day. Order is a day's work. */
 const WORKSPACE: NavItem[] = [
   { href: "/meetings", label: "Meetings", icon: CalendarDays },
-  // Every role, because it is only ever the reader's own record — see
-  // `app/(portal)/my-performance/page.tsx`. In Workspace rather than Data: it
-  // is about the person doing the work, not about the lead database.
-  { href: "/my-performance", label: "My performance", icon: Gauge },
-  // Every role, and their own record only — same rule as My performance above,
-  // and enforced the same way: the page and its endpoint query the session's own
-  // id and take none from the request. The administrator's view of everybody is
-  // a different screen in the Data group.
-  { href: "/time-tracking", label: "My time", icon: Clock },
+  /*
+   * An agent's own figures, and drawn for agents only.
+   *
+   * Not because an administrator may not see them — the page and its endpoint
+   * query the session's own id and take none from the request, so an
+   * administrator opening `/my-performance` gets their own record exactly as an
+   * agent does, and that still works if they type the URL. It is that the row is
+   * noise in an administrator's rail: they have Team performance three rows
+   * below, which is the same figures for everybody including themselves, and two
+   * entries that differ only in scope invite the reading that one of them is the
+   * other's summary.
+   *
+   * `lib/access.ts` is deliberately unchanged. It says who *may* reach a path,
+   * and the answer for this one is genuinely "every role" — a nav list is the
+   * right place for "who is this useful to", and the wrong place for a rule
+   * anyone could sidestep with the address bar.
+   */
+  { href: "/my-performance", label: "My performance", icon: Gauge, roles: ["AGENT"] },
+  // Same rule and the same reasoning as My performance above: an agent's own
+  // clock, with the administrator's view of everybody's — Time tracking and
+  // Timesheets — sitting in the Data group below.
+  { href: "/time-tracking", label: "My time", icon: Clock, roles: ["AGENT"] },
 ];
 
 /** Bulk data movement, and the read-only view of it. Admin-only, all four. */
@@ -143,13 +181,22 @@ export default function AppSidebar({
   role,
   /** Mobile only: the drawer is open. Ignored from `md` up. */
   onNavigate,
+  mode = "auto",
+  /** Absent in the phone drawer, which is always full width and never collapses. */
+  onToggleCollapsed,
 }: {
   role: Role;
   onNavigate?: () => void;
+  mode?: NavMode;
+  onToggleCollapsed?: () => void;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const { workState, setWorkState, counts } = useLeadQueue();
+
+  // What this mode does to a label, a heading and a nav row. See the note on
+  // NAV_MODE_CLASSES for why these are whole literal strings.
+  const style = NAV_MODE_CLASSES[mode];
 
   /**
    * Which row is lit — the *most specific* item that matches, not every item
@@ -198,7 +245,10 @@ export default function AppSidebar({
   ]
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => canAccess(role, item.href)),
+      items: group.items.filter(
+        (item) =>
+          canAccess(role, item.href) && (item.roles === undefined || item.roles.includes(role)),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 
@@ -232,7 +282,7 @@ export default function AppSidebar({
             priority
             className="h-[26px] w-[26px] shrink-0 rounded object-contain grayscale"
           />
-          <span className="min-w-0 truncate text-ui font-semibold tracking-[-0.02em] text-fg 2xl:block max-2xl:hidden">
+          <span className={`min-w-0 truncate text-ui font-semibold tracking-[-0.02em] text-fg ${style.hide}`}>
             SpiderHunts
           </span>
         </Link>
@@ -250,7 +300,7 @@ export default function AppSidebar({
             a second tab that opened on the wrong queue. */}
         {canAccess(role, "/") && (
           <div className="flex flex-col gap-1">
-            <p className="eyebrow px-2 pb-1 max-2xl:hidden">Leads</p>
+            <p className={`eyebrow px-2 pb-1 ${style.hide}`}>Leads</p>
             {LEAD_WORK_STATES.map((candidate) => {
               // Only lit while the worklist is actually on screen. On Meetings
               // these are a way *back* to a queue, not a description of what is
@@ -271,15 +321,15 @@ export default function AppSidebar({
                   // whole row is a tooltip, and "New, 843 leads" is the useful
                   // form of it.
                   title={`${label} — ${count} lead${count === 1 ? "" : "s"}`}
-                  className="nav-item w-full max-2xl:justify-center max-2xl:px-0"
+                  className={`nav-item w-full ${style.center}`}
                 >
                   <Icon className="nav-icon h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                  <span className="truncate max-2xl:sr-only">{label}</span>
+                  <span className={`truncate ${style.srOnly}`}>{label}</span>
                   {/* Pushed to the trailing edge and quiet: a number you glance
                       at while scanning the rail, not a badge demanding action.
                       Gone on the icon rail, where it would not fit and is
                       already in the tooltip. */}
-                  <span className="nav-count max-2xl:hidden">
+                  <span className={`nav-count ${style.hide}`}>
                     {count.toLocaleString()}
                   </span>
                 </button>
@@ -294,7 +344,7 @@ export default function AppSidebar({
                 three are a different kind of thing from those two. Hidden on
                 the icon rail, where there is no room for a word and the
                 grouping is carried by the gap between blocks instead. */}
-            <p className="eyebrow px-2 pb-1 max-2xl:hidden">{group.heading}</p>
+            <p className={`eyebrow px-2 pb-1 ${style.hide}`}>{group.heading}</p>
             {group.items.map((item) => {
               const active = isActive(item.href);
               const Icon = item.icon;
@@ -310,10 +360,10 @@ export default function AppSidebar({
                   // from the accessible name — `title` gives a tooltip and the
                   // text stays in the DOM for a screen reader.
                   title={item.label}
-                  className="nav-item max-2xl:justify-center max-2xl:px-0"
+                  className={`nav-item ${style.center}`}
                 >
                   <Icon className="nav-icon h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                  <span className="truncate max-2xl:sr-only">{item.label}</span>
+                  <span className={`truncate ${style.srOnly}`}>{item.label}</span>
                 </Link>
               );
             })}
@@ -322,8 +372,13 @@ export default function AppSidebar({
       </nav>
 
       {/* --- footer ------------------------------------------------------ */}
-      <div className="shrink-0 border-t border-line px-3 py-2.5 max-2xl:hidden">
-        <p className="flex items-center gap-2 text-meta text-fg-3">
+      {/* The collapse control lives here rather than in the nav list above,
+          because it is chrome and not a destination — a row that looks like
+          Meetings and Reports but goes nowhere is the one thing a rail this
+          legible should not contain. The version line beside it is the first
+          thing to go when there is no room for it. */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-2.5">
+        <p className={`flex min-w-0 items-center gap-2 text-meta text-fg-3 ${style.hide}`}>
           <span
             aria-hidden="true"
             className="h-1.5 w-1.5 shrink-0 rounded-full bg-success"
@@ -332,6 +387,67 @@ export default function AppSidebar({
           <span aria-hidden="true">·</span>
           <span className="truncate">Active workspace</span>
         </p>
+
+        {onToggleCollapsed && (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            /*
+             * Two icons and two labels rather than one of each, because in
+             * "auto" the effective state is decided by a media query and the
+             * server cannot know which side of it this browser is on. Letting
+             * CSS choose keeps the button honest at every width without a
+             * measurement that would have to happen after hydration — and in
+             * the two explicit modes only one of the pair is ever rendered.
+             */
+            aria-label={
+              mode === "collapsed"
+                ? "Expand the sidebar"
+                : mode === "expanded"
+                  ? "Collapse the sidebar"
+                  : // Left to the labels below in "auto", where which of the two
+                    // this is depends on a media query. An `aria-label` is one
+                    // string and would have to guess.
+                    undefined
+            }
+            title={
+              mode === "collapsed"
+                ? "Expand the sidebar"
+                : mode === "expanded"
+                  ? "Collapse the sidebar"
+                  : "Collapse or expand the sidebar"
+            }
+            className="ui-btn ui-btn-ghost ml-auto h-7 w-7 shrink-0 !px-0 text-fg-3 max-2xl:mx-auto"
+          >
+            {mode === "collapsed" ? (
+              <PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            ) : mode === "expanded" ? (
+              <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+            ) : (
+              /*
+               * The accessible name comes from whichever of these two is
+               * displayed: `hidden` is `display: none`, which takes an element
+               * out of the accessible name entirely, so exactly one of them
+               * ever contributes. That is what lets one server-rendered button
+               * say the right thing on both sides of the breakpoint.
+               */
+              <>
+                <PanelLeftOpen
+                  className="h-4 w-4 2xl:hidden"
+                  strokeWidth={1.75}
+                  aria-hidden="true"
+                />
+                <span className="sr-only 2xl:hidden">Expand the sidebar</span>
+                <PanelLeftClose
+                  className="hidden h-4 w-4 2xl:block"
+                  strokeWidth={1.75}
+                  aria-hidden="true"
+                />
+                <span className="sr-only hidden 2xl:block">Collapse the sidebar</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
     </div>
   );
