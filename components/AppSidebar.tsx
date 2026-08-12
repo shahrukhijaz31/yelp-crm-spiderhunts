@@ -9,6 +9,7 @@ import {
   CalendarDays,
   Gauge,
   Inbox,
+  Monitor,
   PhoneOutgoing,
   Settings,
   Upload,
@@ -100,6 +101,18 @@ const DATA: NavItem[] = [
 
 /** Administration. Visited occasionally, not worked in. */
 const ADMIN: NavItem[] = [
+  /*
+   * Workforce monitoring rather than lead data, which is why it is here and not
+   * in Data beside Reports — the group above is about the lead database, and
+   * this screen never touches one.
+   *
+   * Admin-only by virtue of `/screenshots` being an admin prefix, which
+   * `canAccess` below applies to every item in this list, so an agent is never
+   * shown it. That is tidiness. The page refuses an agent independently
+   * (`requireRole`), and so does every endpoint behind it (`apiAdmin`) —
+   * deleting this line would change nothing about who can see a screenshot.
+   */
+  { href: "/screenshots", label: "Screenshots", icon: Monitor },
   { href: "/users", label: "Users", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

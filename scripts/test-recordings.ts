@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { config as loadEnv } from "dotenv";
@@ -52,24 +52,56 @@ function check(name: string, ok: boolean, detail = ""): void {
   }
 }
 
-/** A signed-in browser: one cookie jar, one `fetch`. */
+/** Matches `SESSION_COOKIE` in `lib/access.ts`, which the server is using. */
+const SESSION_COOKIE =
+  process.env.NODE_ENV === "production" ? "__Host-lp_session" : "lp_session";
+
+/**
+ * A signed-in browser: one cookie jar, one `fetch`.
+ *
+ * **The session row is inserted directly rather than signed in for**, which is
+ * a change from the first version of this file. Sign-in grew a second factor
+ * ("Added OTP verification"): `POST /api/auth/login` no longer answers with a
+ * session for an agent, it answers with `otpRequired: true` and a pending
+ * cookie that names nobody and grants nothing, and the session is minted only
+ * by `POST /api/auth/otp/verify` on presentation of six digits emailed to the
+ * account. A test cannot read that mailbox, and the code is stored as a salted
+ * scrypt hash, so it cannot be recovered from the database either.
+ *
+ * So this does what `test-screenshot-viewer.ts` does, for the same reason and
+ * with the same construction copied from `lib/session.ts` — 32 random bytes,
+ * SHA-256 into the row. What the routes under test authenticate is therefore
+ * exactly what they authenticate in production; the only thing skipped is the
+ * issuing of the cookie, which is the login route's business and is not what
+ * any check in this file is about.
+ */
 class Client {
   private cookie = "";
 
   constructor(readonly label: string) {}
 
   async signIn(identifier: string): Promise<void> {
-    const response = await fetch(`${BASE_URL}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: identifier, password: PASSWORD }),
+    const user = await prisma.user.findUnique({
+      where: { username: identifier },
+      select: { id: true },
     });
-    if (!response.ok) {
-      throw new Error(`${this.label} could not sign in: ${response.status} ${await response.text()}`);
-    }
-    const setCookie = response.headers.get("set-cookie") ?? "";
-    this.cookie = setCookie.split(";")[0] ?? "";
-    if (!this.cookie) throw new Error(`${this.label} got no session cookie`);
+    if (!user) throw new Error(`${this.label}: no such user ${identifier}`);
+
+    const token = randomBytes(32).toString("base64url");
+    const now = Date.now();
+
+    await prisma.session.create({
+      data: {
+        tokenHash: createHash("sha256").update(token, "utf8").digest("hex"),
+        userId: user.id,
+        expiresAt: new Date(now + 12 * 60 * 60 * 1000),
+        absoluteExpiresAt: new Date(now + 7 * 24 * 60 * 60 * 1000),
+        userAgent: "recording-test",
+        ipAddress: "127.0.0.1",
+      },
+    });
+
+    this.cookie = `${SESSION_COOKIE}=${token}`;
   }
 
   fetch(path: string, init: RequestInit = {}): Promise<Response> {

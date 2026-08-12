@@ -144,14 +144,28 @@ const PUBLIC_PATHS = new Set<string>([
  * the same policy as the screen; the enforcement is `apiAdmin()` inside the
  * handler, which is what an agent with curl actually meets.
  */
+/*
+ * `/screenshots` and `/api/screenshots` are the administrator's screenshot
+ * viewer — the screen and the endpoints behind it. Unlike call recordings,
+ * which are gated by *who uploaded them* and therefore cannot be a path rule,
+ * this genuinely is one: no agent may see any screenshot, including their own.
+ * A monitoring feature whose subject can read it back is a different feature.
+ *
+ * `/api/monitor/screenshots` is not affected and is not related. That is the
+ * desktop client's upload route, bearer-authenticated per device, and it is
+ * listed among the public paths above for the reason given there — prefix
+ * matching here is on the whole path, so the two never meet.
+ */
 const ADMIN_PREFIXES = [
   "/export",
   "/import",
   "/reports",
+  "/screenshots",
   "/settings",
   "/users",
   "/api/leads/upload",
   "/api/reports",
+  "/api/screenshots",
   "/api/users",
 ] as const;
 

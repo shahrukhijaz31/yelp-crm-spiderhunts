@@ -3,21 +3,29 @@
 import { PAGE_SIZES, type PageSize } from "@/lib/leadQuery";
 
 /**
- * The worklist's pager: a count on the left, the controls on the right.
+ * The pager: a count on the left, the controls on the right.
  *
- * Deliberately quiet. It sits directly under an eight-column table an agent
- * reads all day, so it borrows the table's own chrome — the same `border-line`
- * hairline, the same `bg-surface`, the `ui-field` control chassis for the
- * selector and the mono numerals the rest of the app uses for figures — rather
- * than arriving as a component with opinions of its own. The only saturated
- * colour is the accent on the current page, which is the one thing here that
- * has to be findable at a glance.
+ * Deliberately quiet. It was built for the worklist, where it sits directly
+ * under an eight-column table an agent reads all day, so it borrows the table's
+ * own chrome — the same `border-line` hairline, the same `bg-surface`, the
+ * `ui-field` control chassis for the selector and the mono numerals the rest of
+ * the app uses for figures — rather than arriving as a component with opinions
+ * of its own. The only saturated colour is the accent on the current page,
+ * which is the one thing here that has to be findable at a glance.
  *
  * On a narrow screen the two halves stack and the row wraps; the page numbers
  * are the first thing to lose room, which is why Previous and Next carry the
  * words as well as the chevrons.
+ *
+ * **Two callers now, one component.** The screenshot viewer pages a grid rather
+ * than a table, which needs a different noun in the count and a different set
+ * of page sizes (a card is twenty times the area of a row, so ten of them is
+ * not a useful option). Both arrive as optional props that default to what the
+ * worklist has always passed, so the worklist's markup, copy and behaviour are
+ * byte-for-byte what they were — the alternative was a second pager that would
+ * drift from this one the first time either was touched.
  */
-export default function Pagination({
+export default function Pagination<Size extends number = PageSize>({
   page,
   pageSize,
   total,
@@ -25,6 +33,10 @@ export default function Pagination({
   busy,
   onPageChange,
   onPageSizeChange,
+  noun = "leads",
+  emptyLabel = "No leads match the current view",
+  pageSizes = PAGE_SIZES as unknown as readonly Size[],
+  label = "Lead list pages",
 }: {
   page: number;
   pageSize: number;
@@ -34,7 +46,20 @@ export default function Pagination({
   /** A fetch is in flight — the controls stay legible but stop accepting input. */
   busy: boolean;
   onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: PageSize) => void;
+  /**
+   * Typed to whatever `pageSizes` offers, so a caller cannot be handed a size
+   * that was never in its own selector — `Size` is inferred from the two
+   * together, and the worklist, which passes neither, gets `PageSize` as before.
+   */
+  onPageSizeChange: (pageSize: Size) => void;
+  /** Plural noun for the count: "1–20 of 340 <noun>". */
+  noun?: string;
+  /** What the left side says when nothing matched. */
+  emptyLabel?: string;
+  /** The options in the per-page selector. */
+  pageSizes?: readonly Size[];
+  /** Accessible name for the `<nav>`. */
+  label?: string;
 }) {
   const first = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const last = Math.min(page * pageSize, total);
@@ -44,7 +69,7 @@ export default function Pagination({
 
   return (
     <nav
-      aria-label="Lead list pages"
+      aria-label={label}
       // No panel and no margin: this is the footer strip of the workspace
       // surface, joined to the table above it by one hairline. A pager in its
       // own floating card is a pager that has been detached from the thing it
@@ -56,7 +81,7 @@ export default function Pagination({
           the buttons themselves say nothing about where they landed. */}
       <p aria-live="polite" className="text-caption text-fg-3">
         {total === 0 ? (
-          "No leads match the current view"
+          emptyLabel
         ) : (
           <>
             <span className="tnum font-mono font-medium text-fg-2">
@@ -64,7 +89,7 @@ export default function Pagination({
             </span>{" "}
             of{" "}
             <span className="tnum font-mono text-fg-2">{total.toLocaleString()}</span>{" "}
-            leads
+            {noun}
             {/* The page position, stated in words as well as drawn as buttons.
                 On a narrow screen the numbers collapse to a gap and this is
                 the only thing left saying where you are. */}
@@ -85,14 +110,14 @@ export default function Pagination({
             value={pageSize}
             disabled={busy}
             onChange={(event) =>
-              onPageSizeChange(Number(event.target.value) as PageSize)
+              onPageSizeChange(Number(event.target.value) as Size)
             }
             // Shorter than the shared 2.25rem chassis: a four-option numeric
             // select next to a row of page buttons should not be the tallest
             // thing in the bar.
             className="ui-field h-8 w-[4.5rem] cursor-pointer px-2"
           >
-            {PAGE_SIZES.map((size) => (
+            {pageSizes.map((size) => (
               <option key={size} value={size}>
                 {size}
               </option>

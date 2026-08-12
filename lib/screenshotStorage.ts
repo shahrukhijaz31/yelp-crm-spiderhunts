@@ -1,6 +1,8 @@
+import { createReadStream } from "node:fs";
 import { mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 /**
  * Object storage for desktop screenshots.
@@ -13,9 +15,11 @@ import path from "node:path";
  * supplied, every path is re-checked against the root, and writes are atomic.
  *
  * **Nothing serves this directory.** It is not under `public/`, nginx has no
- * location for it, and there is no route that maps a key to a URL. A screenshot
- * is not reachable over HTTP at all in this stage; the authenticated viewer in
- * a later stage will read it through a route that checks who is asking.
+ * location for it, and there is no route that maps a key to a URL. The one way
+ * bytes leave it is `GET /api/screenshots/:id/image`, which resolves the caller
+ * from the session row in Postgres, refuses anyone who is not an administrator,
+ * and looks the key up from the screenshot row itself — the key is never a
+ * parameter, so there is nothing for a caller to point anywhere.
  *
  * **The root must be outside the release tree.** Blue/green deploys replace the
  * release directory wholesale (deploy/README.md), so screenshots stored inside
@@ -136,6 +140,28 @@ export async function screenshotSize(key: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * An object as a web stream, ready to be a Response body.
+ *
+ * A stream rather than a `readFile`, for the reason the gallery makes obvious:
+ * a page of fifty screenshots is fifty concurrent-ish requests, and buffering
+ * each one whole would put fifty images in the heap at once to send bytes that
+ * are going straight out to a socket. `Readable.toWeb` also gives the runtime a
+ * stream it can cancel, so an administrator who closes the tab mid-response
+ * releases the file handle instead of having it read to the end into nothing.
+ *
+ * No `Range` support, unlike `recordingStream`. Ranges are what make an audio
+ * element seekable; an `<img>` asks for a whole file and nothing else, so the
+ * parsing that seeking needs would be code with no caller.
+ *
+ * The key is re-checked against the root by {@link resolveKey} like every other
+ * path in this file — a missing file throws on read, which the caller answers
+ * as a 404 rather than a stack trace.
+ */
+export function screenshotStream(key: string): ReadableStream<Uint8Array> {
+  return Readable.toWeb(createReadStream(resolveKey(key))) as ReadableStream<Uint8Array>;
 }
 
 /**
