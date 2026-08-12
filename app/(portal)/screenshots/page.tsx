@@ -18,11 +18,12 @@ import { listUsers } from "@/lib/userDb";
  * `ADMIN_PREFIXES` are about tidiness and policy documentation, and removing
  * either would change nothing here.
  *
- * The same refusal is enforced independently on all three endpoints the panel
- * uses — the list, the metadata and the image stream, each behind `apiAdmin()`
- * — because the two are reached separately: a page guard cannot protect an API
- * an agent calls with curl, and the image route in particular is reached by the
- * browser directly as an `<img src>`.
+ * The same refusal is enforced independently on every endpoint the panel uses —
+ * the list, the metadata and the image stream, and the two deletes at
+ * `/api/admin/screenshots`, each behind `apiAdmin()` — because the two are
+ * reached separately: a page guard cannot protect an API an agent calls with
+ * curl, and the image route in particular is reached by the browser directly as
+ * an `<img src>`.
  *
  * Today's screenshots are rendered on the server for the default filter, so the
  * screen paints with real cards instead of a skeleton; the panel recognises the
@@ -31,7 +32,7 @@ import { listUsers } from "@/lib/userDb";
  * so the grid arrives complete and fills in as the browser fetches each one.
  */
 export default async function ScreenshotsPage() {
-  const { allowed } = await requireRole("ADMIN", "/screenshots");
+  const { user, allowed } = await requireRole("ADMIN", "/screenshots");
   if (!allowed) return <AccessDenied />;
 
   // "Today" and "the latest capture" are relative to now, so this must be a
@@ -52,7 +53,20 @@ export default async function ScreenshotsPage() {
         // Names and roles only. The picker needs enough to label a filter and
         // nothing more, so no email address or account state travels to a
         // screen that has no use for one.
-        agents={users.map((user) => ({ id: user.id, name: user.name, role: user.role }))}
+        agents={users.map((account) => ({
+          id: account.id,
+          name: account.name,
+          role: account.role,
+        }))}
+        /*
+         * Whether the delete controls are drawn. Always true past the guard
+         * above, and passed explicitly rather than hard-coded so the component
+         * states its condition instead of assuming its caller's. It is not a
+         * permission: `DELETE /api/admin/screenshots…` re-reads the caller's
+         * role from Postgres on every request and refuses an agent whatever
+         * this says.
+         */
+        canDelete={user.role === "ADMIN"}
       />
     </main>
   );

@@ -183,7 +183,19 @@ const PUBLIC_PATHS = new Set<string>([
  * session's own; the admin view of the same data is `/reports/time`, a
  * different screen behind a different endpoint, admin-only at both ends.
  */
+/*
+ * `/api/admin` is screenshot deletion — `DELETE /api/admin/screenshots` and
+ * `DELETE /api/admin/screenshots/:id`. It is the one place in this application
+ * where an `admin` segment appears in a URL, and the exception is deliberate:
+ * the read side of that feature is `/api/screenshots` above, and destroying a
+ * screenshot is a different power from looking at one. Giving the destructive
+ * half its own prefix means a client that knows the viewer's URL cannot reach
+ * the delete by guessing a verb, and means this list describes the two
+ * separately. The enforcement is `apiAdmin()` inside each handler, which is what
+ * an agent with curl actually meets.
+ */
 const ADMIN_PREFIXES = [
+  "/api/admin",
   "/export",
   "/import",
   "/reports",

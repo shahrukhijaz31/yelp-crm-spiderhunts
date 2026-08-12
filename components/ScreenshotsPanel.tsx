@@ -7,11 +7,13 @@ import {
   Clock3,
   ImageOff,
   Monitor,
+  Trash2,
   Users2,
 } from "lucide-react";
 
 import CountUp from "./CountUp";
 import Pagination from "./Pagination";
+import ScreenshotDeleteDialog from "./ScreenshotDeleteDialog";
 import ScreenshotViewer from "./ScreenshotViewer";
 import { useSpotlight } from "./useSpotlight";
 import type { Role } from "@/lib/access";
@@ -88,6 +90,22 @@ import {
  * artefact per screenshot to store, expire and keep consistent with the
  * original — a large amount of machinery for a screen a handful of
  * administrators open, and deliberately not built at this stage.
+ *
+ * ---------------------------------------------------------------------------
+ * Deleting, and why selection is page-scoped
+ * ---------------------------------------------------------------------------
+ * Selection lives here, in the browser, and holds nothing but ids from the page
+ * currently on screen. It is pruned to the page on every payload — a filter
+ * change, a page step, a reload after a delete — so it is not possible for a
+ * tick made under one filter to survive into a request made under another. That
+ * is the whole reason "Select all" is worded for the page it is on: an
+ * administrator who ticks a header box gets the fifty screenshots in front of
+ * them, never the four thousand behind the pager.
+ *
+ * `canDelete` hides the controls for anyone who is not an administrator. It is
+ * courtesy, exactly like the hidden nav item: the two delete endpoints are
+ * behind `apiAdmin()` and re-read the caller's role from Postgres on every
+ * request, so an agent who reconstructed the fetch by hand would get a 403.
  */
 
 interface AgentOption {
@@ -96,15 +114,24 @@ interface AgentOption {
   role: Role;
 }
 
+/** A success or failure line above the gallery, after a delete. */
+type Notice = { tone: "ok" | "error"; message: string } | null;
+
+/** What the confirmation window is standing in front of. */
+type PendingDelete = { ids: string[] } | null;
+
 export default function ScreenshotsPanel({
   initialPayload,
   serverToday,
   agents,
+  canDelete = false,
 }: {
   initialPayload: ScreenshotPayload;
   serverToday: string;
   /** Every account, for the picker. Names only — this is a filter, not a list. */
   agents: AgentOption[];
+  /** ADMIN. Draws the delete controls; it does not authorize anything. */
+  canDelete?: boolean;
 }) {
   const [query, setQuery] = useState<ScreenshotQuery>(() =>
     defaultScreenshotQuery(serverToday),
@@ -181,6 +208,222 @@ export default function ScreenshotsPanel({
   }, []);
 
   const { screenshots, meta, summary, timeline, timelineTruncated, sessions } = payload;
+
+  /* ------------------------------------------------------------------------ */
+  /* Selection and deletion                                                   */
+  /* ------------------------------------------------------------------------ */
+
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [pending, setPending] = useState<PendingDelete>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  /**
+   * Selection is what is on this page, and nothing else.
+   *
+   * Pruned during render rather than in an effect, and keyed on the ids
+   * themselves: a payload arriving from a new filter, a new page or a reload
+   * after a delete drops every tick that is no longer in front of the
+   * administrator. Doing it in an effect would leave one painted frame in which
+   * the bar claimed a count for screenshots that had already gone from the grid.
+   */
+  const pageKey = screenshots.map((screenshot) => screenshot.id).join(",");
+  const [selectionKey, setSelectionKey] = useState(pageKey);
+  if (selectionKey !== pageKey) {
+    setSelectionKey(pageKey);
+    setSelected((current) => {
+      if (current.size === 0) return current;
+      const onPage = new Set(screenshots.map((screenshot) => screenshot.id));
+      const kept = new Set<string>();
+      for (const id of current) if (onPage.has(id)) kept.add(id);
+      return kept.size === current.size ? current : kept;
+    });
+  }
+
+  const selectedCount = selected.size;
+  const allOnPageSelected = screenshots.length > 0 && selectedCount === screenshots.length;
+
+  /**
+   * "Some, but not all" is a third state the checked attribute cannot express,
+   * and it has to be set on the DOM node. The same handling the export table's
+   * header box uses.
+   */
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selectedCount > 0 && !allOnPageSelected;
+    }
+  }, [selectedCount, allOnPageSelected]);
+
+  const toggleOne = useCallback((id: string, checked: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const toggleAllOnPage = useCallback(
+    (checked: boolean) => {
+      setSelected(
+        checked ? new Set(screenshots.map((screenshot) => screenshot.id)) : new Set(),
+      );
+    },
+    [screenshots],
+  );
+
+  // A success line is an acknowledgement, not a state — it goes away by itself
+  // so the screen it sits above is not permanently a sentence taller. Failures
+  // stay: they are something the administrator has to read and act on.
+  useEffect(() => {
+    if (!notice || notice.tone !== "ok") return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  /**
+   * What the screen does once the server has said what actually went.
+   *
+   * The deleted ids are dropped locally first so the cards disappear on the
+   * click rather than after a round trip, and then the current filter is
+   * re-requested — the counts, the timeline and the shift picker all come from
+   * the server and must not be guessed at. The filter itself is never touched,
+   * which is what "preserve the filters" means here: no navigation happens, and
+   * `query` is the same object it was before the delete.
+   *
+   * Emptying the last card on a page steps back one page instead of leaving an
+   * empty grid under "page 4 of 3" — but only above page one, where "empty"
+   * genuinely means nothing matches the filter and is the honest answer.
+   */
+  const applyOutcome = useCallback(
+    (deleted: string[], failed: Array<{ id: string; message?: string }>) => {
+      const removed = new Set(deleted);
+
+      if (removed.size > 0) {
+        setOpenIndex(null);
+        setPayload((current) => {
+          const kept = current.screenshots.filter((row) => !removed.has(row.id));
+          const gone = current.screenshots.length - kept.length;
+          const total = Math.max(0, current.meta.total - gone);
+
+          return {
+            ...current,
+            screenshots: kept,
+            timeline: current.timeline.filter((point) => !removed.has(point.id)),
+            meta: {
+              ...current.meta,
+              total,
+              totalPages: Math.max(1, Math.ceil(total / current.meta.pageSize)),
+            },
+            summary: {
+              ...current.summary,
+              inWindow: Math.max(0, current.summary.inWindow - gone),
+            },
+          };
+        });
+      }
+
+      /*
+       * What went, leaves the selection. What failed, stays in it — those cards
+       * are still on screen and are the ones most likely to be tried again.
+       *
+       * Amended rather than replaced, because a delete is not always about the
+       * selection: the trash icon on a single card deletes that one screenshot,
+       * and wiping a dozen unrelated ticks as a side effect of it would be a
+       * second, silent action nobody asked for.
+       */
+      setSelected((current) => {
+        const next = new Set(current);
+        for (const id of removed) next.delete(id);
+        for (const row of failed) next.add(row.id);
+        return next;
+      });
+
+      const emptied =
+        screenshots.length > 0 && screenshots.every((row) => removed.has(row.id));
+
+      if (emptied && query.page > 1) {
+        setQuery((current) => ({ ...current, page: current.page - 1 }));
+      } else {
+        void load(query);
+      }
+    },
+    [load, query, screenshots],
+  );
+
+  /**
+   * Delete one screenshot or a batch of them.
+   *
+   * One id goes to `DELETE /api/admin/screenshots/:id` and several go to
+   * `DELETE /api/admin/screenshots`, which is not an optimisation — they are two
+   * endpoints with two different answers. The single one either deleted the
+   * screenshot or did not; the bulk one reports each id's fate, and this
+   * function believes that report rather than assuming the request as a whole
+   * succeeded. A partial failure leaves the failed cards exactly where they
+   * were, because their rows are exactly where they were.
+   */
+  const runDelete = useCallback(
+    async (ids: string[]) => {
+      if (ids.length === 0) return;
+
+      setDeleting(true);
+      setDeleteError(null);
+
+      try {
+        const single = ids.length === 1;
+        const response = single
+          ? await fetch(`/api/admin/screenshots/${encodeURIComponent(ids[0]!)}`, {
+              method: "DELETE",
+              credentials: "same-origin",
+            })
+          : await fetch("/api/admin/screenshots", {
+              method: "DELETE",
+              credentials: "same-origin",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ids }),
+            });
+
+        const body = (await response.json().catch(() => ({}))) as {
+          message?: string;
+          deleted?: string[];
+          failed?: Array<{ id: string; message?: string }>;
+        };
+
+        if (!response.ok) {
+          setDeleteError(
+            body.message ??
+              (response.status === 403
+                ? "Deleting screenshots is for administrators only."
+                : response.status === 401
+                  ? "Your session has ended. Sign in again to continue."
+                  : "That could not be deleted. Try again."),
+          );
+          return;
+        }
+
+        const deleted = single ? ids : (body.deleted ?? []);
+        const failed = single ? [] : (body.failed ?? []);
+
+        setPending(null);
+        setNotice(describeOutcome(deleted.length, failed));
+        applyOutcome(deleted, failed);
+      } catch {
+        setDeleteError("Could not reach the server. Try again.");
+      } finally {
+        setDeleting(false);
+      }
+    },
+    [applyOutcome],
+  );
+
+  const askToDelete = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    setDeleteError(null);
+    setNotice(null);
+    setPending({ ids });
+  }, []);
 
   const selectedAgent = query.userId
     ? (agents.find((agent) => agent.id === query.userId) ?? null)
@@ -365,8 +608,76 @@ export default function ScreenshotsPanel({
         busy={busy}
       />
 
+      {/* The outcome of the last delete. Above the gallery rather than inside
+          it, because it is about screenshots that are no longer in there. */}
+      {notice && (
+        <p
+          role={notice.tone === "error" ? "alert" : "status"}
+          className={`rounded-lg border px-4 py-2.5 text-caption ${
+            notice.tone === "ok"
+              ? "border-success-line bg-success-bg text-success"
+              : "border-danger-line bg-danger-bg text-danger"
+          }`}
+        >
+          {notice.message}
+        </p>
+      )}
+
       {/* --- the gallery ---------------------------------------------------- */}
       <section className="panel overflow-hidden">
+        {/* The selection strip. The tick box is always here when there is
+            anything to tick — it is how a selection is made — but the bar of
+            actions only exists once something is selected, so an ordinary
+            browse of the gallery is not shadowed by a destructive button. */}
+        {canDelete && screenshots.length > 0 && !error && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3 py-2">
+            <label className="flex cursor-pointer select-none items-center gap-2 text-caption text-fg-2">
+              {/* Same control, same classes, same indeterminate handling as the
+                  export table's header box — this portal already has one
+                  select-all and there is no reason for a second design. */}
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allOnPageSelected}
+                onChange={(event) => toggleAllOnPage(event.target.checked)}
+                aria-label={
+                  allOnPageSelected
+                    ? "Untick every screenshot on this page"
+                    : "Tick every screenshot on this page"
+                }
+                className="h-3.5 w-3.5 cursor-pointer accent-accent"
+              />
+              {/* Named for the page, because that is what it does. */}
+              Select all on this page
+            </label>
+
+            {selectedCount > 0 && (
+              <>
+                <span className="tnum font-mono text-meta text-fg-3" aria-live="polite">
+                  {selectedCount.toLocaleString()} screenshot
+                  {selectedCount === 1 ? "" : "s"} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={() => toggleAllOnPage(false)}
+                  className="ui-btn ui-btn-ghost h-8 px-2 text-caption"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => askToDelete([...selected])}
+                  disabled={deleting}
+                  className="ui-btn ui-btn-danger ml-auto h-8"
+                >
+                  <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                  Delete Selected
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         {error ? (
           <Empty
             icon={ImageOff}
@@ -398,6 +709,10 @@ export default function ScreenshotsPanel({
                 serverToday={serverToday}
                 showAgent={query.userId === null}
                 onOpen={() => setOpenIndex(index)}
+                canDelete={canDelete}
+                selected={selected.has(screenshot.id)}
+                onSelect={(checked) => toggleOne(screenshot.id, checked)}
+                onDelete={() => askToDelete([screenshot.id])}
               />
             ))}
           </div>
@@ -436,8 +751,60 @@ export default function ScreenshotsPanel({
           }
         />
       )}
+
+      {pending && (
+        <ScreenshotDeleteDialog
+          count={pending.ids.length}
+          busy={deleting}
+          error={deleteError}
+          onConfirm={() => void runDelete(pending.ids)}
+          onCancel={() => {
+            // Cancel does exactly nothing else: no request was made, the
+            // selection is untouched, and the grid is the grid it was.
+            setPending(null);
+            setDeleteError(null);
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * What to say once the server has reported what actually happened.
+ *
+ * A partial failure is never rounded up into a success. "Twelve deleted" when
+ * three of them are still on disk would be contradicted by the grid a second
+ * later, which is the specific way a delete confirmation loses its authority.
+ */
+function describeOutcome(
+  deleted: number,
+  failed: Array<{ id: string; message?: string }>,
+): Notice {
+  const noun = (count: number) => `${count.toLocaleString()} screenshot${count === 1 ? "" : "s"}`;
+
+  if (failed.length === 0) {
+    return {
+      tone: "ok",
+      message: deleted === 1 ? "Screenshot deleted." : `${noun(deleted)} deleted.`,
+    };
+  }
+
+  // The server's own wording for the first failure, which already says what is
+  // in the way; a generic "some failed" would send an administrator looking.
+  const reason = failed[0]?.message ? ` ${failed[0].message}` : "";
+
+  if (deleted === 0) {
+    return {
+      tone: "error",
+      message: `${noun(failed.length)} could not be deleted and ${failed.length === 1 ? "is" : "are"} still here.${reason}`,
+    };
+  }
+
+  return {
+    tone: "error",
+    message: `${noun(deleted)} deleted. ${noun(failed.length)} could not be deleted and ${failed.length === 1 ? "is" : "are"} still here.${reason}`,
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -454,28 +821,85 @@ export default function ScreenshotsPanel({
  *
  * Its load state is local to the card. Lifting it into the panel would re-render
  * the whole grid once per image as fifty of them arrive out of order.
+ *
+ * **The card is a div containing a button, not a button.** It was the latter
+ * until selection arrived, and a checkbox nested inside a `<button>` is invalid
+ * markup that browsers resolve by making the inner control unclickable. The
+ * open-the-viewer button is now one child and the two administrative controls
+ * are its siblings, laid over the preview — which is also what keeps a tick or a
+ * trash click from opening the window underneath it.
  */
 function Card({
   screenshot,
   serverToday,
   showAgent,
   onOpen,
+  canDelete,
+  selected,
+  onSelect,
+  onDelete,
 }: {
   screenshot: ScreenshotCard;
   serverToday: string;
   /** Hidden when the grid is already filtered to one person. */
   showAgent: boolean;
   onOpen: () => void;
+  /** ADMIN. Draws the tick box and the trash icon; authorizes nothing. */
+  canDelete: boolean;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
+  onDelete: () => void;
 }) {
   const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex flex-col overflow-hidden rounded-lg border border-line bg-surface text-left transition-all duration-200 hover:border-line-2 hover:shadow-[var(--c-shadow-2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--c-focus)]"
+    <div
+      className={`group relative flex flex-col overflow-hidden rounded-lg border bg-surface transition-all duration-200 hover:shadow-[var(--c-shadow-2)] ${
+        // A selected card is marked on the card itself, not only in its
+        // checkbox: a tick 200 pixels away is invisible at a glance across a
+        // grid of forty, and "which of these did I choose" is the question the
+        // bulk bar's count cannot answer.
+        selected ? "border-accent ring-1 ring-[var(--c-accent)]" : "border-line hover:border-line-2"
+      }`}
     >
-      <div className="relative aspect-[16/10] w-full overflow-hidden bg-recessed">
+      {canDelete && (
+        <>
+          {/* Both controls sit over the preview, top corners, and both stop the
+              click from reaching the open-the-viewer button beneath them. The
+              tick box is always visible once it is ticked — a control that
+              faded out while it was on would hide the state it is reporting. */}
+          <label
+            className={`absolute left-2 top-2 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded border border-line-2 bg-surface/90 backdrop-blur transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100 ${
+              selected ? "opacity-100" : "opacity-0 max-sm:opacity-100"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(event) => onSelect(event.target.checked)}
+              aria-label={`Select the screenshot of ${screenshot.agent.name}'s desktop at ${formatClock(screenshot.capturedAt)}`}
+              className="h-3.5 w-3.5 cursor-pointer accent-accent"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label={`Delete the screenshot of ${screenshot.agent.name}'s desktop at ${formatClock(screenshot.capturedAt)}`}
+            title="Delete screenshot"
+            className="absolute right-2 top-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded border border-line-2 bg-surface/90 text-fg-3 opacity-0 backdrop-blur transition-all duration-150 hover:border-danger-line hover:bg-danger-bg hover:text-danger focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--c-focus)] group-hover:opacity-100 max-sm:opacity-100"
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+          </button>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex flex-col text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--c-focus)]"
+      >
+        <div className="relative aspect-[16/10] w-full overflow-hidden bg-recessed">
         {status === "loading" && (
           <div className="skeleton absolute inset-0" aria-hidden="true" />
         )}
@@ -542,8 +966,9 @@ function Card({
             </>
           )}
         </p>
-      </div>
-    </button>
+        </div>
+      </button>
+    </div>
   );
 }
 
