@@ -213,6 +213,19 @@ const PUBLIC_PATHS = new Set<string>([
  * separately. The enforcement is `apiAdmin()` inside each handler, which is what
  * an agent with curl actually meets.
  */
+/*
+ * Deliberately not here: `/downloads` and `/api/downloads`, the SpiderHunts
+ * Monitor installer. Every signed-in user may fetch it, and agents most of all
+ * — it is the software they are required to run, so an admin-only download
+ * would lock out the people the feature exists for.
+ *
+ * "Not admin-only" is not "public": neither path is in `PUBLIC_PATHS` above, so
+ * the proxy still turns away a request with no session cookie, and both route
+ * handlers call `apiUser()`, which resolves the session against Postgres. What
+ * an agent cannot do is change any of it — there is no upload, no version
+ * setting and no write verb anywhere in the feature. The installer is placed on
+ * the server during deployment and the routes only ever read.
+ */
 const ADMIN_PREFIXES = [
   "/api/admin",
   "/export",

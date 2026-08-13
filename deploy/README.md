@@ -56,6 +56,8 @@ binary** — the same build runs on Windows and Ubuntu.
   db-password     root:root 0600
 /var/lib/leadportal/
   recordings/     uploaded call audio, leadportal:leadportal 0750
+  screenshots/    desktop screenshots, leadportal:leadportal 0750
+  downloads/      SpiderHunts Monitor installer, leadportal:leadportal 0750 (read-only to the app)
 /etc/nginx/sites-available/leadportal
 /etc/nginx/conf.d/leadportal-upstream.conf   ← rewritten by deploy.sh
 /etc/nginx/leadportal.htpasswd
@@ -275,6 +277,46 @@ systemctl start leadportal@blue
 > logged and never fails the run. Contabo's own Auto Backup is a separate paid
 > add-on in their panel, and being a whole-box image it is a blunt tool for
 > recovering one table across ten sites.
+
+### Monitor installer
+
+Agents download the SpiderHunts Monitor Windows installer from the portal
+(account menu → **Download Monitor**, or `/downloads`). The file lives in
+`/var/lib/leadportal/downloads`, named in `/etc/leadportal/env` as
+`MONITOR_INSTALLER_PATH`, and is served only by `GET /api/downloads/monitor` —
+which resolves the session from Postgres first. Both roles may download it; no
+role can replace it, because there is no upload endpoint at all.
+
+Outside the release tree for the usual reason, with one difference from
+recordings and screenshots: the application only ever **reads** here, so the
+directory is deliberately *not* in the unit's `ReadWritePaths`. A new installer
+is put there by root.
+
+Shipping a new version is two files and a restart:
+
+```bash
+scp 'SpiderHunts Monitor-Windows-0.2.0-Setup.exe' \
+    leadportal:/var/lib/leadportal/downloads/SpiderHunts-Monitor-Windows-0.2.0-Setup.exe
+ssh leadportal 'chown leadportal:leadportal /var/lib/leadportal/downloads/SpiderHunts-Monitor-Windows-0.2.0-Setup.exe \
+  && chmod 640 /var/lib/leadportal/downloads/SpiderHunts-Monitor-Windows-0.2.0-Setup.exe'
+# point the env at it — both keys, together
+ssh leadportal 'sed -i "s|^MONITOR_INSTALLER_PATH=.*|MONITOR_INSTALLER_PATH=\"/var/lib/leadportal/downloads/SpiderHunts-Monitor-Windows-0.2.0-Setup.exe\"|; \
+                        s|^MONITOR_VERSION=.*|MONITOR_VERSION=0.2.0|" /etc/leadportal/env \
+  && systemctl restart leadportal@blue leadportal@green'
+```
+
+`MONITOR_VERSION` is what the page shows *and* what the saved filename is built
+from (`SpiderHunts-Monitor-Windows-<version>-Setup.exe`), so the two cannot
+disagree — but the file on disk can, which is why both keys move together. The
+old installer can stay in the directory; nothing serves it once the path moves.
+
+With the file missing the page says "SpiderHunts Monitor is temporarily
+unavailable" and the endpoint answers 404. Nothing else in the app is affected,
+and no path or error from the server reaches the browser.
+
+```bash
+ssh leadportal 'ls -lh /var/lib/leadportal/downloads'
+```
 
 ### Migration safety
 

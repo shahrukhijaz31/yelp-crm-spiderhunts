@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, KeyRound, LogOut } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, MonitorDown } from "lucide-react";
 
 import { useWorkSession } from "./WorkSessionProvider";
 import { LOGIN_PATH, type SessionUser } from "@/lib/access";
@@ -20,8 +20,8 @@ import { formatWorkClock } from "@/lib/performanceRules";
  * exactly nothing.
  *
  * Keyboard behaviour is hand-rolled rather than borrowed from a primitives
- * library, because there is exactly one menu in this application and it is two
- * items long. Down-arrow from the trigger opens it and lands on the first item,
+ * library, because there is exactly one menu in this application and it is
+ * three items long. Down-arrow from the trigger opens it and lands on the first item,
  * Escape closes and returns focus to the trigger, and Tab out closes it. That
  * is the whole `menu` pattern for a menu this size.
  *
@@ -193,6 +193,32 @@ export default function UserMenu({ user }: { user: SessionUser }) {
           >
             <KeyRound className="h-4 w-4 shrink-0 text-fg-4" strokeWidth={1.75} aria-hidden="true" />
             Change password
+          </Link>
+
+          {/*
+           * The desktop software, beside the other thing about your own account
+           * rather than in the rail.
+           *
+           * It is here and not in the sidebar because of how often it is
+           * wanted: an agent downloads the Monitor once, on their first day,
+           * and never again — a permanent row in the navigation would be a
+           * destination nobody visits twice, sitting above the queues they use
+           * all day. This menu is already where "things about me" live, and the
+           * page has an address (`/downloads`) that an administrator can say
+           * over the phone.
+           *
+           * Drawn for both roles, and that is not a permission: `/downloads` is
+           * not an admin prefix, and the page and both endpoints behind it
+           * resolve the session from Postgres themselves.
+           */}
+          <Link
+            href="/downloads"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-ui text-fg-2 transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg"
+          >
+            <MonitorDown className="h-4 w-4 shrink-0 text-fg-4" strokeWidth={1.75} aria-hidden="true" />
+            Download Monitor
           </Link>
 
           <button

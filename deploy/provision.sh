@@ -39,6 +39,21 @@ RECORDINGS_DIR_PATH="/var/lib/${SITE}/recordings"
 # all day — which is why retention (below) is provisioned alongside it rather
 # than left as something to remember later.
 SCREENSHOTS_DIR_PATH="/var/lib/${SITE}/screenshots"
+# The SpiderHunts Monitor Windows installer, which agents download from the
+# portal. Beside the other two and outside APP_ROOT for the identical reason: a
+# deploy replaces the release directory wholesale, and an installer kept inside
+# it would be gone at the next release with nothing to restore it from — the
+# file is placed here by hand, so a rollback could not bring it back either.
+#
+# Unlike recordings and screenshots this directory is only ever READ by the
+# application. Nothing in the portal writes here; a new installer arrives by scp
+# from whoever built it (see MONITOR_INSTALLER_PATH below).
+DOWNLOADS_DIR_PATH="/var/lib/${SITE}/downloads"
+# The installer's canonical name. It must match MONITOR_VERSION in the app
+# (lib/monitorRelease.ts derives the download filename from the version), or an
+# agent downloads a file whose name disagrees with the page that offered it.
+MONITOR_VERSION="0.1.0"
+MONITOR_INSTALLER_FILE="SpiderHunts-Monitor-Windows-${MONITOR_VERSION}-Setup.exe"
 DB_NAME="lead_portal"
 DB_USER="leadportal"
 # The public hostname, a subdomain of the company's existing Hostinger-hosted
@@ -145,10 +160,32 @@ chown -R root:root "${APP_ROOT}/repo"
 # directory listing there is a record of when somebody's screen was
 # photographed, which is not something the rest of the box needs to be able to
 # read.
-log "Creating ${RECORDINGS_DIR_PATH} and ${SCREENSHOTS_DIR_PATH}"
-mkdir -p "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH"
+#
+# The downloads directory is the same shape with one difference: the app only
+# reads it. Ownership by the app user is what makes the installer readable at
+# all under 0750, and root is what puts a new one there — the application has no
+# code path that writes to this directory, and the unit file does not list it
+# under ReadWritePaths.
+log "Creating ${RECORDINGS_DIR_PATH}, ${SCREENSHOTS_DIR_PATH} and ${DOWNLOADS_DIR_PATH}"
+mkdir -p "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH" "$DOWNLOADS_DIR_PATH"
 chown -R "${DB_USER}:${DB_USER}" "/var/lib/${SITE}"
-chmod 750 "/var/lib/${SITE}" "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH"
+chmod 750 "/var/lib/${SITE}" "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH" "$DOWNLOADS_DIR_PATH"
+
+# Say plainly whether the installer is actually there. The portal answers a
+# clean "temporarily unavailable" when it is not — which is the right behaviour
+# and also the kind of thing nobody notices for a week, so it is called out on
+# every run rather than only on the run that created the directory.
+if [[ -f "${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}" ]]; then
+  log "Monitor installer present ($(du -h "${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}" | cut -f1))"
+  # Placed by scp as root, so it arrives root-owned and unreadable to the app
+  # user under 0750. Fixed here rather than left as a step to remember.
+  chown "${DB_USER}:${DB_USER}" "${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}"
+  chmod 640 "${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}"
+else
+  warn "No Monitor installer at ${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}. The Downloads page will say the app is temporarily unavailable until one is copied there:
+    scp 'SpiderHunts Monitor-Windows-${MONITOR_VERSION}-Setup.exe' ${SITE}:${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}
+  then re-run this script (or chown ${DB_USER}:${DB_USER} and chmod 640 it by hand)."
+fi
 
 # --- Database on the EXISTING cluster --------------------------------------
 log "Configuring database on the existing PostgreSQL 17 cluster"
@@ -253,6 +290,13 @@ SCREENSHOT_RETENTION_DAYS=30
 # by /usr/local/bin/${SITE}-screenshot-retention. With this unset the route
 # refuses every request, so screenshots would simply never be deleted.
 SCREENSHOT_RETENTION_TOKEN="${SCREENSHOT_RETENTION_TOKEN}"
+# The SpiderHunts Monitor installer agents download from the portal. Read-only
+# to the application, outside the release tree, and served only through
+# GET /api/downloads/monitor, which checks the session first. MONITOR_VERSION
+# is what the page shows and what the saved filename is built from, so the two
+# move together when a new installer is copied to the box.
+MONITOR_INSTALLER_PATH="${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}"
+MONITOR_VERSION=${MONITOR_VERSION}
 # SMTP for the sign-in verification code. Signing in is password + a 6-digit
 # code emailed to the address on the user's record, so the login route refuses
 # every attempt while these are unset — it fails closed rather than falling back
@@ -294,6 +338,17 @@ else
   if ! grep -q '^SCREENSHOT_RETENTION_TOKEN=' "${ENV_DIR}/env"; then
     printf 'SCREENSHOT_RETENTION_TOKEN="%s"\n' "$SCREENSHOT_RETENTION_TOKEN" >> "${ENV_DIR}/env"
     log "Added SCREENSHOT_RETENTION_TOKEN to the existing ${ENV_DIR}/env"
+  fi
+  # The Monitor installer, added with the portal download page. Two keys, each
+  # skipped when already present, so an operator who has already moved to a
+  # newer installer keeps both their path and their version.
+  if ! grep -q '^MONITOR_INSTALLER_PATH=' "${ENV_DIR}/env"; then
+    printf 'MONITOR_INSTALLER_PATH="%s"\n' "${DOWNLOADS_DIR_PATH}/${MONITOR_INSTALLER_FILE}" >> "${ENV_DIR}/env"
+    log "Added MONITOR_INSTALLER_PATH to the existing ${ENV_DIR}/env"
+  fi
+  if ! grep -q '^MONITOR_VERSION=' "${ENV_DIR}/env"; then
+    printf 'MONITOR_VERSION=%s\n' "$MONITOR_VERSION" >> "${ENV_DIR}/env"
+    log "Added MONITOR_VERSION to the existing ${ENV_DIR}/env"
   fi
   # The SMTP block, added when email OTP was introduced. Appended one key at a
   # time so an operator who has already filled in a value keeps it, and with

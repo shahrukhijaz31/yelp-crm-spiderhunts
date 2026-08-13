@@ -169,6 +169,7 @@ app/
                               the caller's own figures — every role, own row only
   (portal)/time-tracking/page.tsx
                               the caller's own tracked time — every role, own row only
+  (portal)/downloads/page.tsx the SpiderHunts Monitor installer — every role
   (portal)/settings/page.tsx  placeholder for backend config  — ADMIN
   (portal)/users/page.tsx     accounts and roles              — ADMIN
   api/auth/login/route.ts     POST — verify a password, mint a session
@@ -189,6 +190,10 @@ app/
                               GET/POST — manual corrections and their audit trail — ADMIN
   api/work-session/heartbeat/route.ts
                               POST — "this browser is still open"
+  api/downloads/monitor/route.ts
+                              GET — the Monitor installer, streamed — every role
+  api/downloads/monitor/info/route.ts
+                              GET — its version, filename and size  — every role
   api/leads/route.ts          GET — every lead, from Postgres
   api/leads/[id]/route.ts     PATCH — persists one inline edit
   api/leads/upload/route.ts   POST — parses a CSV and merges it in, never wipes
@@ -892,6 +897,72 @@ timeline ordering and cap, both permission directions, a 5,000-row window, and
 that leads, screenshots, activity, timesheets, productivity and the monitor
 session endpoint all still answer. It creates throwaway accounts (`apptest-*`)
 and removes everything it made, including after a failure.
+
+## Monitor installer download
+
+Agents get the SpiderHunts Monitor Windows installer from the portal itself,
+rather than from someone emailing them a 77MB attachment. The account menu (top
+right) has **Download Monitor**, which is `/downloads`: one card giving the
+product name, the platform, the version, the filename and the approximate size,
+and a button.
+
+**The installer is not in this repository and not in the release tree.** It is a
+file placed on the server by hand during deployment, at
+`MONITOR_INSTALLER_PATH` — `/var/lib/leadportal/downloads/…` in production,
+`.data/downloads/<filename>` in development. `deploy/deploy.sh` replaces the
+whole slot directory on every release, so an installer kept inside it would be
+destroyed by the next deploy; this is the same reasoning, and the same location,
+as recordings and screenshots. Unlike those two the application only ever
+*reads* here, so the systemd unit deliberately does not grant write access to
+the directory.
+
+```
+GET /api/downloads/monitor        the bytes         — any signed-in user
+GET /api/downloads/monitor/info   name/version/size — any signed-in user
+```
+
+**Both roles, and nothing else.** `apiUser()` resolves the session from Postgres
+on both routes, so an unauthenticated request gets a 401 whatever the UI is
+doing; agents are allowed because the Monitor is the software they are required
+to run. No role can upload, replace or re-version anything — there is no write
+verb in the feature at all, so an agent with curl has exactly the power an agent
+with the button has.
+
+**There is no parameter anywhere in it.** Neither route takes a filename, a path
+or an id, so "path traversal" and "requesting some other file" are not defended
+against so much as absent: `lib/monitorRelease.ts` opens the one path the server
+is configured with, and that path never appears in a response, in success or
+failure. A missing installer is a clean 404 and the sentence "SpiderHunts
+Monitor is temporarily unavailable. Please try again later."
+
+The version lives in one place (`lib/monitorRelease.ts`, overridable with
+`MONITOR_VERSION`) and the saved filename is derived from it as
+`SpiderHunts-Monitor-Windows-<version>-Setup.exe`, so the page, the download
+header and the file on disk cannot drift apart by more than an operator forgetting
+to move both env keys at once. Shipping a new build is a copy and two settings —
+see `deploy/README.md` → *Monitor installer*.
+
+Nothing about the Monitor application itself changed for this: it is
+distribution, not functionality.
+
+### Testing it
+
+```
+npm run dev                     # in one terminal
+npm run test:monitor-download   # in another
+```
+
+Checks against the real routes and the real database: the missing-installer 404
+and its message, the unauthenticated and forged-cookie refusals, the page
+redirect, agent and admin downloads, content type, attachment disposition,
+filename, length against the file on disk and the bytes themselves, the metadata
+endpoint's agreement with the download, that neither response leaks a path,
+that query parameters change nothing and no sibling route exists, that POST/PUT/
+DELETE are 405 even for an administrator, and that leads, screenshots, app
+usage, users, time tracking and the monitor session endpoint all still answer as
+before. It creates throwaway accounts (`dltest-*`) and removes everything it
+made, including after a failure — and it never deletes an installer it did not
+itself write.
 
 ## Expected CSV columns
 

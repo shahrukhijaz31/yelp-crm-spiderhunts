@@ -95,6 +95,14 @@ ReadWritePaths=/var/lib/leadportal/recordings
 # process and has to be able to *delete* here as well as write.
 ReadWritePaths=/var/lib/leadportal/screenshots
 
+# /var/lib/leadportal/downloads — the SpiderHunts Monitor installer — is
+# deliberately ABSENT from this list. ProtectSystem=strict makes the filesystem
+# read-only, not unreadable, so the process can still open the installer and
+# stream it to an authenticated download; what it cannot do is write there. The
+# file is put in place by root during deployment, and no code path in the
+# application writes to it, so granting write access would only widen what a
+# bug could reach.
+
 # The box has 47GB, but a runaway render should kill this process rather than
 # pressure the nine other tenants.
 MemoryMax=1G
