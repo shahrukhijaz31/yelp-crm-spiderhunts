@@ -336,6 +336,12 @@ model WorkSession {
   /// what the portal decided they were.
   activityIntervals ActivityInterval[]
 
+  /// Which applications were in the foreground during this shift. The direction
+  /// of the dependency is the same one the intervals have: a usage row
+  /// describes a session, and a session knows nothing about usage. Nothing in
+  /// `lib/appUsage.ts` writes to this table.
+  appUsage AppUsage[]
+
   /// Manual corrections an administrator has made to this shift. Kept even
   /// after the correction has been applied — the row above holds the current
   /// value, these hold every value it has ever had and who changed it.
@@ -431,6 +437,10 @@ model User {
   /// Aggregate keyboard/mouse activity observed during this person's shifts.
   /// Counts only — see `ActivityInterval` for what is deliberately absent.
   activityIntervals ActivityInterval[]
+
+  /// Which applications held the foreground during those shifts, and for how
+  /// long. Admin-only on the read side — see `lib/access.ts`.
+  appUsage AppUsage[]
 
   /// Manual time corrections: the ones made *to* this person's shifts, and (the
   /// second relation) the ones this administrator made to other people's. The
@@ -603,6 +613,10 @@ model MonitorDevice {
   /// Screenshots this workstation uploaded. Nullable on the far side — see the
   /// note on `Screenshot.deviceId`.
   screenshots Screenshot[]
+
+  /// Foreground application usage this workstation reported. Nullable on the
+  /// far side for the identical reason.
+  appUsage AppUsage[]
 
   /// "This user's devices" for revocation, and the clock for the housekeeping
   /// sweep. Token lookups already ride the two unique indexes.
@@ -788,6 +802,116 @@ model ActivityInterval {
   @@index([startedAt])
   @@index([createdAt])
   @@map("activity_intervals")
+}
+
+/// One stretch of time an application was in the foreground on a workstation.
+///
+/// The third thing a work session can contain, beside screenshots and activity
+/// intervals, and the same shape as both: server-attributed, bounded, and
+/// describing a shift rather than making one.
+///
+///     Work Session
+///       ├── Activity Intervals   (how much input)
+///       ├── Screenshots          (what the screen looked like)
+///       └── App Usage            (which application had the foreground)
+///
+/// **What is deliberately not here.** No window titles, no URLs, no document
+/// names, no keystrokes, no typed text, no mouse coordinates, no screenshots.
+/// Two labels — the process and the application it belongs to — and the window
+/// the process held the foreground for. As with `activity_intervals`, that is
+/// not a gap a later version might fill: these are the only columns app usage
+/// data has to go in, so there is nowhere for a window title to be stored even
+/// if a workstation tried to send one. The upload route refuses a name that
+/// looks like a URL and truncates nothing — it refuses (`lib/appUsageRules.ts`).
+///
+/// **No application is classified.** There is no `productive` column, no
+/// category, no score and no weight. The table records how long something was
+/// on screen; deciding whether that was a good use of the time is a judgement
+/// this system does not make and has no column to record. `Chrome` is not
+/// productive, `WhatsApp` is not a distraction, and the existing productivity
+/// score (`lib/productivity.ts`) does not read this table at all.
+///
+/// **Nothing identifying comes from the request.** `user_id` is the account the
+/// bearer token resolved to, `work_session_id` is the portal's own view of that
+/// agent's open shift, and `monitor_device_id` is the device row that
+/// authenticated — exactly as for a screenshot and an activity interval. There
+/// is no field in a submission that names a user or a shift.
+model AppUsage {
+  id String @id @default(cuid())
+
+  /// Whose workstation. Cascade, matching `screenshots` and
+  /// `activity_intervals`: monitoring data about a deleted account has nobody
+  /// to be reported for.
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The shift it happened during. Required, not optional, for the reason
+  /// `activity_intervals.work_session_id` is: usage outside a work session is
+  /// usage that was not being tracked, and the API refuses it rather than
+  /// filing it against nothing.
+  workSessionId String      @map("work_session_id")
+  workSession   WorkSession @relation(fields: [workSessionId], references: [id], onDelete: Cascade)
+
+  /// Which workstation reported it. Nullable with `SetNull`, exactly as
+  /// `screenshots.monitor_device_id` is and for the same reason: device rows are
+  /// revoked on sign-out and deleted by the housekeeping sweep, and a usage
+  /// record must outlive the laptop it came from.
+  deviceId String?        @map("monitor_device_id")
+  device   MonitorDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  /// The executable, without its directory — `chrome.exe`, not
+  /// `C:\Users\umar\AppData\…\chrome.exe`. The path is stripped on the way in
+  /// (`lib/appUsageRules.ts`): a full path carries the account name and the
+  /// layout of somebody's disk, neither of which this feature has any use for.
+  processName String @map("process_name")
+
+  /// The human label the reports group by — `Google Chrome`, `WhatsApp`.
+  /// Client-supplied, bounded in length and refused if it looks like a URL or
+  /// carries control characters. It is a *label*, never a window title.
+  applicationName String @map("application_name")
+
+  /// The foreground window, in UTC. Validated against the server's clock and
+  /// against the shift's own start, and refused rather than clamped — the same
+  /// rule `activity_intervals` follows, because a segment *is* its timestamps
+  /// and clamping would invent time nobody observed.
+  startedAt DateTime @map("started_at")
+  endedAt   DateTime @map("ended_at")
+
+  /// Whole seconds, derived from the two timestamps on the server. Stored
+  /// rather than computed on read for the reason every other duration in this
+  /// schema is: `sum(duration_seconds)` over an indexed range is what every
+  /// report does, several hundred thousand times.
+  durationSeconds Int @map("duration_seconds")
+
+  /// The client's idempotency key for this segment.
+  ///
+  /// **Unique on its own**, not scoped to the shift the way an activity
+  /// interval's is. A resend of a segment the server already holds therefore
+  /// cannot become a second row under any circumstances, including the one the
+  /// scoped index misses — a retry that arrives after the agent's shift rolled
+  /// over, where the same key would resolve to a different session. The cost is
+  /// that two workstations colliding on one key is a refusal rather than a
+  /// silent second row, which is the right way round: see the note on
+  /// `client_key_conflict` in `lib/appUsage.ts`.
+  clientKey String @unique @map("client_key")
+
+  /// When the server received it. `started_at` is when it happened; the two
+  /// together are what expose a workstation reporting late or with a wrong
+  /// clock, exactly as they do for screenshots and intervals.
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The four shapes of query this table has. One agent over a window (the
+  /// employee view), everything in one shift (the session detail and the
+  /// timeline), a range across everybody (the team report), and one application
+  /// across everybody (the application filter) — which is why that index leads
+  /// with the name and carries the instant, so the filter and the window are
+  /// served by one index rather than by a scan after a lookup.
+  @@index([userId, startedAt])
+  @@index([workSessionId, startedAt])
+  @@index([startedAt])
+  @@index([applicationName, startedAt])
+  @@index([deviceId])
+  @@map("app_usage")
 }
 
 /// One manual correction an administrator made to a work session, kept forever.

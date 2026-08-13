@@ -129,7 +129,7 @@ export default function AppShell({
       <aside
         className={`sticky top-0 hidden h-screen shrink-0 border-r border-line transition-[width] duration-200 ease-out md:block ${NAV_MODE_CLASSES[navMode].width}`}
       >
-        <AppSidebar role={user.role} mode={navMode} onToggleCollapsed={toggleNav} />
+        <AppSidebar role={user.role} mode={navMode} />
       </aside>
 
       {/* --- drawer (below md) ------------------------------------------- */}
@@ -177,7 +177,19 @@ export default function AppShell({
           forces this flex child to that width and the whole page scrolls
           sideways instead of just the table. */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppTopBar today={today} user={user} onOpenNav={() => setNavOpen(true)} />
+        {/* The rail's collapse control lives up here rather than in the
+            sidebar's own footer. It is the same `toggleNav` and the same
+            cookie — what moved is where the reader reaches for it: beside the
+            drawer button it replaces below `md`, at the top of the screen
+            rather than at the bottom of a column they may have scrolled. One
+            control, so there is no second one to disagree with it. */}
+        <AppTopBar
+          today={today}
+          user={user}
+          navMode={navMode}
+          onOpenNav={() => setNavOpen(true)}
+          onToggleNav={toggleNav}
+        />
         {children}
       </div>
     </div>

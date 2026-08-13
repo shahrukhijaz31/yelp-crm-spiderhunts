@@ -77,6 +77,15 @@ npm run dev   # http://localhost:3000
   `work_sessions`; every number is a count of something an agent saved, there
   are no targets or estimates, and nothing is counted in the browser.
   See **Performance and work sessions** below.
+- **App usage** — which applications held the foreground during a shift, and for
+  how long, reported by the desktop Monitor. Admin-only: an application table
+  with total time and share, employee / date-range / application filters, an
+  employee view carrying tracked time and the activity figure beside the
+  breakdown, and an optional segment-by-segment daily timeline. No window
+  titles, URLs or document names are ever stored, and **no application is
+  classified as productive or unproductive** — the feature reports time and
+  makes no judgement, and it does not touch the activity percentage or the
+  productivity score. See **App usage tracking** below.
 - **Themes** — dark (graphite + signal red) and light (cool slate), toggled from
   the nav bar and persisted to localStorage via next-themes. Colour lives in one
   place: every token is a `--c-*` variable defined twice in `app/globals.css`
@@ -766,6 +775,123 @@ attribution, the ignored-identity fields, every authentication refusal, the
 409-not-a-new-shift rule, retries, eleven kinds of implausible value, both
 permission directions, and the correction audit trail. It creates throwaway
 accounts (`acttest-*`) and removes everything it made, including after a failure.
+
+## App usage tracking
+
+The third thing a work session can contain, beside screenshots and activity
+intervals:
+
+```
+Work Session
+  ├── Activity Intervals   (how much input)
+  ├── Screenshots          (what the screen looked like)
+  └── App Usage            (which application had the foreground)
+```
+
+One new table (`app_usage`) and no change to any existing one. The work session
+is still the only thing that decides when somebody was working, the screenshot
+pipeline is untouched, the activity percentage is unchanged, and the
+productivity score does not read this data.
+
+### What is recorded, and what deliberately is not
+
+Two labels and a window: the executable (`chrome.exe`), the application it
+belongs to (`Google Chrome`), when it took the foreground and when it lost it.
+
+**Never recorded**: window titles, URLs, page addresses, document names,
+keystrokes, typed text, mouse coordinates. There is nowhere in the schema for
+any of it to go. A process *path* is reduced to its executable on the way in —
+`C:\Users\umar\…\slack.exe` is stored as `slack.exe` — because a path carries an
+account name and the shape of somebody's disk, and an `applicationName` that
+looks like a URL is refused rather than truncated.
+
+**No application is classified.** There is no productive / unproductive /
+distracting split, no category, no weight and no score anywhere in the feature.
+Chrome is not productive, WhatsApp is not a distraction, and VS Code is not
+either. The system reports usage time; the judgement stays with the person
+reading it.
+
+### What the Monitor sends
+
+`POST /api/monitor/app-usage`, bearer-authenticated by the **existing** device
+credential (`monitorDevice()`), AGENT-only, with role and `isActive` re-read
+from Postgres on every call.
+
+```json
+{ "processName": "chrome.exe", "applicationName": "Google Chrome",
+  "startedAt": "…", "endedAt": "…", "clientKey": "an idempotency token" }
+```
+
+There is **no `userId` and no `workSessionId` in that shape.** The user comes
+from the device the token resolved to, the shift from the portal's own
+`getActiveWorkSession`, the device from the credential, and the duration from
+the two timestamps.
+
+- **No open shift → 409, and no shift is created.** Nothing on this path writes
+  to `work_sessions` at all.
+- **Retries are safe.** `client_key` is unique: a resend answers
+  `200 {duplicate: true}` with the row already stored, a first delivery `201`.
+  A key already used by another account is a 409 `client_key_conflict` instead —
+  the two must not be answered the same way.
+- **Timestamps are validated, not clamped.** Refused if the segment is shorter
+  than 5s, longer than 4h, ends more than 15 minutes from the server's clock, or
+  starts before the shift it would attach to.
+
+### The report
+
+```
+tracked   = overlap of the window with the agent's work sessions   (work_sessions)
+recorded  = app usage reported inside it                           (app_usage)
+coverage  = recorded ÷ tracked
+```
+
+Tracked time is **never** summed from app usage, for the reason time tracking
+gives at length: an agent working with the Monitor closed still has their hours
+counted in full and simply reports no applications. Coverage is the honesty
+figure — it says how much of the working day the breakdown actually describes.
+
+Each application row carries two shares, because there are two honest
+denominators: **share of recorded app time** (the rows add to 100%) and **share
+of tracked time** (they do not, and the gap is real). The table lists the top
+eight applications and folds the tail into one `Other` row, which carries the
+whole remainder, so the column still adds up.
+
+| | Who | Shows |
+| --- | --- | --- |
+| `/reports/app-usage` | **ADMIN** | applications, total time, share, coverage; employee and application filters; today / this week / this month / custom |
+| `/reports/app-usage` + an employee | **ADMIN** | that person's tracked time, activity %, application breakdown, and an optional segment-by-segment daily timeline |
+| `/reports/time/:id` | **ADMIN** | the same breakdown beneath their existing tracking record |
+
+**Admin-only, server-side.** `/reports` and `/api/reports` are already admin
+prefixes in `lib/access.ts`; every page runs `requireRole("ADMIN")` and every
+endpoint `apiAdmin()`, and the two are reached separately because a page guard
+cannot protect an API somebody calls with curl. There is **no agent-facing app
+usage endpoint at all**, not even one returning only the caller's own — the same
+rule screenshots follow.
+
+Every figure is a grouped aggregate in Postgres. The report returns at most nine
+application rows however many segments the window holds; the only read that
+returns a row per segment is the optional timeline, which takes one agent and is
+capped at 500 with a `truncated` flag. Indexes: `(user_id, started_at)`,
+`(work_session_id, started_at)`, `(started_at)`, `(application_name, started_at)`
+and `(monitor_device_id)`.
+
+### Testing it
+
+```
+npm run dev              # in one terminal
+npm run test:app-usage   # in another
+```
+
+Checks against the real routes and the real database: submission and automatic
+attribution, the ignored-identity fields, that no window title or URL survives,
+every authentication refusal, the 409-not-a-new-shift rule, retries and the
+cross-account key conflict, twelve kinds of implausible value, aggregation
+arithmetic against the rows in Postgres, employee/date/application filtering,
+timeline ordering and cap, both permission directions, a 5,000-row window, and
+that leads, screenshots, activity, timesheets, productivity and the monitor
+session endpoint all still answer. It creates throwaway accounts (`apptest-*`)
+and removes everything it made, including after a failure.
 
 ## Expected CSV columns
 

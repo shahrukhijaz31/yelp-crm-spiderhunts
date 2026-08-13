@@ -116,6 +116,25 @@ const PUBLIC_PATHS = new Set<string>([
    */
   "/api/monitor/activity",
   /*
+   * The foreground application report. Identical in kind to the two write
+   * endpoints above and exempt for the identical reason: `monitorDevice()`
+   * inside the handler resolves the bearer token against `monitor_devices` and
+   * re-reads role and `isActive` from Postgres on every call, so "public" means
+   * exempt from the cookie check and nothing else.
+   *
+   * It is the third write endpoint on this list. What it can write is one row
+   * in `app_usage`, attributed to the device's own user, to that user's
+   * currently-open shift and to the device that authenticated — all three
+   * server-derived. It cannot create, extend or close a work session; see
+   * `lib/appUsage.ts`.
+   *
+   * The *read* side of the same feature is `/api/reports/app-usage`, which is
+   * covered by the `/api/reports` admin prefix below. No agent may read app
+   * usage, including their own — the same rule screenshots follow, and for the
+   * same reason.
+   */
+  "/api/monitor/app-usage",
+  /*
    * The screenshot retention sweep, called by the box's own cron
    * (`deploy/leadportal-screenshot-retention`). Same shape as the ingest route:
    * not a browser, no session cookie, its own bearer token checked inside the

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  AppWindow,
   ArrowDownToLine,
   BarChart3,
   CalendarDays,
@@ -12,8 +13,6 @@ import {
   Gauge,
   Inbox,
   Monitor,
-  PanelLeftClose,
-  PanelLeftOpen,
   PhoneOutgoing,
   Settings,
   Target,
@@ -48,9 +47,9 @@ import {
  * below that, and off-canvas behind a button on a tablet or phone. The old bar
  * had no answer for narrow screens except hiding links.
  *
- * Those widths are the default rather than the rule — the control in the footer
- * collapses and expands the rail by hand, and that choice then holds at every
- * width. `mode` carries it in, and `NAV_MODE_CLASSES` is where each mode's
+ * Those widths are the default rather than the rule — the control in the top
+ * bar collapses and expands the rail by hand, and that choice then holds at
+ * every width. `mode` carries it in, and `NAV_MODE_CLASSES` is where each mode's
  * effect on a label, a heading and a row is written down. A label removed by
  * the icon rail goes `sr-only` rather than `hidden`: it stays in the accessible
  * name, so the rail is still navigable by screen reader.
@@ -157,6 +156,15 @@ const DATA: NavItem[] = [
   // applies to every item in this list. Time tracking is the live board; the
   // timesheet is the period report behind it.
   { href: "/reports/time", label: "Time tracking", icon: Clock },
+  /*
+   * Which applications were in the foreground during those shifts. Beside Time
+   * tracking because it is the same shift read a third way — the board says who
+   * was on the clock, this says where the time went — and admin-only by the
+   * same `/reports` prefix. There is deliberately no agent-facing counterpart:
+   * app usage is monitoring data, and its subject reading it back would be a
+   * different feature (see the note on `/screenshots` below).
+   */
+  { href: "/reports/app-usage", label: "App usage", icon: AppWindow },
   { href: "/reports/timesheets", label: "Timesheets", icon: ClipboardList },
   { href: "/export", label: "Export", icon: ArrowDownToLine },
   { href: "/import", label: "Import", icon: Upload },
@@ -194,14 +202,18 @@ export default function AppSidebar({
   role,
   /** Mobile only: the drawer is open. Ignored from `md` up. */
   onNavigate,
+  /**
+   * The rail's width preference. Set by the shell from the cookie; the control
+   * that changes it is in the top bar (`AppTopBar`), not in here — this
+   * component only renders the mode it is given. The phone drawer passes
+   * `expanded`, because it is 264px of deliberately-opened navigation and has
+   * no narrow form to collapse into.
+   */
   mode = "auto",
-  /** Absent in the phone drawer, which is always full width and never collapses. */
-  onToggleCollapsed,
 }: {
   role: Role;
   onNavigate?: () => void;
   mode?: NavMode;
-  onToggleCollapsed?: () => void;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -385,11 +397,11 @@ export default function AppSidebar({
       </nav>
 
       {/* --- footer ------------------------------------------------------ */}
-      {/* The collapse control lives here rather than in the nav list above,
-          because it is chrome and not a destination — a row that looks like
-          Meetings and Reports but goes nowhere is the one thing a rail this
-          legible should not contain. The version line beside it is the first
-          thing to go when there is no room for it. */}
+      {/* Chrome, not a destination. The collapse control used to live here and
+          now sits in the top bar (`AppTopBar`), where it is beside the drawer
+          button it replaces below `md` and does not need the rail scrolled to
+          the bottom to be reached. One control rather than two, so there is no
+          second one to disagree with it. The version line is what is left. */}
       <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-2.5">
         <p className={`flex min-w-0 items-center gap-2 text-meta text-fg-3 ${style.hide}`}>
           <span
@@ -400,67 +412,6 @@ export default function AppSidebar({
           <span aria-hidden="true">·</span>
           <span className="truncate">Active workspace</span>
         </p>
-
-        {onToggleCollapsed && (
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            /*
-             * Two icons and two labels rather than one of each, because in
-             * "auto" the effective state is decided by a media query and the
-             * server cannot know which side of it this browser is on. Letting
-             * CSS choose keeps the button honest at every width without a
-             * measurement that would have to happen after hydration — and in
-             * the two explicit modes only one of the pair is ever rendered.
-             */
-            aria-label={
-              mode === "collapsed"
-                ? "Expand the sidebar"
-                : mode === "expanded"
-                  ? "Collapse the sidebar"
-                  : // Left to the labels below in "auto", where which of the two
-                    // this is depends on a media query. An `aria-label` is one
-                    // string and would have to guess.
-                    undefined
-            }
-            title={
-              mode === "collapsed"
-                ? "Expand the sidebar"
-                : mode === "expanded"
-                  ? "Collapse the sidebar"
-                  : "Collapse or expand the sidebar"
-            }
-            className="ui-btn ui-btn-ghost ml-auto h-7 w-7 shrink-0 !px-0 text-fg-3 max-2xl:mx-auto"
-          >
-            {mode === "collapsed" ? (
-              <PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-            ) : mode === "expanded" ? (
-              <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-            ) : (
-              /*
-               * The accessible name comes from whichever of these two is
-               * displayed: `hidden` is `display: none`, which takes an element
-               * out of the accessible name entirely, so exactly one of them
-               * ever contributes. That is what lets one server-rendered button
-               * say the right thing on both sides of the breakpoint.
-               */
-              <>
-                <PanelLeftOpen
-                  className="h-4 w-4 2xl:hidden"
-                  strokeWidth={1.75}
-                  aria-hidden="true"
-                />
-                <span className="sr-only 2xl:hidden">Expand the sidebar</span>
-                <PanelLeftClose
-                  className="hidden h-4 w-4 2xl:block"
-                  strokeWidth={1.75}
-                  aria-hidden="true"
-                />
-                <span className="sr-only hidden 2xl:block">Collapse the sidebar</span>
-              </>
-            )}
-          </button>
-        )}
       </div>
     </div>
   );

@@ -56,8 +56,10 @@ working.
 | `POST /auth/resend` | challenge token → a fresh code |
 | `POST /auth/refresh` | refresh token → a rotated pair |
 | `POST /auth/logout` | revoke this workstation. **Not** a portal logout. |
-| `GET  /session` | identity, work-session state and the screenshot cadence. Read-only. |
+| `GET  /session` | identity, work-session state, and the screenshot, activity and app-usage policies. Read-only. |
 | `POST /screenshots` | upload one desktop capture (multipart). Rate limited. |
+| `POST /activity` | report one interval of aggregate keyboard/mouse counts (JSON). |
+| `POST /app-usage` | report one foreground application segment (JSON). |
 
 `POST /api/maintenance/screenshot-retention` is *not* in this group and is not
 reachable by a workstation — it is the box's cron deleting aged screenshots. See
@@ -83,6 +85,43 @@ check would refuse it, but because the value is never read.
 An upload is refused when the agent has no active work session (409). The
 work-session read is the only work-session code this path touches, and it
 writes nothing: uploading cannot open, extend or close a shift.
+
+## App usage
+
+`POST /api/monitor/app-usage` takes JSON — five fields, no binary:
+
+```json
+{ "processName": "chrome.exe", "applicationName": "Google Chrome",
+  "startedAt": "…", "endedAt": "…", "clientKey": "an idempotency token" }
+```
+
+**Nothing identifying is taken from the request**, exactly as for a screenshot:
+`userId` comes from the authenticated device, `workSessionId` from the portal's
+own `getActiveWorkSession`, `monitorDeviceId` from the credential itself, and
+`durationSeconds` from the two timestamps. There is no field an agent could set
+to file usage against another account or another shift.
+
+**What is never stored**: window titles, URLs, document names, keystrokes, mouse
+coordinates. Two labels and a window, and there is nowhere in `app_usage` for
+anything else to go. A `processName` arrives as a path and is reduced to its
+executable (`chrome.exe`, never `C:\Users\…`); an `applicationName` that looks
+like a URL is refused rather than truncated.
+
+**No application is classified.** There is no productive/unproductive split
+anywhere in the feature, and nothing here feeds the productivity score.
+
+A submission is refused when the agent has no active work session (409) — and no
+shift is created to receive it. A segment shorter than 5s, longer than 4h,
+ending more than 15 minutes from the server's clock, or starting before the
+shift is refused rather than clamped (422). Retries are safe: `client_key` is
+unique, so a resend answers `200 {duplicate: true}` with the stored row and a
+first delivery answers `201`. A key already used by **another account** is a 409
+`client_key_conflict` rather than a duplicate — telling workstation B that
+workstation A's segment is "already stored" would let B believe its own data
+landed when it never did.
+
+The read side is admin-only (`/reports/app-usage`) and is not reachable from a
+workstation. No agent may read app usage, including their own.
 
 ## The cadence, and who decides it
 

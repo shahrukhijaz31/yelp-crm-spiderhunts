@@ -1,13 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Menu } from "lucide-react";
+import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import SessionTimer from "./SessionTimer";
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
 import { usePortalStats } from "./PortalStatsProvider";
 import type { SessionUser } from "@/lib/access";
+import { type NavMode } from "@/lib/navPreference";
 
 /**
  * The top bar: where you are on the left, the state of the workspace on the
@@ -33,6 +34,9 @@ const TITLES: Array<[string, string]> = [
   // of this one. The two are different screens: Reports is the state of the
   // lead list, this is the state of the people working it.
   ["/reports/team", "Team performance"],
+  // Before `/reports` for the same reason Team performance is: the first match
+  // wins, and `/reports` is a prefix of this one.
+  ["/reports/app-usage", "App usage"],
   ["/reports", "Reports"],
   ["/my-performance", "My performance"],
   ["/export", "Export"],
@@ -45,6 +49,17 @@ const TITLES: Array<[string, string]> = [
   ["/", "Leads workspace"],
 ];
 
+/**
+ * Which half of the "auto" toggle is on screen, as whole literal strings.
+ *
+ * `2xl:` is the breakpoint `NAV_LABEL_MIN_WIDTH` names, and the pair matches
+ * `NAV_MODE_CLASSES.auto` in `lib/navPreference.ts` — above it the rail shows
+ * labels and the button offers to collapse, below it the reverse. Written out
+ * rather than assembled, because Tailwind finds classes by scanning source text.
+ */
+const RAIL_COLLAPSED_AT_THIS_WIDTH = "2xl:hidden";
+const RAIL_EXPANDED_AT_THIS_WIDTH = "2xl:block";
+
 function titleFor(pathname: string): string {
   const match = TITLES.find(([prefix]) =>
     prefix === "/" ? pathname === "/" : pathname.startsWith(prefix),
@@ -55,12 +70,18 @@ function titleFor(pathname: string): string {
 export default function AppTopBar({
   today,
   user,
+  navMode = "auto",
   onOpenNav,
+  onToggleNav,
 }: {
   today: string;
   user: SessionUser;
+  /** The rail's current width preference, for labelling the toggle. */
+  navMode?: NavMode;
   /** Opens the off-canvas sidebar. Below `md` only. */
   onOpenNav: () => void;
+  /** Collapses or expands the rail, and remembers it. From `md` up. */
+  onToggleNav?: () => void;
 }) {
   const pathname = usePathname();
   // The shell's counts, not the current screen's: seeded by the layout from a
@@ -78,6 +99,62 @@ export default function AppTopBar({
       >
         <Menu className="h-[18px] w-[18px]" strokeWidth={1.75} aria-hidden="true" />
       </button>
+
+      {/*
+       * Collapse or expand the rail. From `md` up only — below that the rail is
+       * off-canvas and the button beside this one already opens it, so a second
+       * control for a width nothing has would do nothing visible.
+       *
+       * Two icons and two labels in "auto" rather than one of each, because in
+       * that mode the effective state is decided by a media query and the server
+       * cannot know which side of it this browser is on. `hidden` is
+       * `display: none`, which takes an element out of the accessible name
+       * entirely, so exactly one of the pair ever contributes — which is what
+       * lets one server-rendered button say the right thing at both widths
+       * without a measurement after hydration.
+       */}
+      {onToggleNav && (
+        <button
+          type="button"
+          onClick={onToggleNav}
+          aria-label={
+            navMode === "collapsed"
+              ? "Expand the sidebar"
+              : navMode === "expanded"
+                ? "Collapse the sidebar"
+                : undefined
+          }
+          title={
+            navMode === "collapsed"
+              ? "Expand the sidebar"
+              : navMode === "expanded"
+                ? "Collapse the sidebar"
+                : "Collapse or expand the sidebar"
+          }
+          className="ui-btn ui-btn-ghost -ml-1 hidden h-8 w-8 !px-0 text-fg-3 md:inline-flex"
+        >
+          {navMode === "collapsed" ? (
+            <PanelLeftOpen className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          ) : navMode === "expanded" ? (
+            <PanelLeftClose className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          ) : (
+            <>
+              <PanelLeftOpen
+                className={`h-4 w-4 ${RAIL_COLLAPSED_AT_THIS_WIDTH}`}
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              <span className={`sr-only ${RAIL_COLLAPSED_AT_THIS_WIDTH}`}>Expand the sidebar</span>
+              <PanelLeftClose
+                className={`hidden h-4 w-4 ${RAIL_EXPANDED_AT_THIS_WIDTH}`}
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              <span className={`sr-only hidden ${RAIL_EXPANDED_AT_THIS_WIDTH}`}>Collapse the sidebar</span>
+            </>
+          )}
+        </button>
+      )}
 
       <h1 className="min-w-0 truncate text-ui font-semibold tracking-[-0.015em] text-fg">
         {titleFor(pathname)}

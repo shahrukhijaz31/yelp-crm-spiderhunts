@@ -1,4 +1,5 @@
 import { activityPolicy } from "@/lib/activityPolicy";
+import { MAX_SEGMENT_SECONDS, MIN_SEGMENT_SECONDS } from "@/lib/appUsageRules";
 import { monitorUser } from "@/lib/monitorAuth";
 import { capturePolicy } from "@/lib/screenshotPolicy";
 import { getActiveWorkSession, getWorkClock } from "@/lib/workSessions";
@@ -136,6 +137,25 @@ export async function GET(request: Request): Promise<Response> {
         intervalSeconds: activity.intervalSeconds,
         idleThresholdSeconds: activity.idleThresholdSeconds,
         expectedEventsPerMinute: activity.expectedEventsPerMinute,
+      },
+      /**
+       * The bounds a foreground segment must satisfy to be accepted, in
+       * seconds, so a workstation can merge or drop segments locally rather
+       * than discovering the limits one 422 at a time.
+       *
+       * Constants rather than configuration (`lib/appUsageRules.ts`): unlike
+       * the screenshot cadence and the activity interval there is nothing here
+       * an administrator would want to tune — these are the bounds of a
+       * believable segment, not a policy about how often to look.
+       *
+       * Nothing about the *content* of a segment is negotiated here. The client
+       * decides which application is in the foreground; the server decides
+       * whether the window it reports is possible, and stores no window title,
+       * URL or document name whatever the client sends.
+       */
+      appUsagePolicy: {
+        minSegmentSeconds: MIN_SEGMENT_SECONDS,
+        maxSegmentSeconds: MAX_SEGMENT_SECONDS,
       },
       /** For clock-skew correction on a workstation whose time is wrong. */
       serverNow: clock.serverNow,

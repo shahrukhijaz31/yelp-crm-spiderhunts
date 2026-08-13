@@ -20,7 +20,8 @@
     "test:screenshots": "tsx scripts/test-screenshots.ts",
     "test:screenshot-viewer": "tsx scripts/test-screenshot-viewer.ts",
     "test:screenshot-delete": "tsx scripts/test-screenshot-deletion.ts",
-    "test:productivity": "tsx scripts/test-productivity.ts"
+    "test:productivity": "tsx scripts/test-productivity.ts",
+    "test:app-usage": "tsx scripts/test-app-usage.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
