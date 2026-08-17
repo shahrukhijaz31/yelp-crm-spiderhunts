@@ -34,7 +34,7 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const auth = await apiAdmin();
+  const auth = await apiAdmin(request);
   if (auth instanceof Response) return auth;
 
   let body: unknown;

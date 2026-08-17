@@ -168,7 +168,28 @@ function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
       break;
   }
 
-  // --- free text ---
+  /* --- free text ---
+   *
+   * The one clause here that cannot use an index. `LIKE '%…%'` over an
+   * expression is a sequential scan by construction, and no btree index helps a
+   * leading wildcard.
+   *
+   * WHY THERE IS NO TRIGRAM INDEX. It was considered and deliberately not added.
+   * A `pg_trgm` GIN index would have to be on the *expressions* — the four-column
+   * `lower(… || ' ' || …)` concatenation and the digits-only `regexp_replace` —
+   * because that is what the predicate compares, and two expression indexes
+   * bring a `CREATE EXTENSION`, an insert cost on every scraper push, and a
+   * second definition of the search that has to stay byte-identical to the one
+   * above or it is silently not used. Against a table of a few thousand rows
+   * (~1,700 in production today) a scan of this shape is single-digit
+   * milliseconds, so all of that would buy nothing measurable.
+   *
+   * What the cost of a search is bounded by instead: the 200-character cap on
+   * the needle (`lib/leadQuery.ts`) and the per-user rate limit on searching at
+   * all (`lib/rateLimit.ts`). Revisit the index when the table reaches a size
+   * where an `EXPLAIN ANALYZE` of this query is worth the two extra definitions,
+   * not before.
+   */
   const needle = filters.query.trim().toLowerCase();
   if (needle) {
     // The same four fields `matchesQuery` joins, concatenated in the same order

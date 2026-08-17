@@ -1,6 +1,7 @@
 import { apiAdmin } from "@/lib/authz";
 import { listLeads, mergeLeads } from "@/lib/leadDb";
 import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
+import { LEAD_IMPORT_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
 
 /**
  * POST /api/leads/upload — import a CSV into Postgres.
@@ -88,8 +89,18 @@ async function readCsv(
 export async function POST(request: Request): Promise<Response> {
   // Before the body is read, so an agent's 8MB upload is refused rather than
   // parsed and then thrown away.
-  const auth = await apiAdmin();
+  const auth = await apiAdmin(request);
   if (auth instanceof Response) return auth;
+
+  /*
+   * Also before the body is read, and for the same reason the authorization
+   * check is: an import parses and merges up to 8MB inside one request, so a
+   * refusal that arrives after the parse has already cost the thing it was
+   * refusing. The 8MB cap below is unchanged — that bounds one import, this
+   * bounds how many of them arrive.
+   */
+  const limited = await rateLimitRefusal(LEAD_IMPORT_LIMIT, auth.id);
+  if (limited) return limited;
 
   const read = await readCsv(request);
   if (read instanceof Response) return read;

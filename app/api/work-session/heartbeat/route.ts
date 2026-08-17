@@ -22,8 +22,8 @@ import { getWorkClock, heartbeatWorkSession } from "@/lib/workSessions";
  *
  * POST rather than GET: it writes, and a GET that writes gets prefetched.
  */
-export async function POST(): Promise<Response> {
-  const auth = await apiUser();
+export async function POST(request: Request): Promise<Response> {
+  const auth = await apiUser(request);
   if (auth instanceof Response) return auth;
 
   try {

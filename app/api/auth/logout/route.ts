@@ -1,4 +1,5 @@
 import { LOGIN_PATH } from "@/lib/access";
+import { csrfRefusal } from "@/lib/csrf";
 import { destroySession, getSessionUser } from "@/lib/session";
 import { endWorkSessionForLogout } from "@/lib/workSessions";
 
@@ -12,7 +13,10 @@ import { endWorkSessionForLogout } from "@/lib/workSessions";
  * reachable with the old cookie — there is no session left to reach it with.
  *
  * POST, not GET: a logout on GET can be triggered by an `<img>` tag on any
- * other site, which is a nuisance attack that costs nothing to close.
+ * other site, which is a nuisance attack that costs nothing to close. A
+ * cross-site POST closes the same nuisance from the other side (`lib/csrf.ts`)
+ * — this route has no `apiUser()` guard to carry that check for it, because
+ * signing out must work whether or not the session is still valid.
  *
  * Always 200, even with no session to destroy. Signing out is idempotent and
  * "you were not signed in" is not an error worth showing anyone.
@@ -35,7 +39,10 @@ import { endWorkSessionForLogout } from "@/lib/workSessions";
  * by a database hiccup is closed by the next reconciliation sweep at its last
  * heartbeat.
  */
-export async function POST(): Promise<Response> {
+export async function POST(request: Request): Promise<Response> {
+  const crossSite = csrfRefusal(request);
+  if (crossSite) return crossSite;
+
   const user = await getSessionUser().catch(() => null);
 
   await destroySession();

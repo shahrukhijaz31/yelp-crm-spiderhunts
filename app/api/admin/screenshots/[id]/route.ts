@@ -49,10 +49,10 @@ import { deleteScreenshotById, isScreenshotId } from "@/lib/screenshotDeletion";
  * carries who deleted what, never a path or a storage key.
  */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiAdmin();
+  const auth = await apiAdmin(request);
   if (auth instanceof Response) return auth;
 
   const { id } = await params;

@@ -2,6 +2,7 @@ import { apiUser } from "@/lib/authz";
 import { leadCategories, leadStats, leadWorkCounts, listLeadsPage } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
+import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
 
 /**
  * GET /api/leads — one page of the worklist.
@@ -59,6 +60,29 @@ export async function GET(request: Request): Promise<Response> {
   const query = parseLeadSearchParams(url.searchParams, todayIso());
   const wantCategories = url.searchParams.get("categories") === "1";
   const wantRows = url.searchParams.get("rows") !== "0";
+
+  /*
+   * Only a *search* is counted, and only when rows are being returned.
+   *
+   * The free-text term is the expensive part of this query: it is the one
+   * clause that cannot use an index, because it is a `LIKE '%…%'` over four
+   * concatenated columns (see `leadFilterSql`). A tab change or a page turn
+   * costs an indexed read and is left alone, as is the `?rows=0` counts-only
+   * request the worklist fires whenever its tab regains focus — throttling that
+   * would break a refresh nobody asked for.
+   *
+   * The 200-character cap on the term itself is unchanged and still applied in
+   * `parseLeadSearchParams`, before the value reaches SQL. This is the second
+   * half of the same idea: that one bounds the cost of a single search, this
+   * one bounds how many of them one account can ask for.
+   *
+   * Counted against the session's user id, which `apiUser()` resolved from the
+   * session row in Postgres. Nothing in the request names the bucket.
+   */
+  if (wantRows && query.filters.query.trim() !== "") {
+    const limited = await rateLimitRefusal(LEAD_SEARCH_LIMIT, auth.id);
+    if (limited) return limited;
+  }
 
   try {
     // `workCounts` rides along with `stats` — including on the `?rows=0`

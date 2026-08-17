@@ -1149,3 +1149,36 @@ model Session {
   @@index([expiresAt])
   @@map("sessions")
 }
+
+/// One counter for one caller doing one expensive thing, in one time window.
+///
+/// The state behind `lib/rateLimit.ts`, which brakes the authenticated
+/// endpoints that cost the server real work: lead search, the export screen's
+/// whole-table read, CSV import and bulk screenshot deletion. Those are all
+/// behind a session, so the caller is a known account rather than an address —
+/// the key is `<action>:<user id>` and the limit is per person.
+///
+/// In Postgres rather than in a `Map`, for the reason `lib/screenshotRateLimit.ts`
+/// gives at length: this app runs two PM2 workers and two blue/green slots, so
+/// an in-process counter would hand each caller as many windows as there are
+/// workers and lose them all on a deploy. One row, one conditional upsert, no
+/// lock — see the SQL in that module.
+///
+/// Nothing here is user data and nothing is retained: a row is a key, a count
+/// and the instant its window opened. The key set is bounded by (number of
+/// accounts x number of limited actions), so it does not grow with traffic and
+/// needs no sweep.
+model RateLimit {
+  /// `<action>:<user id>`. Composed server-side from the session — a client
+  /// cannot name a bucket, which would be a way to be counted as somebody else.
+  key String @id
+
+  /// When the current window opened. Written from the *database* clock, so two
+  /// workers with drifting system time still agree.
+  windowStartedAt DateTime @map("window_started_at")
+
+  /// Requests counted in the current window, including the one being decided.
+  count Int
+
+  @@map("rate_limits")
+}

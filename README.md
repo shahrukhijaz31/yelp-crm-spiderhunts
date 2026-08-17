@@ -111,9 +111,42 @@ merely dropped by the browser.
 
 | Layer | Does | Trusts |
 | --- | --- | --- |
-| `proxy.ts` | redirects requests with no session cookie; sets `Cache-Control: no-store` | nothing — a cookie's *presence* only |
+| `proxy.ts` | redirects requests with no session cookie; refuses cross-site state changes; sets `Cache-Control: no-store` | nothing — a cookie's *presence* only |
 | `lib/authz.ts` | the real check, inside every protected page and route handler | the `sessions` + `users` rows |
 | `NavBar` | hides tabs a role cannot use | nothing; it is tidiness |
+
+**Cross-site requests.** `SameSite=Lax` is not the only defence any more.
+`POST`/`PUT`/`PATCH`/`DELETE` requests that carry the session cookie must also
+come from this origin: `Sec-Fetch-Site` must be `same-origin` if the browser
+sent it, and `Origin` must match the request's `Host` (or one of `APP_ORIGIN`)
+if it did. The rule is in `lib/csrf.ts` and is applied by both `proxy.ts` and
+the `apiUser`/`apiRole` guards, so a new route inherits it whether or not its
+author remembers. Deliberate exemptions: the bearer-token `/api/monitor/*`
+routes and `/api/leads/ingest`, which are not browsers, attach no cookie
+automatically, and send no `Origin` at all. A caller with neither header is
+allowed for the same reason — it is not a browser, and CSRF is a browser attack.
+
+**The client address.** `clientIp()` in `lib/loginThrottle.ts` reads
+`X-Real-IP`, or the **rightmost trusted hop** of `X-Forwarded-For` — never the
+leftmost, which nginx's `$proxy_add_x_forwarded_for` leaves as whatever the
+caller typed. `TRUSTED_PROXY_HOPS` says how many proxies are in front (1 in
+production, 0 in development, where nothing is). This is what the per-IP login
+throttle counts and what `sessions.ip_address` records, so both are the address
+our own proxy observed rather than one a caller chose.
+
+**Security headers** are set by the application in `next.config.ts` — CSP,
+`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+`Permissions-Policy`, `Cross-Origin-Opener-Policy` — so they survive a change of
+proxy and cover `/_next/static/*`, which the nginx vhost had been serving with
+no headers at all (`add_header` replaces the inherited set per block; that block
+now repeats it too). `Strict-Transport-Security` is deliberately *not* here: TLS
+terminates at nginx, which keeps it.
+
+**Rate limits on expensive authenticated work** — lead search, the export
+screen's whole-table read, CSV import and bulk screenshot deletion — are counted
+per user id in the `rate_limits` table (`lib/rateLimit.ts`), so the limit holds
+across both PM2 workers and both blue/green slots. They are set where normal
+work never meets them: see the numbers and the reasoning in that file.
 
 **Who can do what** — the list lives in `lib/access.ts` and is read by all
 three layers:
@@ -215,9 +248,12 @@ lib/
   access.ts                   the access policy: cookie name, public/admin paths, callbackUrl
   session.ts                  create/verify/destroy sessions against Postgres
   authz.ts                    requireUser / requireRole / apiUser / apiAdmin
+  csrf.ts                     the cross-site rule for state-changing requests
   password.ts                 scrypt hashing, on node:crypto alone
   userDb.ts                   every users query; passwordHash never leaves login
-  loginThrottle.ts            per-account and per-IP brake on password guessing
+  loginThrottle.ts            per-account and per-IP brake on password guessing;
+                              also `clientIp()` — the trusted-hop address
+  rateLimit.ts                per-user brake on the expensive authenticated endpoints
   prisma.ts                   Prisma Client singleton (survives dev hot reload)
   leadMapping.ts              database row <-> Lead; pure, no client
   leadDb.ts                   every query, plus PATCH body validation
@@ -294,6 +330,8 @@ scraper CSV has no agent-owned fields, so seeding from it leaves every lead on
 | `npm run db:studio` | browse the table in Prisma Studio |
 | `npm run user:create` | create a user (`-- --name … --username … --email … --role ADMIN`) |
 | `npm run test:recordings` | end-to-end check of the call-recording feature against a running server |
+| `npm run test:security-offline` | the security fixes that are pure functions: trusted-hop client IP, export formula neutralisation, the cross-site rule. No server needed |
+| `npm run test:security-live` | the same fixes end to end against a running server: the login throttle under a spoofed `X-Forwarded-For`, `sessions.ip_address`, cross-site vs same-origin, security headers on pages and `/_next/static/*`, the authenticated rate limits |
 
 `prisma generate` runs on `postinstall` and again at the start of `npm run
 build`, so a fresh clone or a schema change never needs it typed by hand. The

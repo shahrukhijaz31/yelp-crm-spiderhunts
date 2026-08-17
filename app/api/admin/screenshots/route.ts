@@ -1,4 +1,5 @@
 import { apiAdmin } from "@/lib/authz";
+import { rateLimitRefusal, SCREENSHOT_BULK_DELETE_LIMIT } from "@/lib/rateLimit";
 import {
   deleteScreenshots,
   isScreenshotId,
@@ -46,8 +47,17 @@ import {
  * which is identical.
  */
 export async function DELETE(request: Request): Promise<Response> {
-  const auth = await apiAdmin();
+  const auth = await apiAdmin(request);
   if (auth instanceof Response) return auth;
+
+  /*
+   * One call can destroy 500 rows and 500 files, and that ceiling is unchanged
+   * below. What this adds is a ceiling on how many such calls arrive: 20 in
+   * five minutes still clears ten thousand screenshots, so a genuine purge is
+   * not obstructed, while a loop pointed at this endpoint is.
+   */
+  const limited = await rateLimitRefusal(SCREENSHOT_BULK_DELETE_LIMIT, auth.id);
+  if (limited) return limited;
 
   let body: unknown;
   try {

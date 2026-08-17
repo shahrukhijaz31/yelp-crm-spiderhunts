@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { LOGIN_PATH, type Role, type SessionUser } from "./access";
+import { csrfRefusal } from "./csrf";
 import { getSessionUser } from "./session";
 
 /**
@@ -25,6 +26,20 @@ import { getSessionUser } from "./session";
  *              route handler. Removing the proxy would change nothing about
  *              who can read what.
  *   the nav    hides tabs a role cannot use. Tidiness, not security.
+ *
+ * ---------------------------------------------------------------------------
+ * Cross-site requests
+ * ---------------------------------------------------------------------------
+ * `apiUser`, `apiRole` and `apiAdmin` take the `Request` and, when the method
+ * changes something, refuse it unless it came from this origin (`lib/csrf.ts`).
+ * That check belongs here rather than in each handler for the same reason the
+ * role check does: a guard everybody already calls cannot be the one somebody
+ * forgets. `proxy.ts` performs the identical check first, so the two are belt
+ * and braces over one shared rule and neither is load-bearing alone.
+ *
+ * The argument is optional so that a read-only handler that never had a
+ * `Request` in scope does not have to grow one. Passing it costs nothing on a
+ * GET — the check returns immediately for safe methods.
  */
 
 /**
@@ -99,24 +114,41 @@ export function forbiddenJson(): Response {
  * Returns either the user or the Response to send back, so every handler opens
  * with the same three lines and cannot accidentally continue after a failure:
  *
- *   const auth = await apiUser();
+ *   const auth = await apiUser(request);
  *   if (auth instanceof Response) return auth;
  *   // auth is the SessionUser from here on
+ *
+ * Pass the request on any handler that changes something; see the cross-site
+ * note at the top of this file.
  */
-export async function apiUser(): Promise<SessionUser | Response> {
+export async function apiUser(request?: Request): Promise<SessionUser | Response> {
   const user = await getSessionUser();
-  return user ?? unauthorizedJson();
+  if (!user) return unauthorizedJson();
+
+  // After the session, not before: a signed-out caller should be told they are
+  // signed out, and an unauthenticated cross-site POST has nothing to steal.
+  const crossSite = request ? csrfRefusal(request) : null;
+  if (crossSite) return crossSite;
+
+  return user;
 }
 
 /** Guard for an ADMIN-only route handler. 401 when signed out, 403 when an agent. */
-export async function apiRole(allowedRoles: Role | Role[]): Promise<SessionUser | Response> {
+export async function apiRole(
+  allowedRoles: Role | Role[],
+  request?: Request,
+): Promise<SessionUser | Response> {
   const user = await getSessionUser();
   if (!user) return unauthorizedJson();
 
   const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
   if (!roles.includes(user.role)) return forbiddenJson();
 
+  const crossSite = request ? csrfRefusal(request) : null;
+  if (crossSite) return crossSite;
+
   return user;
 }
 
-export const apiAdmin = (): Promise<SessionUser | Response> => apiRole("ADMIN");
+export const apiAdmin = (request?: Request): Promise<SessionUser | Response> =>
+  apiRole("ADMIN", request);

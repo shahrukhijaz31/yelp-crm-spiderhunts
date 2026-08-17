@@ -29,7 +29,7 @@ import { changeOwnPassword, UserInputError } from "@/lib/userDb";
  * ("your current password is not correct"), never the value.
  */
 export async function POST(request: Request): Promise<Response> {
-  const auth = await apiUser();
+  const auth = await apiUser(request);
   if (auth instanceof Response) return auth;
 
   let body: unknown;

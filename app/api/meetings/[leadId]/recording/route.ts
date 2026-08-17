@@ -81,7 +81,7 @@ export async function POST(
   request: Request,
   context: RouteContext<"/api/meetings/[leadId]/recording">,
 ): Promise<Response> {
-  const auth = await apiUser();
+  const auth = await apiUser(request);
   if (auth instanceof Response) return auth;
 
   const { leadId } = await context.params;
@@ -151,10 +151,10 @@ export async function POST(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   context: RouteContext<"/api/meetings/[leadId]/recording">,
 ): Promise<Response> {
-  const auth = await apiUser();
+  const auth = await apiUser(request);
   if (auth instanceof Response) return auth;
 
   const { leadId } = await context.params;

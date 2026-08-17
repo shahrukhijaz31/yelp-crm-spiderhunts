@@ -85,7 +85,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiUser();
+  const auth = await apiUser(request);
   if (auth instanceof Response) return auth;
 
   const { id } = await params;
