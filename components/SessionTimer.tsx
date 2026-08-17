@@ -1,7 +1,7 @@
 "use client";
 
 import { useWorkSession } from "./WorkSessionProvider";
-import { formatWorkClock } from "@/lib/performanceRules";
+import { formatWorkClockLong } from "@/lib/performanceRules";
 
 /**
  * Today's work time, in the top bar.
@@ -18,7 +18,17 @@ import { formatWorkClock } from "@/lib/performanceRules";
  * checked occasionally and overwhelmingly at one moment: when somebody is about
  * to sign out. That is in `UserMenu`, directly above the Sign out item, where
  * it is in front of you exactly when it matters and out of the way the rest of
- * the time. `/my-performance` still shows both in full, with seconds.
+ * the time. `/my-performance` still shows both in full.
+ *
+ * **Seconds are shown here too.** The provider already samples the wall clock
+ * once a second, so this costs nothing but two more digits; the earlier
+ * minute-resolution version was a judgement about attention that the people
+ * reading it did not share. `tnum` below is what keeps a per-second readout
+ * from being a nuisance — the digits change without the row moving.
+ *
+ * **Agents only**, and `AppTopBar` is where that is decided rather than here:
+ * an administrator's own shift is not tracked or reported anywhere, so the
+ * clock would be decoration on their screen.
  *
  * The dot is the only piece of colour: it says the clock is running, which is
  * genuinely state rather than data. Nothing here is rendered in the accent —
@@ -39,13 +49,13 @@ export default function SessionTimer() {
   return (
     <p
       className="hidden items-center gap-1.5 text-caption text-fg-3 md:flex"
-      title={`${formatWorkClock(todayTotalSeconds)} worked today, across every session`}
+      title={`${formatWorkClockLong(todayTotalSeconds)} worked today, across every session`}
     >
       {/* The accessible name carries the meaning once. The digits are
-          `aria-hidden` so a screen reader is not read a new clock every minute
+          `aria-hidden` so a screen reader is not read a new clock every second
           by the live region this would otherwise become. */}
       <span className="sr-only">
-        Today&rsquo;s work time so far, {formatWorkClock(todayTotalSeconds)}.
+        Today&rsquo;s work time so far, {formatWorkClockLong(todayTotalSeconds)}.
       </span>
 
       <span aria-hidden="true" className="relative flex h-1.5 w-1.5 shrink-0">
@@ -58,7 +68,7 @@ export default function SessionTimer() {
       </span>
 
       <span aria-hidden="true" className="tnum font-mono font-medium text-fg-2">
-        {formatWorkClock(todayTotalSeconds)}
+        {formatWorkClockLong(todayTotalSeconds)}
       </span>
       <span aria-hidden="true" className="text-fg-4">today</span>
     </p>
