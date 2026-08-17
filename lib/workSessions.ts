@@ -35,13 +35,13 @@ import { prisma } from "./prisma";
  *
  * **The browser that never says goodbye.** Nothing waits for the logout button.
  * An open portal tab heartbeats every {@link HEARTBEAT_SECONDS}; a session
- * whose heartbeat has stopped for {@link STALE_MS} is *stale*, and is closed at
- * its own `lastSeenAt` rather than at the moment somebody noticed. A closed
- * laptop therefore costs at most one grace window of over-count, and never a
- * clock that runs forever. Stale sessions are swept at login (this app has no
- * cron — see `pruneExpiredSessions` for the same reasoning) and, so that a
- * report is never wrong while waiting for someone to sign in, are *also*
- * clamped on read by {@link OPEN_SESSION_END_SQL}.
+ * whose *liveness* has stopped for {@link STALE_MS} is *stale*, and is closed
+ * at the instant it was last seen alive rather than at the moment somebody
+ * noticed. A closed laptop therefore costs at most one grace window of
+ * over-count, and never a clock that runs forever. Stale sessions are swept at
+ * login (this app has no cron — see `pruneExpiredSessions` for the same
+ * reasoning) and, so that a report is never wrong while waiting for someone to
+ * sign in, are *also* clamped on read by {@link OPEN_SESSION_END_SQL}.
  *
  * **Logging out of one device while working on another.** Logout closes the
  * shift only when the person has no other live authentication session left
@@ -49,15 +49,53 @@ import { prisma } from "./prisma";
  * the clock on the desk they are still sitting at.
  *
  * ---------------------------------------------------------------------------
+ * Two liveness signals, and why there has to be more than one
+ * ---------------------------------------------------------------------------
+ * **Portal visibility is not the definition of working.** It used to be the
+ * only thing this file measured, and that was a bug with teeth: an agent who
+ * minimised the portal to work in Chrome, Excel or anything else stopped
+ * beating, went stale five minutes later, and had their shift closed underneath
+ * them — which in turn told the SpiderHunts Monitor to stop capturing
+ * screenshots, activity and app usage on its next poll. The portal was
+ * measuring "is this tab in front", and reporting it as "is this person at
+ * work".
+ *
+ * So a shift now has two independent liveness signals, and stays open while
+ * *either* is beating:
+ *
+ *   lastSeenAt         an open portal tab, once per {@link HEARTBEAT_SECONDS}.
+ *                      Portal presence. Written by the browser heartbeat.
+ *   lastMonitorSeenAt  an authenticated, unrevoked SpiderHunts Monitor device
+ *                      belonging to this agent made a request while this shift
+ *                      was open. Desktop-monitoring liveness. Written by
+ *                      {@link touchMonitorLiveness}, from `getDeviceContext`.
+ *
+ * {@link livenessAt} is the one place the two are combined, and
+ * {@link SESSION_LIVE_AT_SQL} is the same expression for the read path. Every
+ * staleness decision in this file — resume, read, sweep, and the clamp the
+ * reports apply — goes through one of those two and therefore cannot drift into
+ * disagreeing.
+ *
+ * What this deliberately is **not**: a longer grace window. {@link STALE_MS} is
+ * unchanged at five beats. A workstation whose Monitor has died and whose
+ * browser has gone quiet is stale on exactly the old schedule, and is closed at
+ * the last instant either signal was seen — never at "now", so nothing is
+ * credited for the silence. Both signals go quiet, the shift ends, and the
+ * Monitor is told it is off the clock on its next poll.
+ *
+ * What this is also not: a way for the Monitor to *start* a shift.
+ * {@link touchMonitorLiveness} can only update a row that is already open and
+ * already live; it creates nothing and it cannot revive a shift that has
+ * already gone stale. The portal still decides when work begins and ends.
+ *
+ * ---------------------------------------------------------------------------
  * Active time vs login time
  * ---------------------------------------------------------------------------
- * Today the heartbeat means "the portal is open in a browser", so a duration
- * here is *authenticated session time*, which is what was asked for. Real
- * idle detection would change what the heartbeat is sent *on* — the client
- * stops beating after N minutes without input — and would change neither this
- * file's queries nor the table. That is the whole reason the beat is a write to
- * `lastSeenAt` rather than a timer in React: the definition of "active" lives
- * on one side of one HTTP call.
+ * A duration here is *presence* — the portal or the workstation was in touch —
+ * which is what was asked for. Real idle detection is a separate question and
+ * already has its own answer: `activity_intervals` describes what happened
+ * inside a shift, and `lib/timeTracking.ts` is careful never to let it redefine
+ * the shift itself.
  */
 
 /*
@@ -104,19 +142,38 @@ export function utc(date: Date): Prisma.Sql {
 }
 
 /**
+ * The instant a session was last known to be alive, as SQL — the read path's
+ * copy of {@link livenessAt}.
+ *
+ * `greatest(portal heartbeat, monitor heartbeat)`, with the monitor column
+ * folded onto the portal one when it is null so `greatest` never sees a NULL
+ * (in Postgres `greatest` ignores NULLs, but `coalesce` says so out loud and
+ * survives somebody adding a third signal later). Every report that clamps an
+ * open session reads this, so no figure anywhere in the portal can be built on
+ * "the tab was in front" alone.
+ *
+ * Requires the sessions table to be aliased `ws`, as every caller already does.
+ */
+export const SESSION_LIVE_AT_SQL = Prisma.sql`greatest(ws.last_seen_at, coalesce(ws.last_monitor_seen_at, ws.last_seen_at))`;
+
+/**
  * When an *open* session should be treated as having ended, as SQL.
  *
- * `least(now, last_seen_at + grace)` — a live session ends "now" (its clock is
- * still running), and a dead one ended one grace window after its last
- * heartbeat. This is what stops a browser that crashed an hour ago from
- * reporting an hour of work before anybody happens to sign in and trigger the
- * sweep, and it means the figure a report shows is the same figure the sweep
- * will eventually write to `ended_at`.
+ * `least(now, last-seen-alive + grace)` — a live session ends "now" (its clock
+ * is still running), and a dead one ended one grace window after the last
+ * signal of any kind. This is what stops a browser that crashed an hour ago
+ * from reporting an hour of work before anybody happens to sign in and trigger
+ * the sweep.
+ *
+ * "Last signal of any kind" is the whole of this change on the read path: a
+ * shift whose tab has been hidden for two hours while the Monitor kept
+ * reporting is clamped to now, not to two hours ago, because
+ * {@link SESSION_LIVE_AT_SQL} has seen the Monitor.
  *
  * Kept here, next to {@link STALE_MS}, so the read path and the write path
  * cannot drift apart into two different definitions of a dead session.
  */
-export const OPEN_SESSION_END_SQL = Prisma.sql`least(${NOW_UTC_SQL}, ws.last_seen_at + interval '${Prisma.raw(String(STALE_MS / 1000))} seconds')`;
+export const OPEN_SESSION_END_SQL = Prisma.sql`least(${NOW_UTC_SQL}, ${SESSION_LIVE_AT_SQL} + interval '${Prisma.raw(String(STALE_MS / 1000))} seconds')`;
 
 /**
  * Seconds of a session that fall inside [from, to), whether it is open or
@@ -145,6 +202,36 @@ export interface ActiveWorkSession {
   id: string;
   /** ISO instant. The timer in the UI counts up from this. */
   startedAt: string;
+}
+
+/** The two columns any staleness decision needs. Selected together, always. */
+interface LivenessColumns {
+  lastSeenAt: Date;
+  lastMonitorSeenAt: Date | null;
+}
+
+/**
+ * When this shift was last known to be alive — the later of the portal
+ * heartbeat and the Monitor's, and the only definition of it in TypeScript.
+ *
+ * The counterpart of {@link SESSION_LIVE_AT_SQL}, kept beside it so the two
+ * cannot say different things. Every `staleBefore` comparison and every
+ * "close it at the last instant it was alive" in this file goes through here,
+ * which is what makes "a hidden tab does not end a monitored shift" a property
+ * of one function rather than of four call sites remembering to agree.
+ *
+ * Null `lastMonitorSeenAt` — a shift worked with no desktop client, and every
+ * shift that existed before the column did — falls back to the portal
+ * heartbeat, so the old behaviour is exactly preserved for those rows.
+ */
+function livenessAt(row: LivenessColumns): Date {
+  const monitor = row.lastMonitorSeenAt;
+  return monitor !== null && monitor > row.lastSeenAt ? monitor : row.lastSeenAt;
+}
+
+/** Is this shift still within the grace window on *either* signal? */
+function isLive(row: LivenessColumns, staleBefore: Date): boolean {
+  return livenessAt(row) > staleBefore;
 }
 
 /*
@@ -189,13 +276,14 @@ export async function openOrResumeWorkSession(
       const open = await tx.workSession.findFirst({
         where: { userId, endedAt: null },
         orderBy: { startedAt: "asc" },
-        select: { id: true, startedAt: true, lastSeenAt: true },
+        select: { id: true, startedAt: true, lastSeenAt: true, lastMonitorSeenAt: true },
       });
 
-      if (open && open.lastSeenAt > staleBefore) {
-        // Still beating — this is the same shift. Touch it so a resume from a
-        // fresh browser counts as presence straight away rather than waiting a
-        // minute for the first heartbeat.
+      if (open && isLive(open, staleBefore)) {
+        // Still beating on one signal or the other — this is the same shift,
+        // and its id does not change. Touch it so a resume from a fresh browser
+        // counts as presence straight away rather than waiting a minute for the
+        // first heartbeat.
         await tx.workSession.update({
           where: { id: open.id },
           data: { lastSeenAt: now },
@@ -204,7 +292,10 @@ export async function openOrResumeWorkSession(
       }
 
       if (open) {
-        await closeSessionTx(tx, open.id, open.startedAt, open.lastSeenAt, "timeout");
+        // Dead on both signals. Closed at the last instant *either* was seen,
+        // so a Monitor that outlived the browser is still credited for the time
+        // it was watching.
+        await closeSessionTx(tx, open.id, open.startedAt, livenessAt(open), "timeout");
       }
 
       const created = await tx.workSession.create({
@@ -231,16 +322,19 @@ export async function getActiveWorkSession(
     .findFirst({
       where: { userId, endedAt: null },
       orderBy: { startedAt: "asc" },
-      select: { id: true, startedAt: true, lastSeenAt: true },
+      select: { id: true, startedAt: true, lastSeenAt: true, lastMonitorSeenAt: true },
     })
     .catch(() => null);
 
   if (!open) return null;
 
-  // A session that has stopped beating is not "the session you are in" even
-  // though its row is still open — the sweep simply has not reached it. Saying
-  // so here keeps the timer honest between a crash and the next login.
-  if (open.lastSeenAt <= staleBefore) return null;
+  // A session that has stopped beating on *both* signals is not "the session
+  // you are in" even though its row is still open — the sweep simply has not
+  // reached it. Saying so here keeps the timer honest between a crash and the
+  // next login. A hidden tab whose Monitor is still reporting is very much the
+  // session you are in, and this is the read every part of the portal and the
+  // Monitor's own status screen goes through, so they cannot disagree.
+  if (!isLive(open, staleBefore)) return null;
 
   return { id: open.id, startedAt: open.startedAt.toISOString() };
 }
@@ -348,6 +442,85 @@ export async function heartbeatWorkSession(userId: string): Promise<WorkClock> {
 }
 
 /**
+ * How long between two writes of `lastMonitorSeenAt` for the same shift.
+ *
+ * The Monitor makes several kinds of authenticated request — a status poll, an
+ * activity interval, an app-usage segment, a screenshot — and every one of them
+ * is a liveness signal, so without a throttle a busy workstation would rewrite
+ * the same column many times a minute for no gain. One beat, matching the
+ * portal's, is a twentieth of the grace window and the same figure
+ * `lib/monitorAuth.ts` already throttles `monitor_devices.last_seen_at` with.
+ */
+const MONITOR_TOUCH_AFTER_MS = HEARTBEAT_SECONDS * 1000;
+
+/**
+ * The Monitor's heartbeat: "this agent's workstation is still being watched".
+ *
+ * Called from `getDeviceContext` in `lib/monitorAuth.ts`, so **every**
+ * authenticated Monitor request is a liveness signal and no new endpoint,
+ * credential or client change is needed. By the time this runs the bearer token
+ * has already resolved to an unrevoked device row, the account behind it has
+ * been re-read from Postgres, and `checkMonitorEligibility` has confirmed it is
+ * an enabled AGENT — so the `userId` here is derived from the credential and
+ * never from anything the client sent.
+ *
+ * ---------------------------------------------------------------------------
+ * The three things it deliberately cannot do
+ * ---------------------------------------------------------------------------
+ * **It cannot start a shift.** `updateMany` and no `create`, anywhere. A
+ * workstation left running overnight against an agent who is signed out matches
+ * no row and writes nothing, which is the property `lib/monitorAuth.ts` has
+ * always promised and this change does not spend.
+ *
+ * **It cannot revive a dead one.** The `OR` on the two liveness columns means a
+ * shift that is *already* stale is not matched. Without it, a Monitor coming
+ * back after a two-hour outage would move the column to now and silently
+ * un-close a shift that every report had already clamped — inventing two hours
+ * of work and contradicting the figure the reports had been showing all
+ * morning. It is refused, the sweep closes the shift at the instant it really
+ * died, and the agent's next portal heartbeat opens a fresh one.
+ *
+ * **It cannot touch anybody else's shift.** `userId` is the device's owner, and
+ * a device row *is* the credential — "does this device belong to this user"
+ * cannot be false. One agent's Monitor keeping another agent's shift alive is
+ * not defended against with a check, it is unrepresentable.
+ *
+ * Returns nothing and throws nothing. A missed touch costs a fraction of a
+ * grace window that is twenty beats wide, and a monitoring request must never
+ * fail because a bookkeeping write did.
+ */
+export async function touchMonitorLiveness(userId: string): Promise<void> {
+  const now = new Date();
+  const staleBefore = new Date(now.getTime() - STALE_MS);
+  const touchBefore = new Date(now.getTime() - MONITOR_TOUCH_AFTER_MS);
+
+  await prisma.workSession
+    .updateMany({
+      where: {
+        userId,
+        endedAt: null,
+        // Still live on one signal or the other. `null` here is a shift that
+        // has never seen a Monitor, which the portal heartbeat alone must be
+        // keeping alive.
+        OR: [
+          { lastSeenAt: { gt: staleBefore } },
+          { lastMonitorSeenAt: { gt: staleBefore } },
+        ],
+        // The throttle, ANDed with the above by Prisma. A shift whose column is
+        // already within a beat of now has nothing to learn from this request.
+        AND: [{ OR: [{ lastMonitorSeenAt: null }, { lastMonitorSeenAt: { lte: touchBefore } }] }],
+      },
+      // The server's clock, never the client's. A workstation with a doctored
+      // system time cannot buy itself a longer shift, for the same reason it
+      // cannot buy itself extra screenshot uploads.
+      data: { lastMonitorSeenAt: now },
+    })
+    .catch(() => {
+      // Bookkeeping. See the note above.
+    });
+}
+
+/**
  * End the shift because somebody pressed Sign out.
  *
  * **Only if this was their last browser.** `destroySession` has already deleted
@@ -358,6 +531,16 @@ export async function heartbeatWorkSession(userId: string): Promise<WorkClock> {
  *
  * Ordering matters and is the caller's responsibility: this runs *after*
  * `destroySession`, which is why the current browser is not in the count.
+ *
+ * **A connected Monitor does not save the shift here, and must not.** Signing
+ * out is an explicit statement that work has stopped, and it outranks every
+ * liveness signal: `lastMonitorSeenAt` is not consulted, the row is closed at
+ * `now`, and because everything that writes liveness matches only on
+ * `endedAt: null`, no amount of Monitor traffic can reopen it. The Monitor is
+ * told it is off the clock on its next poll, which is exactly the intended
+ * behaviour. The same is true of an administrator's manual end and of a
+ * revoked or disabled account — a revoked device cannot authenticate at all,
+ * so it never reaches {@link touchMonitorLiveness}.
  */
 export async function endWorkSessionForLogout(userId: string): Promise<void> {
   try {
@@ -370,7 +553,7 @@ export async function endWorkSessionForLogout(userId: string): Promise<void> {
 
     const open = await prisma.workSession.findMany({
       where: { userId, endedAt: null },
-      select: { id: true, startedAt: true, lastSeenAt: true },
+      select: { id: true, startedAt: true },
     });
 
     for (const session of open) {
@@ -385,22 +568,33 @@ export async function endWorkSessionForLogout(userId: string): Promise<void> {
 }
 
 /**
- * Housekeeping: close shifts whose browser stopped talking, and collapse any
- * duplicate open row.
+ * Housekeeping: close shifts that stopped talking on **both** signals, and
+ * collapse any duplicate open row.
  *
  * Called opportunistically from the login route beside `pruneExpiredSessions`,
  * for the same reason given there — this app deploys as two short-lived
  * blue/green processes, so a background interval would be an unreliable place
  * to put it. Reports do not depend on it having run: {@link OPEN_SESSION_END_SQL}
  * clamps an un-swept session to the same instant this would have written.
+ *
+ * The `lastMonitorSeenAt` half of the predicate is what makes a dead Monitor
+ * still cost a shift: silence from the desktop client is not special, it is
+ * just the other signal going quiet, and once both have the shift is swept on
+ * exactly the old schedule.
  */
 export async function reconcileStaleWorkSessions(): Promise<void> {
   try {
     const staleBefore = new Date(Date.now() - STALE_MS);
 
     const stale = await prisma.workSession.findMany({
-      where: { endedAt: null, lastSeenAt: { lte: staleBefore } },
-      select: { id: true, startedAt: true, lastSeenAt: true },
+      where: {
+        endedAt: null,
+        lastSeenAt: { lte: staleBefore },
+        // Null is "never seen by a Monitor" and cannot keep anything alive.
+        // Both conditions are ANDed, so one live signal is enough to be spared.
+        OR: [{ lastMonitorSeenAt: null }, { lastMonitorSeenAt: { lte: staleBefore } }],
+      },
+      select: { id: true, startedAt: true, lastSeenAt: true, lastMonitorSeenAt: true },
       // Bounded: a sweep is a courtesy on somebody's login request, not a job.
       // Whatever it misses is caught by the next one, and is correct on read
       // in the meantime.
@@ -408,7 +602,9 @@ export async function reconcileStaleWorkSessions(): Promise<void> {
     });
 
     for (const session of stale) {
-      await closeSessionTx(prisma, session.id, session.startedAt, session.lastSeenAt, "timeout");
+      // Closed at the later of the two, so a shift whose browser died at 09:15
+      // and whose Monitor kept reporting until 11:00 is credited to 11:00.
+      await closeSessionTx(prisma, session.id, session.startedAt, livenessAt(session), "timeout");
     }
 
     await collapseDuplicateOpenSessions();
@@ -428,24 +624,24 @@ export async function reconcileStaleWorkSessions(): Promise<void> {
  * time is counted twice.
  */
 async function collapseDuplicateOpenSessions(): Promise<void> {
-  const duplicates = await prisma.$queryRaw<{ id: string; started_at: Date; last_seen_at: Date }[]>(
+  const duplicates = await prisma.$queryRaw<{ id: string; started_at: Date; live_at: Date }[]>(
     Prisma.sql`
-      SELECT id, started_at, last_seen_at
+      SELECT id, started_at, live_at
       FROM (
         SELECT
-          id,
-          started_at,
-          last_seen_at,
-          row_number() OVER (PARTITION BY user_id ORDER BY started_at ASC, id ASC) AS rn
-        FROM work_sessions
-        WHERE ended_at IS NULL
+          ws.id,
+          ws.started_at,
+          ${SESSION_LIVE_AT_SQL} AS live_at,
+          row_number() OVER (PARTITION BY ws.user_id ORDER BY ws.started_at ASC, ws.id ASC) AS rn
+        FROM work_sessions ws
+        WHERE ws.ended_at IS NULL
       ) ranked
       WHERE rn > 1
     `,
   );
 
   for (const row of duplicates) {
-    await closeSessionTx(prisma, row.id, row.started_at, row.last_seen_at, "superseded");
+    await closeSessionTx(prisma, row.id, row.started_at, row.live_at, "superseded");
   }
 }
 

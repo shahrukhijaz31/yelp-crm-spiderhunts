@@ -1,0 +1,29 @@
+-- Monitor liveness on a work session.
+--
+-- One nullable column on one existing table, and nothing else: no table is
+-- created or dropped, no column is removed, no enum moves, and no index is
+-- added. Every existing row keeps the meaning it had — NULL is "this shift has
+-- never been seen by a Monitor", which is exactly true of every shift worked
+-- before this shipped, and the staleness rule falls back to `last_seen_at`
+-- alone for those rows.
+--
+-- Why the column exists: `last_seen_at` is a heartbeat from an *open portal
+-- tab*, so minimising the browser stopped it and the shift was closed five
+-- minutes later — even though the SpiderHunts Monitor was still watching the
+-- workstation and still uploading screenshots, activity and app usage against
+-- that very shift. Browser visibility was standing in for "the agent is
+-- working", which it never was. This column records the other signal, so the
+-- shift is stale only when *both* have gone quiet.
+--
+-- No index. The only query that filters on it is the reconciliation sweep,
+-- which is already restricted to `ended_at IS NULL` — a handful of rows, one
+-- per agent currently on the clock — and the read path touches it only through
+-- `greatest(last_seen_at, coalesce(last_monitor_seen_at, last_seen_at))` on
+-- rows a `user_id` predicate has already selected. An index here would be
+-- write cost for a scan that never happens.
+--
+-- Written from the server's clock only, by `touchMonitorLiveness` in
+-- lib/workSessions.ts, and never from anything a client sends.
+
+-- AlterTable
+ALTER TABLE "work_sessions" ADD COLUMN "last_monitor_seen_at" TIMESTAMP(3);

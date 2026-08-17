@@ -306,8 +306,27 @@ model WorkSession {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   startedAt  DateTime  @default(now()) @map("started_at")
-  /// Last heartbeat from an open portal tab. Bounds the session if it dies.
+  /// Last heartbeat from an open portal tab. **Portal presence, not the whole
+  /// of liveness** — see `lastMonitorSeenAt` below and `lib/workSessions.ts`.
   lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+
+  /// Last authenticated request from this agent's SpiderHunts Monitor while
+  /// this shift was open, written from the server's clock only.
+  ///
+  /// The second liveness signal. A shift is stale when *both* this and
+  /// `lastSeenAt` have gone quiet for the grace window, which is what stops a
+  /// minimised browser from closing the shift of somebody whose workstation is
+  /// still being monitored. Nullable because a shift worked without the desktop
+  /// client never has one, and because it must never be *newer* than the row is
+  /// entitled to be: nothing writes it except `touchMonitorLiveness`, which
+  /// refuses a shift that is already stale so a Monitor reconnecting after an
+  /// outage cannot resurrect one.
+  ///
+  /// Deliberately not reusing `lastSeenAt`: the two are different observations
+  /// with different trust and different meanings on the admin dashboard, and
+  /// collapsing them would make "the portal tab is open" unreadable.
+  lastMonitorSeenAt DateTime? @map("last_monitor_seen_at")
+
   /// Null while the session is open — the one column that says "still working".
   endedAt    DateTime? @map("ended_at")
 

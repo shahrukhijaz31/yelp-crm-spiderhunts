@@ -67,10 +67,24 @@ import { HEARTBEAT_SECONDS, type WorkClock } from "@/lib/performanceRules";
  * the same row, and the row is one shift. Nothing about the duration is derived
  * from how many beats arrive, so ten tabs are not ten hours.
  *
- * A hidden tab does not beat. That is the seam where genuine idle detection
- * would go later: stop beating after N minutes without input and the same table
- * starts recording active time instead of session time, with nothing else in
- * the application changing.
+ * ---------------------------------------------------------------------------
+ * A hidden tab does not beat, and that is no longer a way to lose a shift
+ * ---------------------------------------------------------------------------
+ * This beat is **portal presence**, not the definition of working. It used to
+ * be both, and an agent who minimised the portal to work in Chrome or Excel had
+ * their shift closed five minutes later. The server now keeps a shift alive on
+ * *either* this beat or an authenticated SpiderHunts Monitor request (see the
+ * module note in `lib/workSessions.ts`), so a hidden tab beside a running
+ * Monitor costs nothing at all.
+ *
+ * Nothing in this file ends a session, and nothing in it needed to change for
+ * that: `visibilitychange` has only ever *skipped* a beat here, never sent a
+ * "stop". Coming back to the front fires one immediately, and because the shift
+ * was never closed the server answers with the **same session** — the same
+ * `startedAt`, so the timer picks up where it was rather than restarting, and
+ * the same `work_sessions.id`, so the screenshots, activity intervals and
+ * app-usage segments recorded while the tab was hidden all belong to the shift
+ * still on screen.
  */
 
 const HEARTBEAT_MS = HEARTBEAT_SECONDS * 1000;
@@ -137,8 +151,11 @@ export function WorkSessionProvider({
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   const beat = useCallback(async () => {
-    // A hidden tab is not somebody working. Skipping the beat is what makes a
-    // background tab left open overnight stop counting after the grace window.
+    // A hidden tab is not evidence of *portal presence*, so it does not beat —
+    // which is what makes a background tab left open overnight stop counting
+    // after the grace window. It is not evidence of absence either: if the
+    // agent's Monitor is running, the server keeps the shift open on that
+    // signal instead, and this tab rejoins the same session when it returns.
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
 
     try {

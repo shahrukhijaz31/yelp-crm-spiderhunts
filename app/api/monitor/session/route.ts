@@ -9,17 +9,27 @@ import { getActiveWorkSession, getWorkClock } from "@/lib/workSessions";
  * agent is currently on the clock.
  *
  * The Monitor's only routine request. It answers the two questions the desktop
- * status screen asks and nothing else, and it is **strictly read-only with
- * respect to the work session**: `getWorkClock` runs one aggregate and one
- * lookup, and writes nothing. Polling this a thousand times does not create a
- * shift, extend a shift, or move `last_seen_at` on one.
+ * status screen asks, and the handler itself writes nothing: `getWorkClock`
+ * runs one aggregate and one lookup.
  *
- * That is the whole reason this is not `POST /api/work-session/heartbeat`. The
- * heartbeat *is* a write — it is a browser saying "I am still open", and it will
- * open a session if none exists. Pointing the desktop client at it would mean
- * the Monitor starting an agent's shift by launching, which is exactly what the
- * requirements forbid and what the portal's own design assumes cannot happen.
- * The portal decides when an agent is working; this endpoint reports it.
+ * ---------------------------------------------------------------------------
+ * It is also, by being authenticated at all, a liveness signal
+ * ---------------------------------------------------------------------------
+ * `monitorUser()` → `getDeviceContext()` records `last_monitor_seen_at` on this
+ * agent's **already-open** shift (`touchMonitorLiveness`, throttled to once a
+ * minute), which is what stops a minimised portal tab from closing the shift of
+ * somebody whose workstation is plainly still being watched. Nothing about that
+ * is specific to this route — every authenticated Monitor request does it — so
+ * a client that uploads activity but never polls is just as alive.
+ *
+ * Polling this a thousand times still does not **create** a shift, does not
+ * revive a shift that has already gone stale, and does not move `last_seen_at`,
+ * which remains the portal tab's column alone. That is the whole reason this is
+ * still not `POST /api/work-session/heartbeat`: that route opens a session if
+ * none exists, so pointing the desktop client at it would mean the Monitor
+ * starting an agent's shift by launching. The portal decides when an agent is
+ * working; this endpoint reports it, and separately says the workstation is
+ * alive.
  *
  * `active` is derived from the same `startedAt` the portal's own clock reads, so
  * the tray and the browser cannot disagree about whether a shift is running.

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import type { Role, SessionUser } from "./access";
 import { prisma } from "./prisma";
+import { touchMonitorLiveness } from "./workSessions";
 
 /**
  * Authentication for the SpiderHunts Monitor desktop application.
@@ -16,12 +17,21 @@ import { prisma } from "./prisma";
  * ---------------------------------------------------------------------------
  * What this module deliberately cannot do
  * ---------------------------------------------------------------------------
- * **It cannot start, extend or end a work session.** Nothing here imports
- * `lib/workSessions.ts` or `lib/completeSignIn.ts`, so connecting a workstation
- * — or leaving one connected overnight — has no effect whatsoever on an agent's
- * shift clock. The portal remains the only thing that decides whether somebody
- * is working. The Monitor reads that state (`GET /api/monitor/session`) and
- * never writes it.
+ * **It cannot start or end a work session.** Nothing here imports
+ * `lib/completeSignIn.ts`, so connecting a workstation — or leaving one
+ * connected overnight — cannot put an agent on the clock, and nothing here
+ * closes a shift either. The portal remains the only thing that decides whether
+ * somebody is working.
+ *
+ * **It can keep an already-open shift alive, and only that.** A verified device
+ * belonging to an enabled agent is evidence that their workstation is being
+ * monitored, which is a *liveness* signal about a shift the portal already
+ * started — see {@link touchMonitorLiveness} and the module note in
+ * `lib/workSessions.ts` for why browser visibility alone was never a safe
+ * definition of "working". The write is an `updateMany` bounded to that user's
+ * open, not-yet-stale shift: it creates nothing, revives nothing, ends nothing,
+ * and cannot reach another agent's row. Every earlier promise this module made
+ * about shifts holds except the narrow one this replaces.
  *
  * **It cannot skip the second factor.** There is no path into
  * {@link issueDeviceTokens} except from the OTP verification route, which
@@ -258,6 +268,23 @@ export async function getDeviceContext(request: Request): Promise<DeviceContext 
       .update({ where: { id: device.id }, data: { lastSeenAt: now } })
       .catch(() => {});
   }
+
+  /*
+   * The work session's second liveness signal, recorded here rather than in any
+   * one route so that *every* authenticated Monitor request counts — the status
+   * poll, an activity interval, an app-usage segment, a screenshot. There is
+   * deliberately no new endpoint: the requests the workstation already makes
+   * are the heartbeat.
+   *
+   * Placed after every check above, so it is reached only by a live, unrevoked
+   * device whose owner is an enabled AGENT. An expired token, a revoked device,
+   * a disabled account and an administrator all return before this line and
+   * keep nothing alive.
+   *
+   * Throttled inside, and awaited rather than left dangling: an unawaited
+   * promise in a serverless request is a write that may simply never happen.
+   */
+  await touchMonitorLiveness(device.user.id);
 
   return {
     deviceId: device.id,
