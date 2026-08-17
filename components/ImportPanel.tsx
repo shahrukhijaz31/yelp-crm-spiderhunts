@@ -3,9 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useLeads } from "./LeadsProvider";
 import { describeCleaning } from "@/lib/cleanLeads";
-import type { Lead } from "@/lib/types";
 
 const EXPECTED_COLUMNS = [
   "name",
@@ -27,13 +25,18 @@ type Notice = { tone: "ok" | "error"; message: string; lines?: string[] };
  *
  * Parsing still lives in `lib/parseLeadsCsv`, but it now runs on the server:
  * the file is posted to `POST /api/leads/upload`, which parses it, writes the
- * rows to Postgres and hands back the stored leads. The component's job is the
- * file handoff and the report, exactly as before.
+ * rows to Postgres and reports what it did. The component's job is the file
+ * handoff and the report, exactly as before.
+ *
+ * It holds no leads and never did anything with them: the one thing it showed
+ * was how many there are, so it takes that as a number, and the route sends
+ * back the new total rather than the table it used to re-read to compute one.
+ * `router.refresh()` afterwards re-runs the server components, which is what
+ * puts the import's effect into the nav bar's counters and the worklist.
  */
 
 /** What `POST /api/leads/upload` returns on success. */
 interface UploadResult {
-  leads: Lead[];
   /** Rows actually written — new businesses only. */
   imported: number;
   /** Rows already in the worklist, left exactly as they were. */
@@ -44,13 +47,16 @@ interface UploadResult {
   removedDuplicates: number;
   warnings: string[];
 }
-export default function ImportPanel() {
-  const { replaceLeads, leads } = useLeads();
+export default function ImportPanel({ initialTotal }: { initialTotal: number }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // Seeded by the server and moved on by the upload's own report, so the line
+  // under the drop target is right immediately after an import rather than
+  // waiting for the refresh below to come back.
+  const [total, setTotal] = useState(initialTotal);
 
   async function handleFile(file: File) {
     setBusy(true);
@@ -73,7 +79,12 @@ export default function ImportPanel() {
       }
 
       const result = payload as UploadResult;
-      replaceLeads(result.leads);
+      setTotal(result.total);
+      // The worklist, the nav counters and this page's own count are all
+      // server-rendered from Postgres, and an import has just moved every one
+      // of them. Re-running the server components is what refreshes all three
+      // without this screen having to hold the data to do it itself.
+      router.refresh();
 
       // "Added 120 new leads. 38 were already in the worklist and were left
       // unchanged. 15 duplicates and 8 missing numbers were filtered out.
@@ -82,7 +93,9 @@ export default function ImportPanel() {
       // call history survived, so it is worth its own clause rather than a
       // number they have to work out by subtraction.
       const cleaned = describeCleaning({
-        leads: result.leads,
+        // `describeCleaning` reports only the two removal counts; the list is
+        // part of the shared result shape and is not read for the sentence.
+        leads: [],
         removedNoPhone: result.removedNoPhone,
         removedDuplicates: result.removedDuplicates,
       });
@@ -166,7 +179,7 @@ export default function ImportPanel() {
             Drop a CSV here, or choose a file
           </p>
           <p className="mt-1.5 text-ui text-fg-3">
-            Currently holding {leads.length} lead{leads.length === 1 ? "" : "s"}
+            Currently holding {total} lead{total === 1 ? "" : "s"}
           </p>
         </div>
         <button

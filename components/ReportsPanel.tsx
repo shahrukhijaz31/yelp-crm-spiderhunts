@@ -1,21 +1,32 @@
-"use client";
-
 import Breakdown from "./Breakdown";
-import { useLeads } from "./LeadsProvider";
+import type { LeadStats } from "@/lib/leadUtils";
 import { CALL_STATUS_DOTS, CALL_STATUS_SHORT_LABELS, isCalled } from "@/lib/types";
 
 /**
  * The Reports view. Everything the old stat card was trying to say at once,
  * given room to actually say it — and taken off the worklist, where an agent
  * glancing up from a call only needs three numbers.
+ *
+ * A server component, and no longer a client one. It reads no state and
+ * handles no event: every number on it is settled before the markup is written,
+ * so making it a client component only meant shipping the whole table to the
+ * browser to arrive at figures Postgres had already counted. The counts arrive
+ * as a prop from the page (`leadStats`) and the browser is sent the finished
+ * table — no lead data, and no JavaScript for this screen at all.
  */
-export default function ReportsPanel() {
-  const { stats, leads, today } = useLeads();
-
+export default function ReportsPanel({
+  stats,
+  today,
+}: {
+  stats: LeadStats;
+  today: string;
+}) {
   const outcomes = stats.byStatus.interested + stats.byStatus.not_interested;
   const reachRate = stats.total === 0 ? 0 : Math.round((stats.called / stats.total) * 100);
   const interestRate = outcomes === 0 ? 0 : Math.round((stats.byStatus.interested / outcomes) * 100);
-  const withWebsite = leads.filter((lead) => Boolean(lead.website)).length;
+  // `missingWebsite` counts null *and* "" (see `leadStats`), which is exactly
+  // the `!lead.website` test this used to run over every lead in the browser.
+  const withWebsite = stats.total - stats.missingWebsite;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5">

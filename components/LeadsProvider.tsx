@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -83,6 +84,13 @@ interface LeadsContextValue {
 
 const LeadsContext = createContext<LeadsContextValue | null>(null);
 
+/**
+ * How long a run of saves settles before the counts are re-read. The same 400ms
+ * the worklist uses for its own refresh, and for the same reason: a burst of
+ * edits is one question about the totals, not one per edit.
+ */
+const STATS_REFRESH_DEBOUNCE_MS = 400;
+
 /** Poll the clock so the "due today" view is still correct after midnight. */
 function subscribeToDayChange(onChange: () => void): () => void {
   const timer = setInterval(onChange, 60_000);
@@ -92,10 +100,20 @@ function subscribeToDayChange(onChange: () => void): () => void {
 export function LeadsProvider({
   initialLeads,
   serverToday,
+  publishStats = true,
   children,
 }: {
   initialLeads: Lead[];
   serverToday: string;
+  /**
+   * Whether the counts derived here should replace the nav bar's.
+   *
+   * True only when `initialLeads` is the *whole* workspace, which is now just
+   * `/export`. `/meetings` passes false: it is handed the agenda alone, and
+   * pushing "12 leads" up from a filtered set would overwrite the figures the
+   * layout read from Postgres with a number describing something else.
+   */
+  publishStats?: boolean;
   children: React.ReactNode;
 }) {
   // Clean at every entry point, not just the CSV path: whatever the source —
@@ -113,10 +131,52 @@ export function LeadsProvider({
   // portal left open overnight rolls over on its own.
   const today = useSyncExternalStore(subscribeToDayChange, todayIso, () => serverToday);
 
+  const { setStats } = usePortalStats();
+
+  /*
+   * Re-read the workspace counts from Postgres after a save.
+   *
+   * Only for a screen holding a subset, which cannot derive them: `/meetings`
+   * lets an admin set and clear callback dates, and those are two of the
+   * figures in the nav bar. Deriving them from the agenda would be wrong and
+   * publishing nothing would leave them stale, so the third option is to ask
+   * the server — the same `rows=0` counts-only request the worklist makes on
+   * its own saves, which returns the aggregates and not a single row.
+   *
+   * Debounced, because marking a meeting done and dating the follow-up is two
+   * saves and one question about what the totals now are.
+   */
+  const countsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (countsTimer.current) clearTimeout(countsTimer.current);
+    },
+    [],
+  );
+
+  const refreshStats = useCallback(() => {
+    if (countsTimer.current) clearTimeout(countsTimer.current);
+    countsTimer.current = setTimeout(() => {
+      // The counts ignore tabs and filters; the only thing this carries is the
+      // reader's date, which is what "due today" and "overdue" are relative to.
+      const params = new URLSearchParams({ rows: "0", today });
+      void fetch(`/api/leads?${params}`)
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data: { stats: LeadStats } | null) => {
+          if (data?.stats) setStats(data.stats);
+        })
+        .catch((error) => console.error("Refreshing lead counts failed:", error));
+    }, STATS_REFRESH_DEBOUNCE_MS);
+  }, [today, setStats]);
+
   // The optimistic write/rollback used to be spelled out here. It moved to
   // `useLeadEditor` when the worklist stopped reading this store and needed the
   // same behaviour over its own page — see the note in that file.
-  const updateLead = useLeadEditor(leads, setLeads);
+  const updateLead = useLeadEditor(
+    leads,
+    setLeads,
+    publishStats ? undefined : refreshStats,
+  );
 
   // Called with the rows the upload route stored, so this is a state swap only
   // — the write already happened server-side.
@@ -168,15 +228,17 @@ export function LeadsProvider({
 
   const stats = useMemo(() => computeStats(leads, today), [leads, today]);
 
-  // These screens still hold every lead, so they can still count them exactly
-  // and instantly — including an optimistic edit that has not reached Postgres
-  // yet. Pushing that up keeps the nav bar's counters as live here as they were
+  // A screen holding every lead can count them exactly and instantly —
+  // including an optimistic edit that has not reached Postgres yet — so it
+  // pushes its figures up and the nav bar's counters stay as live as they were
   // before the layout stopped loading leads. The store ignores an unchanged
   // set, so this settles after one write rather than looping.
-  const { setStats } = usePortalStats();
+  //
+  // A screen holding a *subset* must not: see `publishStats` above, and
+  // `refreshStats` for what it does instead.
   useEffect(() => {
-    setStats(stats);
-  }, [stats, setStats]);
+    if (publishStats) setStats(stats);
+  }, [publishStats, stats, setStats]);
 
   const value = useMemo<LeadsContextValue>(
     () => ({

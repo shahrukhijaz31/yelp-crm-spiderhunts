@@ -1,5 +1,5 @@
 import { apiAdmin } from "@/lib/authz";
-import { listLeads, mergeLeads } from "@/lib/leadDb";
+import { countLeads, mergeLeads } from "@/lib/leadDb";
 import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
 import { LEAD_IMPORT_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
 
@@ -136,18 +136,21 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const merged = await mergeLeads(parsed.leads, sourceBatch);
 
-    // The whole table is re-read rather than returned from the merge, so the
-    // client gets the database's cuids for the new rows *and* keeps the
-    // existing rows with the statuses, notes and callbacks already on them.
-    // Those ids are what every later PATCH is addressed to.
-    const leads = await listLeads();
+    // The new size of the worklist, as a count.
+    //
+    // This used to be the whole table, re-read and returned so the Import
+    // screen could swap its in-memory copy for one carrying the database's
+    // cuids. Nothing holds that copy any more — the screen shows a total and
+    // calls `router.refresh()`, and every other view reads its own rows from
+    // Postgres — so returning several thousand leads at the end of an upload
+    // was a second full serialisation nobody read.
+    const total = await countLeads();
 
     return Response.json(
       {
-        leads,
         imported: merged.inserted,
         skippedExisting: merged.skippedExisting,
-        total: leads.length,
+        total,
         sourceBatch,
         parsedRows: parsed.parsedRows,
         skippedRows: parsed.skippedRows,

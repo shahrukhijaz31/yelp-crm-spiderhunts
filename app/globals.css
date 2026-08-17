@@ -1880,6 +1880,35 @@ select option {
     }
   }
 
+  /* ---- loading wheel ----------------------------------------------------- */
+
+  /*
+   * The delay before a wait is admitted to (`components/PageLoading.tsx`).
+   *
+   * `both` so the 0% frame applies before the animation starts: the wheel is
+   * invisible for 300ms and then fades in over 200ms. A navigation the server
+   * answers quickly therefore shows nothing at all, which is the honest
+   * treatment of a wait nobody noticed — while a screen that really is reading
+   * the database says so before anyone starts wondering whether their click
+   * landed.
+   *
+   * Not disabled under `prefers-reduced-motion`: an opacity fade with no
+   * movement is not what that setting is about, and holding the wheel hidden
+   * is the whole point of the rule.
+   */
+  .loading-fade {
+    animation: loading-fade-in 200ms var(--ease-out-soft) 300ms both;
+  }
+
+  @keyframes loading-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
   /* ---- queue marker (New / Called) -------------------------------------- */
 
   /*

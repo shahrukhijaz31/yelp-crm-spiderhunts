@@ -24,18 +24,66 @@ import type { LeadWorkCounts, LeadWorkState } from "./workState";
  * are disorienting. `id` breaks ties, because `created_at` has millisecond
  * resolution and a `createMany` writes a whole file inside one millisecond.
  *
- * **This reads the whole table.** It is still the right call for the screens
- * that genuinely operate on all of it — Export writes every matching row to a
- * file, Meetings derives its agenda from the lead set, Reports aggregates it —
- * and those routes ask for it explicitly. The worklist does not: it goes
- * through {@link listLeadsPage} instead, so an agent opening the call list
- * downloads twenty rows rather than several thousand.
+ * **This reads the whole table**, and every row it returns is serialised into
+ * the HTML of whichever page asked for it. That cost is linear in the size of
+ * the workspace and is paid on every visit, so the list of callers is kept as
+ * short as it can be. Today it is one screen:
+ *
+ *   /export  writes every matching row to a file, and "every matching row" is
+ *            not a page. There is no smaller honest answer for it.
+ *
+ * The three screens that used to call it no longer do, because none of them
+ * actually wanted the rows:
+ *
+ *   /meetings  wanted the agenda, which is a `where` — {@link listMeetingLeads}
+ *   /reports   wanted aggregates, which Postgres counts — {@link leadStats}
+ *   /import    wanted a total, which is a `count(*)` — {@link countLeads}
+ *
+ * The worklist never did: it goes through {@link listLeadsPage}, so an agent
+ * opening the call list downloads twenty rows rather than several thousand.
  */
 export async function listLeads(): Promise<Lead[]> {
   const rows = await prisma.lead.findMany({
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   return rows.map(toLead);
+}
+
+/**
+ * The meetings agenda, and nothing else.
+ *
+ * `isMeetingLead` (lib/meetings.ts) is "interested, or a date in the diary",
+ * and this is that predicate written as a `where` — the same rule, moved from
+ * the browser to the database. The Meetings screen used to read the whole table
+ * and drop the non-meetings on the client, which meant a workspace of several
+ * thousand leads sent all of them to render an agenda of a dozen.
+ *
+ * Both arms are indexed (`@@index([status])`, `@@index([callbackDate])`), so
+ * this stays a pair of index scans as the table grows rather than the
+ * sequential read it replaces.
+ *
+ * The two definitions must not drift: a lead that appears here but fails
+ * `isMeetingLead` would be fetched and then silently dropped, and one that
+ * fails here but passes it would vanish from the agenda altogether. If the
+ * predicate changes, change both.
+ */
+export async function listMeetingLeads(): Promise<Lead[]> {
+  const rows = await prisma.lead.findMany({
+    where: { OR: [{ status: "interested" }, { callbackDate: { not: null } }] },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+  return rows.map(toLead);
+}
+
+/**
+ * How many leads there are. One `count(*)`, no rows.
+ *
+ * The Import screen shows this figure and nothing else about the lead set, so
+ * it asks for this rather than for the table it was reading to call `.length`
+ * on the result.
+ */
+export async function countLeads(): Promise<number> {
+  return prisma.lead.count();
 }
 
 // --- the worklist's paginated read ------------------------------------------
