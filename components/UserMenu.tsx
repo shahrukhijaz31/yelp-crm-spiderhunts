@@ -178,8 +178,14 @@ export default function UserMenu({ user }: { user: SessionUser }) {
            * A row of text, not a menu item: there is nothing to activate, so it
            * takes no `role="menuitem"` and no focus stop. Keyboard users tab
            * straight from the trigger to Change password as before.
+           *
+           * Agents only, matching the top bar's clock — time tracking is
+           * reported *about* agents, and nothing anywhere totals or reviews an
+           * administrator's own shift, so the row would be a fact with no
+           * reader. The session itself is unaffected: this is which figures are
+           * drawn, not who gets a `work_sessions` row.
            */}
-          <SessionRow />
+          {user.role === "AGENT" && <SessionRow />}
 
           <Link
             ref={itemRef}

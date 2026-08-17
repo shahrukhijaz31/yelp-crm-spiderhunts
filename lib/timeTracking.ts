@@ -846,8 +846,13 @@ export async function timeReport(
 
   const [users, intervals, tracked, sessionCounts, leadWork, shots, openSessions] =
     await Promise.all([
+      // Agents, and only agents — the same filter `lib/productivity.ts` already
+      // applies to its own roster. Administrators no longer accumulate work
+      // sessions at all (`openOrResumeWorkSession`), so without this they would
+      // sit in the table as permanent all-zero rows: not a description of
+      // anything, and a row that reads as "this person did no work today".
       prisma.user.findMany({
-        where: scope ? { id: scope } : {},
+        where: { role: "AGENT", ...(scope ? { id: scope } : {}) },
         select: { id: true, name: true, username: true, role: true },
         orderBy: [{ name: "asc" }],
       }),

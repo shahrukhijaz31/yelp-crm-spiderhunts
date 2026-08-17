@@ -114,9 +114,25 @@ export function useWorkSession(): WorkSessionValue {
 
 export function WorkSessionProvider({
   initialClock,
+  tracking = true,
   children,
 }: {
   initialClock: WorkClock | null;
+  /**
+   * Whether this user's time is tracked at all. False for administrators.
+   *
+   * When false the provider is *inert*: no beat, no tick, and every figure it
+   * publishes is null, which is the same thing every consumer already draws
+   * before the first tick — so nothing downstream needs a second branch. It
+   * stays mounted rather than being omitted, because `useWorkSession` throws
+   * without a provider and the alternative is every clock-reading component
+   * growing a "might not be there" case for one role.
+   *
+   * The reason is the beat, not the render: an administrator with no clock on
+   * screen was still opening a `work_sessions` row and writing to it once a
+   * minute, for a shift no report sums and no screen shows.
+   */
+  tracking?: boolean;
   children: React.ReactNode;
 }) {
   /**
@@ -203,6 +219,11 @@ export function WorkSessionProvider({
   // to the front — that last closes the gap left by a tab that was hidden and
   // therefore silent.
   useEffect(() => {
+    // Untracked users never beat, which is what stops the row being written in
+    // the first place: `heartbeatWorkSession` opens a session when it finds
+    // none, so a silent tab is the difference between no row and one per login.
+    if (!tracking) return;
+
     const first = setTimeout(() => void beat(), 0);
     const timer = setInterval(() => void beat(), HEARTBEAT_MS);
 
@@ -216,7 +237,7 @@ export function WorkSessionProvider({
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [beat]);
+  }, [beat, tracking]);
 
   const value = useMemo<WorkSessionValue>(() => {
     if (!clock) {

@@ -66,10 +66,17 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
   // makes signing out and back in stop looking like a reset: the *session*
   // restarts, because it is a new session, but the day's total is a sum over
   // every session that started today and carries straight on.
+  //
+  // The clock is read for agents only. Time tracking is a thing the portal does
+  // *to* agents and reports *to* administrators: nothing sums, reviews or draws
+  // an administrator's own shift, so reading it here would be two queries per
+  // page load for a figure with no reader — and the provider it feeds would go
+  // on writing a `work_sessions` row a minute for a shift nobody looks at.
+  const tracked = user.role === "AGENT";
   const [stats, workCounts, workClock] = await Promise.all([
     leadStats(today),
     leadWorkCounts(),
-    getWorkClock(user.id),
+    tracked ? getWorkClock(user.id) : null,
   ]);
 
   return (
@@ -80,8 +87,9 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
           sidebar and the screen that answers to it is in the route. */}
       <LeadQueueProvider initialCounts={workCounts}>
         {/* Outside the shell so the heartbeat keeps beating whatever screen is
-            on, including the ones that draw no clock at all. */}
-        <WorkSessionProvider initialClock={workClock}>
+            on, including the ones that draw no clock at all. Mounted for both
+            roles but inert for administrators — see the note on `tracking`. */}
+        <WorkSessionProvider initialClock={workClock} tracking={tracked}>
           <AppShell today={today} user={user} navMode={navMode}>
             {children}
           </AppShell>

@@ -189,8 +189,18 @@ export default function AppTopBar({
 
         {/* The shift clock, beside the two lead counts rather than anywhere
             more prominent: it is the same kind of fact, and it is the one
-            number here that is about the person rather than the workspace. */}
-        <SessionTimer />
+            number here that is about the person rather than the workspace.
+         *
+         * Agents only. Time tracking is a thing the portal does *to* agents and
+         * reports *to* administrators — nothing reads, totals or reviews an
+         * administrator's own shift, so a clock on their bar would be a number
+         * with nothing behind it. The same rule drops the current-session row
+         * from `UserMenu`, and the two are the whole of the clock in the shell.
+         *
+         * This is a label, not a permission: the work session still exists and
+         * still beats, because the heartbeat is what keeps `work_sessions`
+         * honest for everyone. Only the readout is role-specific. */}
+        {user.role === "AGENT" && <SessionTimer />}
 
         <p className="hidden text-caption text-fg-3 2xl:block">{longDate(today)}</p>
 

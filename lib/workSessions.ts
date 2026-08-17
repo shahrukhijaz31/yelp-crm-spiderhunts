@@ -262,6 +262,17 @@ export type { WorkClock };
  * this runs on every login, the loser of that race is corrected by the next
  * sweep, and the cost of being wrong is a duplicate row in a reporting table.
  *
+ * **Agents only.** An administrator gets no row and `null` back. Time tracking
+ * exists to be reported on, and every report that sums this table is a report
+ * about agents — so a shift opened for an administrator was write traffic and
+ * storage for a figure that no screen drew and no total included. The check is
+ * here, inside the one function that creates rows, rather than at its two call
+ * sites (`completeSignIn` and the heartbeat), because a rule enforced at the
+ * only `create` in the file cannot be forgotten by the third caller.
+ *
+ * The role is read from Postgres in the same transaction and never taken from
+ * the caller, which is the same rule the rest of this file follows about ids.
+ *
  * Never throws into the caller's face: signing in must not fail because the
  * clock could not be started. The caller logs and carries on.
  */
@@ -273,6 +284,16 @@ export async function openOrResumeWorkSession(
 
   return prisma
     .$transaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
+      // Not an agent — nothing to open, and nothing to close either: an
+      // administrator has no open row for a later sweep to find. Rows written
+      // before this rule existed are left alone; they close on their own
+      // schedule and the reports below no longer list them.
+      if (user?.role !== "AGENT") return null;
+
       const open = await tx.workSession.findFirst({
         where: { userId, endedAt: null },
         orderBy: { startedAt: "asc" },
