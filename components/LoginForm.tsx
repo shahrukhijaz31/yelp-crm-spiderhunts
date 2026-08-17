@@ -74,7 +74,7 @@ function validate(username: string, password: string): FieldErrors {
   const name = username.trim();
 
   if (!name) {
-    errors.username = "Enter your username.";
+    errors.username = "Enter your email or username.";
   } else if (name.includes("@")) {
     // Some deployments issue email addresses as usernames, so an @ means the
     // person meant an email and should be told when it is malformed.
@@ -386,7 +386,7 @@ export default function LoginForm({
             {/* --- username --- */}
             <div className="flex flex-col gap-1.5">
               <label htmlFor={usernameId} className="field-label">
-                Username
+                Email/Username
               </label>
               <input
                 id={usernameId}
@@ -405,7 +405,6 @@ export default function LoginForm({
                 }}
                 aria-invalid={showErrors.username ? true : undefined}
                 aria-describedby={showErrors.username ? `${usernameId}-error` : undefined}
-                placeholder="you@spiderhunts.com"
                 // Taller than the 36px chassis the rest of the app uses. There
                 // are two fields here and nothing to fit around them, so they
                 // get the comfortable height a dense table cannot afford.
@@ -439,7 +438,6 @@ export default function LoginForm({
                   }}
                   aria-invalid={showErrors.password ? true : undefined}
                   aria-describedby={showErrors.password ? `${passwordId}-error` : undefined}
-                  placeholder="••••••••"
                   // Right padding clears the reveal button, so a long password
                   // scrolls under the label rather than behind the icon.
                   className="ui-field h-11 w-full pr-11"
