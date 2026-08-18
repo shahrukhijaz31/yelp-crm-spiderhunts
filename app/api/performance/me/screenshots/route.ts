@@ -1,9 +1,6 @@
 import { apiUser } from "@/lib/authz";
 import { myScreenshotPage } from "@/lib/myScreenshots";
-import {
-  decodeMyScreenshotCursor,
-  readMyScreenshotLimit,
-} from "@/lib/myScreenshotsRules";
+import { resolveMyScreenshotQuery } from "@/lib/myScreenshotsRules";
 
 /**
  * GET /api/performance/me/screenshots — the caller's own captures, and nobody
@@ -30,13 +27,26 @@ import {
  * ---------------------------------------------------------------------------
  * The security property, which is a shape rather than a check
  * ---------------------------------------------------------------------------
- * The only id that reaches Postgres is `auth.id`, read from the session row on
- * this request. This route accepts no `userId`, no `agentId`, no
- * `workSessionId` and no body — the two parameters it does read are `cursor`
- * and `limit`, one a position in a list that has already been scoped and the
- * other a page size that is clamped. There is nothing here to tamper with, so
- * there is nothing to validate and nothing to get wrong. Adding `?agent=` to
- * the URL changes nothing, because nothing reads it.
+ * The only id that reaches Postgres as a *subject* is `auth.id`, read from the
+ * session row on this request. This route accepts no `userId` and no `agentId`
+ * in any form, and no body at all. Adding `?agent=` or `?userId=` to the URL
+ * changes nothing, because nothing reads them.
+ *
+ * What it does read is filters — a date preset and day, a time-of-day range, a
+ * work session, a page and a page size — and every one of them is ANDed with
+ * the subject rather than consulted about it (`lib/myScreenshots.ts`). A filter
+ * can only ever select fewer of the caller's own rows. `?session=` is the one
+ * that is an id somebody could tamper with, and it is worth being explicit: a
+ * shift id belonging to another agent asks for rows that are both theirs and
+ * yours, so it returns an empty page rather than their gallery. It narrows to
+ * nothing; it cannot widen to anybody.
+ *
+ * That is also why nothing here 400s. Every parameter is clamped to something
+ * sensible by `resolveMyScreenshotQuery` — an unknown preset becomes "all
+ * dates", a page size that is not on the menu becomes the default, a malformed
+ * id becomes no filter — because none of them is deciding anything that a
+ * wrong answer would make unsafe, and a screen that errors over a stale
+ * bookmark is worse than one that shows you your own list.
  *
  * ---------------------------------------------------------------------------
  * Read-only
@@ -57,10 +67,10 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const payload = await myScreenshotPage(
       // The subject, from the session. Not a parameter, and not overridable by
-      // one — `myScreenshotPage` has no other way to be told whose list this is.
+      // one — `myScreenshotPage` has no other way to be told whose list this is,
+      // and the query object it takes has no field that could carry a user.
       auth.id,
-      decodeMyScreenshotCursor(params.get("cursor")),
-      readMyScreenshotLimit(params.get("limit")),
+      resolveMyScreenshotQuery(params),
     );
 
     return Response.json(payload, {

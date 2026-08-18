@@ -2,15 +2,36 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { Camera, ChevronLeft, ChevronRight, ImageOff, X } from "lucide-react";
+import {
+  Camera,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ImageOff,
+  X,
+} from "lucide-react";
 
+import Pagination from "./Pagination";
 import {
   formatClock,
   formatDayLabel,
   formatFileSize,
-  localDayIso,
+  formatTimeOfDay,
+  parseTimeOfDay,
 } from "@/lib/screenshotViewerRules";
-import type { MyScreenshotCard, MyScreenshotPayload } from "@/lib/myScreenshotsRules";
+import {
+  buildMyScreenshotParams,
+  defaultMyScreenshotQuery,
+  MY_DATE_PRESETS,
+  MY_DATE_PRESET_LABELS,
+  MY_SCREENSHOT_PAGE_SIZES,
+  type MyDatePreset,
+  type MyScreenshotCard,
+  type MyScreenshotPageSize,
+  type MyScreenshotPayload,
+  type MyScreenshotQuery,
+  type MyWorkSessionOption,
+} from "@/lib/myScreenshotsRules";
 
 /**
  * My screenshots — the agent's own captures, on their own performance page.
@@ -24,135 +45,100 @@ import type { MyScreenshotCard, MyScreenshotPayload } from "@/lib/myScreenshotsR
  * API. Compare `ScreenshotsPanel`, the admin screen, which has all of those
  * controls and is not reachable by an agent at either end.
  *
- * **It cannot be pointed at anybody.** Nothing here sends a user id, because
- * there is nothing here that has one — the fetch below carries a cursor and a
- * page size, and the server resolves the subject from the session row. Editing
- * the request in a console changes the position in this reader's own list and
- * nothing else.
+ * **The filter bar has no agent picker, and cannot grow one.** That is the one
+ * visible difference from the admin screen and the reason the two are separate
+ * components. Everything here narrows a list whose owner was decided by the
+ * session row before the request was parsed — the query type this builds has no
+ * field for a person, so there is nothing for a control to bind to. The work
+ * session picker lists only this reader's own shifts, and a shift id from
+ * anywhere else selects nothing rather than somebody.
  *
- * **A page at a time, and thumbnails only when they are scrolled to.** The list
- * is cursor-paged rather than fetched whole: an agent with a year of captures
- * loads twenty-four rows, and the next twenty-four when the end of the grid
- * comes into view. Each `<img>` is `loading="lazy"` against the same
- * authenticated byte stream the card would otherwise have downloaded eagerly,
- * so scrolling past is what costs, not opening the page.
+ * **A page at a time.** The first page is rendered by the server and handed in,
+ * so opening the performance page costs one round trip rather than two and the
+ * grid is never briefly empty. Every filter change and page turn after that is
+ * a fetch. Thumbnails stay `loading="lazy"`, so a page of ninety-six costs the
+ * two rows that are actually scrolled to.
  */
-export default function MyScreenshotsPanel() {
-  const [cards, setCards] = useState<MyScreenshotCard[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
+export default function MyScreenshotsPanel({
+  initialPayload,
+  serverToday,
+}: {
+  initialPayload: MyScreenshotPayload;
+  /** The server's day, so "Today" means the same thing at both ends. */
+  serverToday: string;
+}) {
+  const [query, setQuery] = useState<MyScreenshotQuery>(() =>
+    defaultMyScreenshotQuery(serverToday),
+  );
+  const [payload, setPayload] = useState(initialPayload);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** False until the first response lands, so the empty state cannot flash. */
-  const [loaded, setLoaded] = useState(false);
+  /** Index into the current page, or null when the preview is closed. */
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
-  /*
-   * "Today" for the day labels, taken once on mount from the browser's clock.
-   *
-   * The admin screen is handed the server's day because its filters are dates
-   * and the two must agree about which day "Today" selects. Nothing here
-   * filters by date — the labels are a courtesy on a list that is already in
-   * order — so the reader's own midnight is the right one, and it is also the
-   * one they would compare against the clock on their wall.
-   */
-  const [today] = useState(() => localDayIso(new Date()));
+  // Identifies the request in flight, so a slow "all dates" cannot land on top
+  // of the "today" asked for afterwards. The same guard the worklist, the team
+  // report and the admin viewer use, for the same reason.
+  const requestId = useRef(0);
 
-  /*
-   * One request in flight at a time, tracked in a ref rather than in `busy`.
-   *
-   * The sentinel below can fire again while a fetch is running — an
-   * IntersectionObserver reports on scroll, not on state — and two overlapping
-   * requests carrying the same cursor would append the same page twice. State
-   * is too late to close that: it is not visible to the callback until the next
-   * render.
-   */
-  const inFlight = useRef(false);
-
-  const loadMore = useCallback(async (from: string | null) => {
-    if (inFlight.current) return;
-    inFlight.current = true;
+  const load = useCallback(async (next: MyScreenshotQuery) => {
+    const id = (requestId.current += 1);
     setBusy(true);
     setError(null);
 
     try {
-      const params = new URLSearchParams();
-      if (from) params.set("cursor", from);
-
-      const query = params.toString();
       const response = await fetch(
-        `/api/performance/me/screenshots${query ? `?${query}` : ""}`,
-        { headers: { accept: "application/json" }, cache: "no-store" },
+        `/api/performance/me/screenshots?${buildMyScreenshotParams(next)}`,
+        { credentials: "same-origin" },
       );
+      if (id !== requestId.current) return;
 
       if (!response.ok) {
-        throw new Error(`status ${response.status}`);
+        setError(
+          response.status === 401
+            ? "Your session has ended. Sign in again to continue."
+            : "Could not load your screenshots. Try again.",
+        );
+        return;
       }
 
-      const payload = (await response.json()) as MyScreenshotPayload;
-
-      setCards((current) =>
-        // Appended rather than replaced, and de-duplicated by id: a capture
-        // arriving between two requests cannot make a keyset page overlap, but
-        // a retry after a network stall can, and a duplicate key in a grid is
-        // a React warning and a card that will not open.
-        from === null ? payload.screenshots : dedupe([...current, ...payload.screenshots]),
-      );
-      setCursor(payload.nextCursor);
-      setHasMore(payload.hasMore);
-    } catch (cause) {
-      console.error("Loading my screenshots failed:", cause);
-      setError("Your screenshots could not be loaded. Try again.");
-      // The cursor is deliberately left where it was, so the retry asks for the
-      // page that failed rather than starting the list again.
-      setHasMore(false);
+      const body = (await response.json()) as MyScreenshotPayload;
+      if (id !== requestId.current) return;
+      setPayload(body);
+    } catch {
+      if (id === requestId.current) setError("Could not reach the server.");
     } finally {
-      inFlight.current = false;
-      setBusy(false);
-      setLoaded(true);
+      if (id === requestId.current) setBusy(false);
     }
   }, []);
 
-  /*
-   * The sentinel: an empty div at the end of the grid. When it comes into view
-   * the next page is asked for, a screen ahead of the reader reaching the end.
-   *
-   * It drives the *first* page too, which is why there is no fetch-on-mount
-   * effect here. Two reasons, and the second is the better one:
-   *
-   *   - a `setState` run synchronously inside an effect body is a cascading
-   *     render, and React's own lint rule says so. An observer callback is the
-   *     shape that rule points at instead — an external system telling the
-   *     component something changed.
-   *   - this section sits at the bottom of the performance page, under the
-   *     figures somebody actually came for. Loading a gallery nobody has
-   *     scrolled to yet would spend their first request on it. With the margin
-   *     below, the fetch starts a screen before the panel is reached, so it is
-   *     ready by the time it is looked at and costs nothing if it never is.
-   *
-   * The button beneath it is not a fallback for a browser without an observer —
-   * every browser this portal supports has one — it is there for keyboard and
-   * screen-reader users, for whom "scroll until more appears" is not an
-   * instruction that can be followed.
-   */
-  const sentinel = useRef<HTMLDivElement>(null);
-
+  // Skips the first run: the server rendered this exact payload, and asking for
+  // it again on mount would be a wasted round trip and a visible flicker on a
+  // section that was already correct.
+  const mounted = useRef(false);
   useEffect(() => {
-    const node = sentinel.current;
-    if (!node || !hasMore) return;
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    void load(query);
+  }, [load, query]);
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) void loadMore(cursor);
-      },
-      { rootMargin: "600px 0px" },
-    );
+  /**
+   * Change the filter.
+   *
+   * Every edit except paging returns to page one. Landing on page 4 of a filter
+   * that now has one page is a blank grid that looks like "no screenshots" and
+   * is really "no such page".
+   */
+  const amend = useCallback((patch: Partial<MyScreenshotQuery>) => {
+    setOpenIndex(null);
+    setQuery((current) => ({ ...current, ...patch, page: 1 }));
+  }, []);
 
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [cursor, hasMore, loadMore]);
-
-  const open = openIndex === null ? null : (cards[openIndex] ?? null);
+  const { screenshots, meta, sessions } = payload;
+  const open = openIndex === null ? null : (screenshots[openIndex] ?? null);
+  const timeDisabled = query.preset === "all";
 
   return (
     <section aria-labelledby="my-screenshots-heading" className="flex flex-col gap-3">
@@ -165,62 +151,178 @@ export default function MyScreenshotsPanel() {
         </p>
       </div>
 
-      <div className="panel overflow-hidden">
-        {!loaded ? (
-          <SkeletonGrid count={8} />
-        ) : cards.length === 0 ? (
-          <Empty />
-        ) : (
-          <>
-            <div className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {cards.map((card, index) => (
-                <Card
-                  key={card.id}
-                  screenshot={card}
-                  today={today}
-                  onOpen={() => setOpenIndex(index)}
-                />
-              ))}
-            </div>
+      {/* --- filters ------------------------------------------------------ */}
+      {/* No agent control here and no room for one — see the note at the top of
+          this file. Everything below narrows your own list. */}
+      <div
+        aria-label="Screenshot filters"
+        className="panel flex flex-wrap items-end gap-3 px-4 py-3"
+      >
+        <Field label="Date" htmlFor="my-ss-date">
+          <Select
+            id="my-ss-date"
+            value={query.preset}
+            onChange={(value) => {
+              const preset = value as MyDatePreset;
+              amend({
+                preset,
+                day: dayFor(preset, query.day, serverToday),
+                // A shift belongs to one day, so a date change would otherwise
+                // leave a selection that filters to a day the shift was not on
+                // and shows nothing.
+                workSessionId: null,
+              });
+            }}
+            options={MY_DATE_PRESETS.map((preset) => ({
+              value: preset,
+              label: MY_DATE_PRESET_LABELS[preset],
+            }))}
+          />
+        </Field>
 
-          </>
+        {query.preset === "custom" && (
+          <Field label="Day" htmlFor="my-ss-day">
+            <input
+              id="my-ss-day"
+              type="date"
+              value={query.day}
+              max={serverToday}
+              onChange={(event) =>
+                amend({ day: event.target.value, workSessionId: null })
+              }
+              className="ui-field h-9 w-[152px]"
+            />
+          </Field>
         )}
 
-        {/* Always mounted while there is more to fetch, including before the
-            first page has arrived — it is what asks for that page. */}
-        {hasMore && <div ref={sentinel} aria-hidden="true" className="h-px" />}
+        <Field label="Work session" htmlFor="my-ss-session">
+          <Select
+            id="my-ss-session"
+            value={query.workSessionId ?? "all"}
+            onChange={(value) =>
+              amend({ workSessionId: value === "all" ? null : value })
+            }
+            options={[
+              { value: "all", label: "All sessions" },
+              ...sessions.map((session) => ({
+                value: session.id,
+                label: sessionLabel(session, serverToday),
+              })),
+            ]}
+            disabled={sessions.length === 0}
+          />
+        </Field>
 
-        {(hasMore || busy || error) && (
-          <div className="flex flex-col items-center gap-2 border-t border-line px-3 py-3">
-            {error && <p className="text-caption text-danger">{error}</p>}
+        {/* Time of day needs a day to be a time *of*. On "All dates" the
+            control is disabled rather than hidden, so the bar does not change
+            width as the date filter is used, and the server drops the values
+            anyway — see `resolveMyScreenshotQuery`. */}
+        <Field label="From" htmlFor="my-ss-from">
+          <input
+            id="my-ss-from"
+            type="time"
+            value={formatTimeOfDay(query.fromMinutes)}
+            disabled={timeDisabled}
+            title={timeDisabled ? "Choose a date to filter by time of day" : undefined}
+            onChange={(event) =>
+              amend({ fromMinutes: parseTimeOfDay(event.target.value) })
+            }
+            className="ui-field h-9 w-[112px] disabled:cursor-not-allowed disabled:opacity-60"
+          />
+        </Field>
 
-            <button
-              type="button"
-              className="ui-btn ui-btn-secondary h-8 px-3 text-caption"
-              disabled={busy}
-              aria-busy={busy}
-              onClick={() => void loadMore(cursor)}
-            >
-              {busy ? "Loading…" : error ? "Try again" : "Load more"}
-            </button>
+        <Field label="To" htmlFor="my-ss-to">
+          <input
+            id="my-ss-to"
+            type="time"
+            value={formatTimeOfDay(query.toMinutes)}
+            disabled={timeDisabled}
+            title={timeDisabled ? "Choose a date to filter by time of day" : undefined}
+            onChange={(event) => amend({ toMinutes: parseTimeOfDay(event.target.value) })}
+            className="ui-field h-9 w-[112px] disabled:cursor-not-allowed disabled:opacity-60"
+          />
+        </Field>
 
-            {!error && cards.length > 0 && (
-              <p className="text-meta text-fg-4">
-                {cards.length.toLocaleString()} shown so far
-              </p>
-            )}
+        {(query.fromMinutes !== null || query.toMinutes !== null) && (
+          <button
+            type="button"
+            onClick={() => amend({ fromMinutes: null, toMinutes: null })}
+            className="ui-btn ui-btn-ghost h-9 px-2.5 text-caption"
+          >
+            Clear time
+          </button>
+        )}
+
+        <p className="ml-auto self-center text-meta text-fg-4" aria-live="polite">
+          {error ? (
+            <span className="text-danger">{error}</span>
+          ) : busy ? (
+            "Loading…"
+          ) : (
+            windowCaption(query)
+          )}
+        </p>
+      </div>
+
+      {/* --- the gallery --------------------------------------------------- */}
+      <div className="panel overflow-hidden">
+        {error && screenshots.length === 0 ? (
+          <Empty
+            title="Your screenshots could not be loaded"
+            body="The server could not be reached. The filters above are unchanged, so trying again will ask for the same view."
+          />
+        ) : busy && screenshots.length === 0 ? (
+          <SkeletonGrid count={8} />
+        ) : screenshots.length === 0 ? (
+          <Empty title="No screenshots found" body={emptyReason(query)} />
+        ) : (
+          <div
+            className={`grid gap-3 p-3 transition-opacity duration-200 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 ${
+              busy ? "opacity-60" : ""
+            }`}
+          >
+            {screenshots.map((card, index) => (
+              <Card
+                key={card.id}
+                screenshot={card}
+                today={serverToday}
+                onOpen={() => setOpenIndex(index)}
+              />
+            ))}
           </div>
         )}
+
+        {/* The pager stays under an empty grid: it is what says "page 3 of 1",
+            which is the fastest way to understand a screen that is empty
+            because of where you are rather than because of what exists. */}
+        <Pagination
+          page={meta.page}
+          pageSize={meta.pageSize}
+          total={meta.total}
+          totalPages={meta.totalPages}
+          busy={busy}
+          onPageChange={(page) => {
+            setOpenIndex(null);
+            setQuery((current) => ({ ...current, page }));
+          }}
+          onPageSizeChange={(pageSize: MyScreenshotPageSize) => amend({ pageSize })}
+          pageSizes={MY_SCREENSHOT_PAGE_SIZES}
+          noun="screenshots"
+          emptyLabel="No screenshots match the current filters"
+          label="Screenshot pages"
+        />
       </div>
 
       {open && openIndex !== null && (
         <Preview
           screenshot={open}
-          today={today}
-          positionLabel={`${openIndex + 1} of ${cards.length.toLocaleString()}${hasMore ? "+" : ""}`}
+          today={serverToday}
+          positionLabel={`${(meta.page - 1) * meta.pageSize + openIndex + 1} of ${meta.total.toLocaleString()}`}
           onClose={() => setOpenIndex(null)}
           onPrevious={openIndex > 0 ? () => setOpenIndex(openIndex - 1) : null}
-          onNext={openIndex < cards.length - 1 ? () => setOpenIndex(openIndex + 1) : null}
+          onNext={
+            openIndex < screenshots.length - 1 ? () => setOpenIndex(openIndex + 1) : null
+          }
         />
       )}
     </section>
@@ -230,15 +332,6 @@ export default function MyScreenshotsPanel() {
 /** The image URL for a card. The one place this component names an endpoint. */
 function imageSrc(id: string): string {
   return `/api/performance/me/screenshots/${encodeURIComponent(id)}/image`;
-}
-
-function dedupe(cards: MyScreenshotCard[]): MyScreenshotCard[] {
-  const seen = new Set<string>();
-  return cards.filter((card) => {
-    if (seen.has(card.id)) return false;
-    seen.add(card.id);
-    return true;
-  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -279,6 +372,9 @@ function Card({
            * cookie, not a static asset the optimiser could fetch, cache or
            * rewrite. Putting it through the image pipeline would mean a second
            * copy of somebody's desktop in a cache that has no session in it.
+           *
+           * `loading="lazy"` is what makes a page of ninety-six affordable:
+           * only the cards scrolled to are ever requested.
            */
           // eslint-disable-next-line @next/next/no-img-element -- an authenticated byte stream, not an optimisable static asset.
           <img
@@ -542,35 +638,9 @@ function Preview({
   );
 }
 
-function sessionSpan(session: { startedAt: string; endedAt: string | null }): string {
-  const started = formatClock(session.startedAt, false);
-  return session.endedAt
-    ? `${started} – ${formatClock(session.endedAt, false)}`
-    : `${started} – now`;
-}
-
-function Fact({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="eyebrow">{label}</dt>
-      <dd className={`mt-0.5 truncate text-caption text-fg-2 ${mono ? "tnum font-mono" : ""}`}>
-        {value}
-      </dd>
-    </div>
-  );
-}
-
 /**
  * One edge chevron. Rendered even when there is nowhere to go, as a disabled
- * control, so the image does not jump at the ends of the list.
+ * control, so the image does not jump at the ends of a page.
  */
 function StepButton({
   side,
@@ -595,8 +665,89 @@ function StepButton({
 }
 
 /* -------------------------------------------------------------------------- */
-/* The two states that are not a grid                                         */
+/* Small parts                                                                */
 /* -------------------------------------------------------------------------- */
+
+function Fact({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="eyebrow">{label}</dt>
+      <dd className={`mt-0.5 truncate text-caption text-fg-2 ${mono ? "tnum font-mono" : ""}`}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <label htmlFor={htmlFor} className="field-label">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A native `<select>`, styled — the same one the admin viewer and the team
+ * report use, and not a custom listbox for the same reason: the platform
+ * control is better than anything that would be built here and comes with
+ * keyboard and screen-reader behaviour for free.
+ */
+function Select({
+  id,
+  value,
+  onChange,
+  options,
+  disabled = false,
+}: {
+  id: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
+}) {
+  return (
+    <span className="relative inline-flex items-center">
+      <select
+        id={id}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="ui-field h-9 min-w-[168px] appearance-none pr-8 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown
+        className="pointer-events-none absolute right-2.5 h-3.5 w-3.5 text-fg-4"
+        strokeWidth={2}
+        aria-hidden="true"
+      />
+    </span>
+  );
+}
 
 function SkeletonGrid({ count }: { count: number }) {
   return (
@@ -617,18 +768,98 @@ function SkeletonGrid({ count }: { count: number }) {
   );
 }
 
-function Empty() {
+function Empty({ title, body }: { title: string; body: string }) {
   return (
     <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
       <Camera className="h-6 w-6 text-fg-4" strokeWidth={1.5} aria-hidden="true" />
-      <p className="text-ui font-medium text-fg">No screenshots yet</p>
+      <p className="text-ui font-medium text-fg">{title}</p>
       {/* No placeholder cards behind this. An empty gallery showing greyed
           rectangles reads as "loading" forever. */}
-      <p className="max-w-md text-caption text-fg-3">
-        Screenshots are captured by the SpiderHunts Monitor while you are signed
-        in to it and on the clock. Once you have worked a shift with the Monitor
-        running, they will appear here.
-      </p>
+      <p className="max-w-md text-caption text-fg-3">{body}</p>
     </div>
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Copy                                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Why this grid is empty, said as specifically as the filters allow. */
+function emptyReason(query: MyScreenshotQuery): string {
+  const span =
+    query.fromMinutes !== null || query.toMinutes !== null
+      ? ` between ${formatTimeOfDay(query.fromMinutes) || "00:00"} and ${formatTimeOfDay(query.toMinutes) || "24:00"}`
+      : "";
+
+  if (query.workSessionId) {
+    return `None of your screenshots fall in the selected work session${span}.`;
+  }
+
+  if (query.preset === "all") {
+    return "Screenshots are captured by the SpiderHunts Monitor while you are signed in to it and on the clock. Once you have worked a shift with the Monitor running, they will appear here.";
+  }
+
+  const when =
+    query.preset === "today"
+      ? "today"
+      : query.preset === "yesterday"
+        ? "yesterday"
+        : `on ${query.day}`;
+
+  return `None of your screenshots were captured ${when}${span}. Screenshots are only taken while you are signed in to the Monitor and on the clock.`;
+}
+
+/** "All dates" / "Today · all day" / "2026-08-12 · 09:00–17:00". */
+function windowCaption(query: MyScreenshotQuery): string {
+  if (query.preset === "all") return "All dates";
+
+  const day =
+    query.preset === "today"
+      ? "Today"
+      : query.preset === "yesterday"
+        ? "Yesterday"
+        : query.day;
+
+  if (query.fromMinutes === null && query.toMinutes === null) {
+    return `${day} · all day`;
+  }
+
+  return `${day} · ${formatTimeOfDay(query.fromMinutes) || "00:00"}–${
+    formatTimeOfDay(query.toMinutes) || "24:00"
+  }`;
+}
+
+/** Which day a preset means, when the picker is switched. */
+function dayFor(preset: MyDatePreset, currentDay: string, today: string): string {
+  if (preset === "today") return today;
+  if (preset === "custom") return currentDay;
+  if (preset === "all") return today;
+  // "Yesterday" is resolved on the server from its own clock; this is only what
+  // the date input shows until the response lands.
+  const date = new Date(`${today}T00:00:00`);
+  date.setDate(date.getDate() - 1);
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+/**
+ * A shift in the picker: which day, its span, and how many captures it holds.
+ *
+ * The count is what makes the list usable — two shifts are told apart far
+ * faster by "34 shots" than by two timestamps that differ by minutes. It is a
+ * real count from the database, never an estimate, and it counts the whole
+ * shift rather than the current filter, which is why a session can read
+ * "34 shots" while the grid under a narrow time filter shows four.
+ */
+function sessionLabel(session: MyWorkSessionOption, today: string): string {
+  const day = formatDayLabel(session.startedAt, today);
+  const shots = `${session.screenshotCount} shot${session.screenshotCount === 1 ? "" : "s"}`;
+  return `${day} · ${sessionSpan(session)} · ${shots}`;
+}
+
+function sessionSpan(session: { startedAt: string; endedAt: string | null }): string {
+  const started = formatClock(session.startedAt, false);
+  return session.endedAt
+    ? `${started} – ${formatClock(session.endedAt, false)}`
+    : `${started} – now`;
 }

@@ -1,8 +1,9 @@
 import { prisma } from "./prisma";
 import {
-  type MyScreenshotCursor,
+  myScreenshotWindow,
   type MyScreenshotPayload,
-  encodeMyScreenshotCursor,
+  type MyScreenshotQuery,
+  type MyWorkSessionOption,
 } from "./myScreenshotsRules";
 
 /**
@@ -17,13 +18,24 @@ import {
  * would put the agent-reachable path through a function that still contains a
  * query capable of returning anybody's rows, one edit away from being wrong.
  *
- * So the agent path is its own two functions, and in both of them `userId` is a
- * required first argument that the callers take from the session row. There is
- * no parameter, no default and no optional form: a call site that has not
+ * So the agent path is its own functions, and in every one of them `userId` is
+ * a required first argument that the callers take from the session row. There
+ * is no parameter, no default and no optional form: a call site that has not
  * decided whose screenshots it wants does not compile. The clause is in the
  * `where` of every query below, not in a guard beside it, which is what makes
  * "an agent can only retrieve their own" a property of the statement sent to
  * Postgres rather than of a check somebody has to remember to run first.
+ *
+ * ---------------------------------------------------------------------------
+ * Filters narrow; they never widen
+ * ---------------------------------------------------------------------------
+ * The query object carries a date window and a work session id, both from the
+ * URL. Each is ANDed with `userId`, so the most a tampered filter can do is
+ * select fewer of the caller's own rows. Another agent's shift id asks for rows
+ * that are both theirs and yours and gets none — it narrows to nothing rather
+ * than widening to somebody, which is why the ids do not need to be validated
+ * against ownership before use, and why a nonsense one is an empty gallery
+ * rather than a 400.
  *
  * ---------------------------------------------------------------------------
  * Read-only, in the same structural sense
@@ -36,64 +48,66 @@ import {
  * imported here, and nothing here is imported by any of them.
  */
 
+/** The `where` every read below shares. `userId` first, and never optional. */
+function whereFor(userId: string, query: MyScreenshotQuery) {
+  const window = myScreenshotWindow(query);
+
+  return {
+    // The authenticated subject. Never absent, never from the request.
+    userId,
+    ...(window ? { capturedAt: { gte: window.from, lt: window.to } } : {}),
+    ...(query.workSessionId ? { workSessionId: query.workSessionId } : {}),
+  };
+}
+
 /**
  * One page of the caller's own screenshots, newest first.
  *
- * `userId` is the authenticated user. `cursor` is a position, never a subject —
- * see the note on {@link MyScreenshotCursor}. A cursor taken from somebody
- * else's browser still reads this user's rows, because the two clauses are
- * ANDed and only one of them decides whose list this is.
+ * Offset paged with a real `count`, rather than the keyset this used before the
+ * screen grew page numbers. A pager that says "page 3 of 12" needs the 12, and
+ * a total is the only honest way to produce one. The cost is bounded by the
+ * same index the ordered read uses, and by the filters: the count is over the
+ * window, not over the table.
  *
- * `take: limit + 1` is how "is there another page" is answered without a
- * `count()`: the extra row is looked at and thrown away. A count over an
- * agent's whole history would be a second full-table read on every scroll to
- * tell the reader a number the gallery does not show.
+ * The id is the tiebreak in the sort so that two captures in the same
+ * millisecond cannot swap places between one page and the next and be shown
+ * twice or not at all.
  */
 export async function myScreenshotPage(
   userId: string,
-  cursor: MyScreenshotCursor | null,
-  limit: number,
+  query: MyScreenshotQuery,
 ): Promise<MyScreenshotPayload> {
-  const rows = await prisma.screenshot.findMany({
-    where: {
-      // The authenticated subject. Never absent, never from the request.
-      userId,
-      // Keyset: strictly older than the last row of the previous page, with the
-      // id breaking a tie so two captures in the same millisecond can neither
-      // be shown twice nor skipped.
-      ...(cursor
-        ? {
-            OR: [
-              { capturedAt: { lt: cursor.capturedAt } },
-              { capturedAt: cursor.capturedAt, id: { lt: cursor.id } },
-            ],
-          }
-        : {}),
-    },
-    orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
-    take: limit + 1,
-    select: {
-      id: true,
-      capturedAt: true,
-      width: true,
-      height: true,
-      fileSize: true,
-      // Never `storageKey`, and never the user — one is a filesystem detail and
-      // the other is a name this payload has no reason to carry. A column that
-      // is not selected cannot be leaked by a careless serialisation.
-      workSessionId: true,
-      workSession: { select: { startedAt: true, endedAt: true } },
-    },
-  });
+  const where = whereFor(userId, query);
 
-  const hasMore = rows.length > limit;
-  const page = hasMore ? rows.slice(0, limit) : rows;
-  const last = page.at(-1);
+  const [rows, total, sessions] = await Promise.all([
+    prisma.screenshot.findMany({
+      where,
+      orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
+      skip: (query.page - 1) * query.pageSize,
+      take: query.pageSize,
+      select: {
+        id: true,
+        capturedAt: true,
+        width: true,
+        height: true,
+        fileSize: true,
+        // Never `storageKey`, and never the user — one is a filesystem detail
+        // and the other is a name this payload has no reason to carry. A column
+        // that is not selected cannot be leaked by a careless serialisation.
+        workSessionId: true,
+        workSession: { select: { startedAt: true, endedAt: true } },
+      },
+    }),
 
-  const activity = await activityForPage(userId, page);
+    prisma.screenshot.count({ where }),
+
+    myWorkSessions(userId, query),
+  ]);
+
+  const activity = await activityForPage(userId, rows);
 
   return {
-    screenshots: page.map((row) => ({
+    screenshots: rows.map((row) => ({
       id: row.id,
       capturedAt: row.capturedAt.toISOString(),
       width: row.width,
@@ -107,12 +121,68 @@ export async function myScreenshotPage(
         : null,
       activityPercentage: activity.get(row.id) ?? null,
     })),
-    nextCursor:
-      hasMore && last
-        ? encodeMyScreenshotCursor({ capturedAt: last.capturedAt, id: last.id })
-        : null,
-    hasMore,
+    meta: {
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
+    },
+    sessions,
   };
+}
+
+/**
+ * The caller's own shifts, for the picker.
+ *
+ * Scoped to `userId` like everything else here, so the picker cannot list a
+ * colleague's shift and therefore cannot offer an id that would select nothing.
+ * The date filter is honoured but the *time* filter is not — a shift that ran
+ * 09:00–17:00 should stay in the list while somebody narrows the grid to the
+ * afternoon, or the control they are using disappears as they use it.
+ *
+ * A picker, not a report: fifty is already more shifts than a person can
+ * plausibly want to choose between, and the count beside each is what actually
+ * makes the list usable.
+ */
+async function myWorkSessions(
+  userId: string,
+  query: MyScreenshotQuery,
+): Promise<MyWorkSessionOption[]> {
+  const window = myScreenshotWindow({
+    ...query,
+    // The whole day, whatever the time filter says.
+    fromMinutes: null,
+    toMinutes: null,
+  });
+
+  const rows = await prisma.workSession.findMany({
+    where: {
+      userId,
+      ...(window
+        ? {
+            startedAt: { lt: window.to },
+            // An open shift has no end and therefore overlaps anything that has
+            // begun.
+            OR: [{ endedAt: null }, { endedAt: { gt: window.from } }],
+          }
+        : {}),
+    },
+    orderBy: { startedAt: "desc" },
+    take: 50,
+    select: {
+      id: true,
+      startedAt: true,
+      endedAt: true,
+      _count: { select: { screenshots: true } },
+    },
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    startedAt: row.startedAt.toISOString(),
+    endedAt: row.endedAt?.toISOString() ?? null,
+    screenshotCount: row._count.screenshots,
+  }));
 }
 
 /**
@@ -169,8 +239,12 @@ async function activityForPage(
  * it. Here the ownership is part of the question asked of Postgres, so a
  * screenshot belonging to somebody else and a screenshot that never existed
  * produce the same thing — `null` — and the route above has only one answer to
- * give for both. That is requirement 5 satisfied by construction rather than by
- * remembering to make the two branches match.
+ * give for both. That is "another user's id is a 404" satisfied by construction
+ * rather than by remembering to make the two branches match.
+ *
+ * No filter reaches this. The image route is asked for one row by primary key
+ * and the date window is none of its business — a link to a capture must keep
+ * working whatever the gallery behind it is currently filtered to.
  *
  * `storageKey` is selected here and only here, because streaming the bytes is
  * the one thing that genuinely needs it. It never leaves the server.

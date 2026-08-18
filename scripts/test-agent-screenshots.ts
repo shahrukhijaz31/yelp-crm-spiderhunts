@@ -9,8 +9,8 @@ import { PrismaClient } from "../lib/generated/prisma/client";
 import { hashPassword } from "../lib/password";
 import { newStorageKey, putScreenshot, storageRoot } from "../lib/screenshotStorage";
 import {
-  MY_SCREENSHOT_MAX_PAGE_SIZE,
-  encodeMyScreenshotCursor,
+  DEFAULT_MY_SCREENSHOT_PAGE_SIZE,
+  MY_SCREENSHOT_PAGE_SIZES,
 } from "../lib/myScreenshotsRules";
 
 /**
@@ -28,15 +28,23 @@ import {
  * The question it exists to answer is not "does the gallery load". It is
  * whether an agent holding a valid session and a text editor can reach one
  * single byte belonging to somebody else — by changing a screenshot id, by
- * adding a `userId`, by replaying another agent's cursor, by asking for a
- * storage key, by calling the admin API, or by trying to delete anything at
- * all. Every one of those is below, and every one of them must fail.
+ * adding a `userId`, by passing another agent's work session to the filter, by
+ * asking for a storage key, by calling the admin API, or by trying to delete
+ * anything at all. Every one of those is below, and every one of them must
+ * fail.
+ *
+ * The second half of the file is the filters and the pager. Those are not
+ * security claims but they are the ones most likely to break quietly: a filter
+ * that is silently ignored looks exactly like a filter that matched everything,
+ * and a pager that double-counts looks exactly like a busy day. So every filter
+ * is checked against a count computed from the fixture rather than against
+ * itself, and the pages are walked and compared to the unpaged read.
  *
  * It creates a throwaway administrator and two throwaway agents (`mysstest-*`),
- * their shifts, their sessions, an activity interval and a handful of
- * screenshots with real files on disk — and deletes all of it on the way out,
- * including after a failure. It never touches an existing user, shift, session
- * or screenshot, and the only delete it performs is against a screenshot it
+ * their shifts, their sessions, an activity interval and thirty-odd screenshots
+ * with real files on disk — and deletes all of it on the way out, including
+ * after a failure. It never touches an existing user, shift, session or
+ * screenshot, and the only delete it performs is against a screenshot it
  * created itself, to prove the administrator's own path still works.
  *
  * Sessions are inserted directly rather than signed in for: a real portal
@@ -56,6 +64,9 @@ const SESSION_COOKIE =
   process.env.NODE_ENV === "production" ? "__Host-lp_session" : "lp_session";
 
 const MINE = "/api/performance/me/screenshots";
+
+/** Big enough to hold the whole fixture on one page. */
+const ALL_ON_ONE_PAGE = MY_SCREENSHOT_PAGE_SIZES[MY_SCREENSHOT_PAGE_SIZES.length - 1];
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -193,8 +204,24 @@ interface ListRow {
   activityPercentage: number | null;
 }
 
+interface Meta {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 function rowsOf(reply: Reply): ListRow[] {
   return (reply.body.screenshots as ListRow[] | undefined) ?? [];
+}
+
+function metaOf(reply: Reply): Meta {
+  return (reply.body.meta as Meta | undefined) ?? {
+    page: 0,
+    pageSize: 0,
+    total: -1,
+    totalPages: -1,
+  };
 }
 
 /** Local midnight plus a time of day, as an instant. */
@@ -203,6 +230,11 @@ function at(hours: number, minutes: number, dayOffset = 0): Date {
   date.setHours(hours, minutes, 0, 0);
   date.setDate(date.getDate() + dayOffset);
   return date;
+}
+
+function isoDay(date: Date): string {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 async function main(): Promise<void> {
@@ -234,13 +266,23 @@ async function main(): Promise<void> {
   );
 
   try {
-    const [aliceShift, bobShift] = await Promise.all([
+    const [aliceToday, aliceYesterday, bobShift] = await Promise.all([
       prisma.workSession.create({
         data: {
           userId: alice.id,
           startedAt: at(9, 0),
-          lastSeenAt: at(17, 0),
-          endedAt: at(17, 0),
+          lastSeenAt: at(18, 30),
+          endedAt: at(18, 30),
+          durationSeconds: 34_200,
+        },
+        select: { id: true },
+      }),
+      prisma.workSession.create({
+        data: {
+          userId: alice.id,
+          startedAt: at(9, 0, -1),
+          lastSeenAt: at(17, 0, -1),
+          endedAt: at(17, 0, -1),
           durationSeconds: 28_800,
         },
         select: { id: true },
@@ -258,22 +300,45 @@ async function main(): Promise<void> {
     ]);
 
     /*
-     * Alice gets five captures and Bob two, deliberately unequal: a scoping bug
-     * that returned everybody's rows would be invisible against a fixture where
-     * both agents have the same number.
+     * The fixture.
+     *
+     * Alice gets twenty-eight captures today at ten-minute intervals from 09:00,
+     * three yesterday, and Bob two — deliberately unequal, and deliberately more
+     * than one page. A scoping bug that returned everybody's rows would be
+     * invisible against a fixture where both agents have the same number, and a
+     * pager that silently returned everything would be invisible against one
+     * that fits on a single page.
      */
+    const aliceTodayTimes = Array.from({ length: 28 }, (_, index) =>
+      at(9 + Math.floor((index * 10) / 60), (index * 10) % 60),
+    );
+    const aliceYesterdayTimes = [at(9, 0, -1), at(12, 0, -1), at(15, 0, -1)];
+    const bobTimes = [at(10, 15), at(15, 40)];
+
     const fixtures = [
-      { owner: alice, shift: aliceShift.id, capturedAt: at(9, 20) },
-      { owner: alice, shift: aliceShift.id, capturedAt: at(10, 45) },
-      { owner: alice, shift: aliceShift.id, capturedAt: at(11, 55) },
-      { owner: alice, shift: aliceShift.id, capturedAt: at(14, 32) },
-      { owner: alice, shift: aliceShift.id, capturedAt: at(16, 10) },
-      { owner: bob, shift: bobShift.id, capturedAt: at(10, 15) },
-      { owner: bob, shift: bobShift.id, capturedAt: at(15, 40) },
+      ...aliceTodayTimes.map((capturedAt) => ({
+        owner: alice,
+        shift: aliceToday.id,
+        capturedAt,
+      })),
+      ...aliceYesterdayTimes.map((capturedAt) => ({
+        owner: alice,
+        shift: aliceYesterday.id,
+        capturedAt,
+      })),
+      ...bobTimes.map((capturedAt) => ({
+        owner: bob,
+        shift: bobShift.id,
+        capturedAt,
+      })),
     ];
 
-    const created: Array<{ id: string; userId: string; storageKey: string; capturedAt: Date }> =
-      [];
+    const created: Array<{
+      id: string;
+      userId: string;
+      storageKey: string;
+      capturedAt: Date;
+    }> = [];
 
     for (const fixture of fixtures) {
       const bytes = fakeJpeg(1920, 1080);
@@ -309,16 +374,16 @@ async function main(): Promise<void> {
     const bobShot = bobShots[0]!;
 
     /*
-     * One activity interval covering Alice's 10:45 capture, so the metadata the
+     * One activity interval covering Alice's second capture, so the metadata the
      * card shows is checked against a row that exists rather than only against
      * the nulls an empty table would produce.
      */
     await prisma.activityInterval.create({
       data: {
         userId: alice.id,
-        workSessionId: aliceShift.id,
-        startedAt: at(10, 45),
-        endedAt: at(10, 46),
+        workSessionId: aliceToday.id,
+        startedAt: aliceTodayTimes[1]!,
+        endedAt: new Date(aliceTodayTimes[1]!.getTime() + 60_000),
         durationSeconds: 60,
         keyboardActivityCount: 120,
         mouseActivityCount: 80,
@@ -332,7 +397,7 @@ async function main(): Promise<void> {
     const orphan = await prisma.screenshot.create({
       data: {
         userId: alice.id,
-        workSessionId: aliceShift.id,
+        workSessionId: aliceToday.id,
         capturedAt: at(17, 30),
         storageKey: orphanKey,
         width: 1920,
@@ -344,15 +409,15 @@ async function main(): Promise<void> {
       select: { id: true },
     });
 
-    // A sixth real capture of Alice's, created only so the administrator can
-    // delete something at the end without touching anything else under test.
+    // A real capture of Alice's, created only so the administrator can delete
+    // something at the end without touching anything else under test.
     const doomedKey = newStorageKey("image/jpeg", alice.id, at(18, 0));
     const doomedSize = await putScreenshot(doomedKey, fakeJpeg(1280, 720));
     storageKeys.push(doomedKey);
     const doomed = await prisma.screenshot.create({
       data: {
         userId: alice.id,
-        workSessionId: aliceShift.id,
+        workSessionId: aliceToday.id,
         capturedAt: at(18, 0),
         storageKey: doomedKey,
         width: 1280,
@@ -364,8 +429,19 @@ async function main(): Promise<void> {
       select: { id: true },
     });
 
-    /** Everything of Alice's the list endpoint should be able to reach. */
-    const aliceTotal = aliceShots.length + 2; // + the orphan row + the doomed one
+    /* What each filter should be able to reach, computed from the fixture. */
+    const expect = {
+      // + the orphan row and the doomed one, both Alice's and both today
+      all: aliceShots.length + 2,
+      today: aliceTodayTimes.length + 2,
+      yesterday: aliceYesterdayTimes.length,
+      todaySession: aliceTodayTimes.length + 2,
+      yesterdaySession: aliceYesterdayTimes.length,
+      // [09:00, 10:00) over today's captures: 09:00 .. 09:50
+      morningWindow: aliceTodayTimes.filter(
+        (time) => time.getHours() === 9,
+      ).length,
+    };
 
     const adminCookie = await signIn(admin.id);
     const aliceCookie = await signIn(alice.id);
@@ -375,15 +451,20 @@ async function main(): Promise<void> {
     section("1. An agent can list their own screenshots");
     // -----------------------------------------------------------------------
     {
-      const reply = await get(`${MINE}?limit=${MY_SCREENSHOT_MAX_PAGE_SIZE}`, aliceCookie);
+      const reply = await get(`${MINE}?pageSize=${ALL_ON_ONE_PAGE}`, aliceCookie);
       const rows = rowsOf(reply);
       const ids = new Set(rows.map((row) => row.id));
 
       check("the list answers 200", reply.status === 200, `status ${reply.status}`);
       check(
         "it returns every one of this agent's captures",
-        rows.length === aliceTotal,
-        `${rows.length} rows, expected ${aliceTotal}`,
+        rows.length === expect.all,
+        `${rows.length} rows, expected ${expect.all}`,
+      );
+      check(
+        "the total agrees with the rows",
+        metaOf(reply).total === expect.all,
+        `total ${metaOf(reply).total}`,
       );
       check(
         "and not one row belonging to the other agent",
@@ -408,7 +489,7 @@ async function main(): Promise<void> {
     section("2. The payload carries no key, no path and nobody else");
     // -----------------------------------------------------------------------
     {
-      const reply = await get(MINE, aliceCookie);
+      const reply = await get(`${MINE}?pageSize=${ALL_ON_ONE_PAGE}`, aliceCookie);
 
       check("it does not carry a storage key field", !reply.raw.includes("storageKey"));
       check(
@@ -427,13 +508,21 @@ async function main(): Promise<void> {
       check(
         "the metadata the gallery shows is present",
         rowsOf(reply).every(
-          (row) =>
-            typeof row.capturedAt === "string" && "activityPercentage" in row,
+          (row) => typeof row.capturedAt === "string" && "activityPercentage" in row,
         ),
       );
       check(
         "the activity figure recorded for one capture came through",
         rowsOf(reply).some((row) => row.activityPercentage === 67),
+      );
+
+      // The shift picker travels with the page. It must list this agent's own
+      // shifts and no one else's — an id in it is an id the client may send back.
+      const sessions = (reply.body.sessions as Array<{ id: string }>) ?? [];
+      check(
+        "the work session picker lists only this agent's shifts",
+        sessions.length > 0 && sessions.every((session) => session.id !== bobShift.id),
+        `${sessions.length} sessions`,
       );
     }
 
@@ -441,69 +530,157 @@ async function main(): Promise<void> {
     section("3. Pagination — a page at a time, and never the whole table");
     // -----------------------------------------------------------------------
     {
-      const first = await get(`${MINE}?limit=2`, aliceCookie);
-      const firstRows = rowsOf(first);
+      const first = await get(`${MINE}?pageSize=24`, aliceCookie);
+      const firstMeta = metaOf(first);
 
-      check("a limit of 2 returns 2 rows", firstRows.length === 2, `${firstRows.length}`);
-      check("it says there is more", first.body.hasMore === true);
-      check("it hands back a cursor", typeof first.body.nextCursor === "string");
-
-      const second = await get(
-        `${MINE}?limit=2&cursor=${encodeURIComponent(String(first.body.nextCursor))}`,
-        aliceCookie,
+      check("a page size of 24 returns 24 rows", rowsOf(first).length === 24);
+      check("the page number is reported", firstMeta.page === 1);
+      check(
+        "the total counts every matching row, not the page",
+        firstMeta.total === expect.all,
+        `${firstMeta.total}`,
       );
-      const secondRows = rowsOf(second);
-      const firstIds = new Set(firstRows.map((row) => row.id));
+      check(
+        "the page count follows from the total",
+        firstMeta.totalPages === Math.ceil(expect.all / 24),
+        `${firstMeta.totalPages}`,
+      );
 
-      check("the next page returns 2 more rows", secondRows.length === 2);
+      const second = await get(`${MINE}?pageSize=24&page=2`, aliceCookie);
+      const firstIds = new Set(rowsOf(first).map((row) => row.id));
+      const secondIds = rowsOf(second).map((row) => row.id);
+
+      check(
+        "the second page holds the remainder",
+        secondIds.length === expect.all - 24,
+        `${secondIds.length}`,
+      );
       check(
         "with no overlap against the first",
-        secondRows.every((row) => !firstIds.has(row.id)),
+        secondIds.every((id) => !firstIds.has(id)),
       );
       check(
         "and none of them the other agent's",
-        secondRows.every((row) => !bobShots.some((shot) => shot.id === row.id)),
+        secondIds.every((id) => !bobShots.some((shot) => shot.id === id)),
       );
 
-      // Walk to the end and count. A keyset that skipped or repeated a row
-      // would not land on the same total the unpaged read reported.
+      // Walk every page and compare to the unpaged read. A skip/take that
+      // double-counted or dropped a row lands here and nowhere else.
       const walked = new Set<string>();
-      let cursor: string | null = null;
-      let pages = 0;
-      do {
-        const page: Reply = await get(
-          `${MINE}?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
-          aliceCookie,
-        );
-        for (const row of rowsOf(page)) walked.add(row.id);
-        cursor = (page.body.nextCursor as string | null) ?? null;
-        pages += 1;
-      } while (cursor && pages < 20);
-
+      for (let page = 1; page <= firstMeta.totalPages; page += 1) {
+        const reply = await get(`${MINE}?pageSize=24&page=${page}`, aliceCookie);
+        for (const row of rowsOf(reply)) walked.add(row.id);
+      }
       check(
-        "walking the cursor visits every row exactly once",
-        walked.size === aliceTotal,
-        `${walked.size} of ${aliceTotal}`,
+        "walking the pages visits every row exactly once",
+        walked.size === expect.all,
+        `${walked.size} of ${expect.all}`,
       );
-      check("and stops", cursor === null);
 
-      const huge = await get(`${MINE}?limit=100000`, aliceCookie);
+      const past = await get(`${MINE}?pageSize=24&page=99`, aliceCookie);
       check(
-        "an enormous limit is clamped, not honoured",
-        rowsOf(huge).length <= MY_SCREENSHOT_MAX_PAGE_SIZE,
+        "a page past the end is an empty page, not an error",
+        past.status === 200 && rowsOf(past).length === 0,
+        `status ${past.status}`,
+      );
+      check(
+        "and it still reports the real total",
+        metaOf(past).total === expect.all,
+        `${metaOf(past).total}`,
+      );
+
+      const huge = await get(`${MINE}?pageSize=100000`, aliceCookie);
+      check(
+        "a page size that is not on the menu falls back to the default",
+        metaOf(huge).pageSize === DEFAULT_MY_SCREENSHOT_PAGE_SIZE,
+        `pageSize ${metaOf(huge).pageSize}`,
+      );
+      check(
+        "so it cannot be used to fetch everything at once",
+        rowsOf(huge).length <= DEFAULT_MY_SCREENSHOT_PAGE_SIZE,
         `${rowsOf(huge).length} rows`,
       );
 
-      const junk = await get(`${MINE}?limit=-5&cursor=not-a-cursor`, aliceCookie);
+      const junk = await get(`${MINE}?pageSize=-5&page=abc&date=wat`, aliceCookie);
       check(
-        "a nonsense cursor and limit start the list again rather than erroring",
-        junk.status === 200 && rowsOf(junk).length > 0,
+        "nonsense parameters are clamped rather than rejected",
+        junk.status === 200 && metaOf(junk).page === 1 && rowsOf(junk).length > 0,
         `status ${junk.status}`,
       );
     }
 
     // -----------------------------------------------------------------------
-    section("4. An agent can view their own image, and it is served safely");
+    section("4. The filters actually filter");
+    // -----------------------------------------------------------------------
+    {
+      const cases: Array<[string, string, number]> = [
+        ["all dates is the default", `pageSize=${ALL_ON_ONE_PAGE}`, expect.all],
+        ["date=today", `date=today&pageSize=${ALL_ON_ONE_PAGE}`, expect.today],
+        ["date=yesterday", `date=yesterday&pageSize=${ALL_ON_ONE_PAGE}`, expect.yesterday],
+        [
+          "date=custom on yesterday's day",
+          `date=custom&day=${isoDay(at(0, 0, -1))}&pageSize=${ALL_ON_ONE_PAGE}`,
+          expect.yesterday,
+        ],
+        [
+          "a time window inside today",
+          `date=today&from=09:00&to=10:00&pageSize=${ALL_ON_ONE_PAGE}`,
+          expect.morningWindow,
+        ],
+        [
+          "a reversed time window is read the right way round",
+          `date=today&from=10:00&to=09:00&pageSize=${ALL_ON_ONE_PAGE}`,
+          expect.morningWindow,
+        ],
+        [
+          "session = today's shift",
+          `session=${aliceToday.id}&pageSize=${ALL_ON_ONE_PAGE}`,
+          expect.todaySession,
+        ],
+        [
+          "session = yesterday's shift",
+          `session=${aliceYesterday.id}&pageSize=${ALL_ON_ONE_PAGE}`,
+          expect.yesterdaySession,
+        ],
+        [
+          "session and date together narrow further",
+          `date=yesterday&session=${aliceToday.id}&pageSize=${ALL_ON_ONE_PAGE}`,
+          0,
+        ],
+        [
+          "a day with nothing on it",
+          `date=custom&day=1999-01-01&pageSize=${ALL_ON_ONE_PAGE}`,
+          0,
+        ],
+      ];
+
+      for (const [label, params, expected] of cases) {
+        const reply = await get(`${MINE}?${params}`, aliceCookie);
+        const meta = metaOf(reply);
+        check(
+          `${label} → ${expected}`,
+          reply.status === 200 &&
+            rowsOf(reply).length === expected &&
+            meta.total === expected,
+          `${rowsOf(reply).length} rows, total ${meta.total}`,
+        );
+      }
+
+      // A time of day cannot mean anything across an unbounded range of days,
+      // so it is dropped rather than silently applied to one of them.
+      const acrossAll = await get(
+        `${MINE}?from=09:00&to=10:00&pageSize=${ALL_ON_ONE_PAGE}`,
+        aliceCookie,
+      );
+      check(
+        "a time filter with no date selected is ignored, not half-applied",
+        metaOf(acrossAll).total === expect.all,
+        `total ${metaOf(acrossAll).total}`,
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    section("5. An agent can view their own image, and it is served safely");
     // -----------------------------------------------------------------------
     {
       const target = aliceShots[0]!;
@@ -548,10 +725,22 @@ async function main(): Promise<void> {
         gone.status === 410,
         `status ${gone.status}`,
       );
+
+      // A link to a capture must keep working whatever the gallery behind it is
+      // filtered to — the image route is asked for one row, not for a view.
+      const filtered = await get(
+        `${MINE}/${target.id}/image?date=custom&day=1999-01-01&session=${bobShift.id}`,
+        aliceCookie,
+      );
+      check(
+        "filters on the image URL neither grant nor deny anything",
+        filtered.status === 200,
+        `status ${filtered.status}`,
+      );
     }
 
     // -----------------------------------------------------------------------
-    section("5. IDOR — another agent's screenshot, by every route in");
+    section("6. IDOR — another agent's screenshot, by every route in");
     // -----------------------------------------------------------------------
     {
       const stranger = await get(`${MINE}/${bobShot.id}/image`, aliceCookie);
@@ -600,10 +789,10 @@ async function main(): Promise<void> {
     }
 
     // -----------------------------------------------------------------------
-    section("6. Nothing in the request can change whose list it is");
+    section("7. Nothing in the request can change whose list it is");
     // -----------------------------------------------------------------------
     {
-      const baseline = rowsOf(await get(`${MINE}?limit=${MY_SCREENSHOT_MAX_PAGE_SIZE}`, aliceCookie))
+      const baseline = rowsOf(await get(`${MINE}?pageSize=${ALL_ON_ONE_PAGE}`, aliceCookie))
         .map((row) => row.id)
         .sort();
 
@@ -612,14 +801,12 @@ async function main(): Promise<void> {
         `agent=${bob.id}`,
         `agentId=${bob.id}`,
         `user=${bob.id}`,
-        `session=${bobShift.id}`,
-        `workSessionId=${bobShift.id}`,
-        `userId=${bob.id}&agent=${bob.id}&session=${bobShift.id}`,
+        `userId=${bob.id}&agent=${bob.id}&agentId=${bob.id}`,
       ];
 
       for (const attempt of attempts) {
         const reply = await get(
-          `${MINE}?limit=${MY_SCREENSHOT_MAX_PAGE_SIZE}&${attempt}`,
+          `${MINE}?pageSize=${ALL_ON_ONE_PAGE}&${attempt}`,
           aliceCookie,
         );
         const ids = rowsOf(reply).map((row) => row.id).sort();
@@ -633,36 +820,52 @@ async function main(): Promise<void> {
         );
       }
 
-      // A cursor minted from another agent's row. It is a position, not a
-      // subject: it may move Alice's window, but it must not populate it with
-      // Bob's rows.
-      const forged = encodeMyScreenshotCursor({
-        capturedAt: new Date(bobShot.capturedAt.getTime() + 60_000),
-        id: bobShot.id,
-      });
-      const replayed = await get(
-        `${MINE}?limit=${MY_SCREENSHOT_MAX_PAGE_SIZE}&cursor=${encodeURIComponent(forged)}`,
+      /*
+       * The work session filter is the one id a client legitimately supplies, so
+       * it gets its own checks: another agent's shift must narrow to nothing
+       * rather than widen to them, and it must not be able to reach their rows
+       * from either direction.
+       */
+      const foreign = await get(
+        `${MINE}?pageSize=${ALL_ON_ONE_PAGE}&session=${bobShift.id}`,
         aliceCookie,
       );
-      const replayedIds = new Set(rowsOf(replayed).map((row) => row.id));
-
       check(
-        "another agent's cursor returns none of their rows",
-        replayed.status === 200 && bobShots.every((shot) => !replayedIds.has(shot.id)),
-        `status ${replayed.status}`,
+        "another agent's work session returns an empty page, not their gallery",
+        foreign.status === 200 &&
+          rowsOf(foreign).length === 0 &&
+          metaOf(foreign).total === 0,
+        `${rowsOf(foreign).length} rows, total ${metaOf(foreign).total}`,
       );
       check(
-        "every row it does return is still this agent's",
-        [...replayedIds].every((id) =>
-          aliceShots.some((shot) => shot.id === id) ||
-          id === orphan.id ||
-          id === doomed.id,
-        ),
+        "and it leaks nothing about them",
+        !foreign.raw.includes(bob.id) && !foreign.raw.includes(bob.name),
+      );
+
+      const mirrored = await get(
+        `${MINE}?pageSize=${ALL_ON_ONE_PAGE}&session=${aliceToday.id}`,
+        bobCookie,
+      );
+      check(
+        "and the same in reverse — Alice's shift returns nothing to Bob",
+        mirrored.status === 200 && rowsOf(mirrored).length === 0,
+        `${rowsOf(mirrored).length} rows`,
+      );
+
+      const nonsenseSession = await get(
+        `${MINE}?pageSize=${ALL_ON_ONE_PAGE}&session=../../etc/passwd`,
+        aliceCookie,
+      );
+      check(
+        "a malformed session id is dropped, not passed on",
+        nonsenseSession.status === 200 &&
+          rowsOf(nonsenseSession).length === baseline.length,
+        `status ${nonsenseSession.status}, ${rowsOf(nonsenseSession).length} rows`,
       );
     }
 
     // -----------------------------------------------------------------------
-    section("7. The agent endpoints are read-only");
+    section("8. The agent endpoints are read-only");
     // -----------------------------------------------------------------------
     {
       const target = aliceShots[1]!;
@@ -689,7 +892,7 @@ async function main(): Promise<void> {
     }
 
     // -----------------------------------------------------------------------
-    section("8. The admin screenshot API is unreachable from an agent session");
+    section("9. The admin screenshot API is unreachable from an agent session");
     // -----------------------------------------------------------------------
     {
       const own = aliceShots[2]!;
@@ -732,7 +935,7 @@ async function main(): Promise<void> {
     }
 
     // -----------------------------------------------------------------------
-    section("9. Signed out reaches nothing");
+    section("10. Signed out reaches nothing");
     // -----------------------------------------------------------------------
     {
       const target = aliceShots[0]!;
@@ -750,7 +953,6 @@ async function main(): Promise<void> {
       );
       check("no image bytes came back", !image.raw.startsWith("�"));
 
-      // A stale or invented cookie is not a session.
       const forged = `${SESSION_COOKIE}=${randomBytes(32).toString("base64url")}`;
       const withJunk = await get(MINE, forged);
       check(
@@ -761,7 +963,7 @@ async function main(): Promise<void> {
     }
 
     // -----------------------------------------------------------------------
-    section("10. The administrator keeps everything they had");
+    section("11. The administrator keeps everything they had");
     // -----------------------------------------------------------------------
     {
       const own = aliceShots[3]!;
@@ -809,10 +1011,12 @@ async function main(): Promise<void> {
         (await prisma.screenshot.count({ where: { id: doomed.id } })) === 0,
       );
 
-      const afterwards = await get(`${MINE}?limit=${MY_SCREENSHOT_MAX_PAGE_SIZE}`, aliceCookie);
+      const afterwards = await get(`${MINE}?pageSize=${ALL_ON_ONE_PAGE}`, aliceCookie);
       check(
         "the agent's own list reflects the deletion",
-        rowsOf(afterwards).every((row) => row.id !== doomed.id),
+        rowsOf(afterwards).every((row) => row.id !== doomed.id) &&
+          metaOf(afterwards).total === expect.all - 1,
+        `total ${metaOf(afterwards).total}`,
       );
     }
   } finally {

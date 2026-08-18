@@ -13,6 +13,7 @@ import CountUp from "./CountUp";
 import MyScreenshotsPanel from "./MyScreenshotsPanel";
 import { useSpotlight } from "./useSpotlight";
 import { useWorkSession } from "./WorkSessionProvider";
+import type { MyScreenshotPayload } from "@/lib/myScreenshotsRules";
 import {
   contactRate,
   conversionRate,
@@ -47,9 +48,14 @@ import {
 export default function MyPerformancePanel({
   performance,
   name,
+  screenshots,
+  serverToday,
 }: {
   performance: PersonalPerformance;
   name: string;
+  /** The first page of this reader's own captures, rendered by the server. */
+  screenshots: MyScreenshotPayload;
+  serverToday: string;
 }) {
   const { startedAt, currentSessionSeconds, todayTotalSeconds } = useWorkSession();
   const { today, week, daily } = performance;
@@ -150,16 +156,16 @@ export default function MyPerformancePanel({
       </section>
 
       {/* --- my screenshots ---------------------------------------------- */}
-      {/* Last on the page, and a client component of its own, because it is the
-          only thing here the server does not already know: the figures above
-          are rendered from one query the page awaited, and blocking that render
-          on a gallery nobody has scrolled to yet would make the numbers slower
-          for the sake of pictures. It fetches its own first page on mount and
-          the rest as they are scrolled to.
+      {/* Last on the page: the figures above are what somebody came for, and a
+          gallery is what they scroll to afterwards. The first page is handed
+          in from the server alongside those figures — the panel is a client
+          component because filtering and paging are interactions, not because
+          it has anything to fetch before it can draw.
 
-          It shows this reader's captures and nothing else, and it has no
-          controls — see the note at the top of `MyScreenshotsPanel`. */}
-      <MyScreenshotsPanel />
+          It shows this reader's captures and nothing else, its filters cannot
+          name a person, and it has no delete, upload or retention controls —
+          see the note at the top of `MyScreenshotsPanel`. */}
+      <MyScreenshotsPanel initialPayload={screenshots} serverToday={serverToday} />
     </div>
   );
 }
