@@ -26,10 +26,12 @@ import { hashPassword } from "../lib/password";
  * ---------------------------------------------------------------------------
  * How time passes in here
  * ---------------------------------------------------------------------------
- * The grace window is five minutes, and a test may not sleep for it. Time is
+ * The grace window is half an hour, and a test may not sleep for it. Time is
  * therefore moved by ageing the row: `last_seen_at` is pushed into the past to
- * mean "this tab has been hidden for ten minutes", which is exactly the state a
- * hidden tab produces — it stops beating, and the column stops moving. Nothing
+ * mean "this tab has been hidden for over half an hour", which is exactly the
+ * state a hidden tab produces — it stops beating, and the column stops moving.
+ * Every ageing below is expressed against `STALE_MS` rather than as a literal,
+ * so widening the window again does not silently turn these into no-ops. Nothing
  * about the code under test is stubbed, and the server's own clock is still the
  * only clock any decision is made on.
  *
@@ -62,10 +64,25 @@ const PASSWORD = "liveness-test-Pa55phrase";
 const SESSION_COOKIE =
   process.env.NODE_ENV === "production" ? "__Host-lp_session" : "lp_session";
 
-/** `STALE_MS` in `lib/workSessions.ts`: five beats of sixty seconds. */
-const STALE_MS = 5 * 60 * 1000;
+/**
+ * `STALE_MS` in `lib/workSessions.ts`: half an hour of silence on *both*
+ * signals. No longer a multiple of the heartbeat — see the note there.
+ */
+const STALE_MS = 30 * 60 * 1000;
 /** `MONITOR_TOUCH_AFTER_MS` in the same file — the write throttle. */
 const MONITOR_TOUCH_AFTER_MS = 60 * 1000;
+
+/**
+ * An instant far enough back to count as silence, as a multiple of the grace
+ * window rather than a literal number of minutes.
+ *
+ * The window used to be five minutes and is now thirty. Every "this tab went
+ * quiet" fixture below was written as `minutesAgo(10)`, which was twice the old
+ * window and is a third of the new one — so widening `STALE_MS` would have
+ * turned each of them into "this tab is still beating" and quietly inverted the
+ * assertion underneath. Deriving them removes that trap for the next change.
+ */
+const staleBy = (multiple: number) => new Date(Date.now() - STALE_MS * multiple);
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -446,7 +463,7 @@ async function main(): Promise<void> {
   await prisma.workSession.update({
     where: { id: shiftId },
     data: {
-      lastSeenAt: minutesAgo(10),
+      lastSeenAt: staleBy(2),
       lastMonitorSeenAt: new Date(Date.now() - MONITOR_TOUCH_AFTER_MS - 5000),
     },
   });
@@ -455,7 +472,7 @@ async function main(): Promise<void> {
   const hiddenSession = hiddenPoll.body.workSession as Record<string, unknown> | undefined;
 
   check(
-    "the browser heartbeat is 10 minutes stale — twice the grace window",
+    "the browser heartbeat is well past the grace window — twice over",
     Date.now() - (await sessionById(shiftId))!.lastSeenAt.getTime() > STALE_MS,
   );
   check("the shift is still reported active", hiddenSession?.active === true);
@@ -583,10 +600,11 @@ async function main(): Promise<void> {
 
   // Held rather than recomputed later: the shift must close at *this* instant,
   // and a few seconds of test runtime must not be mistaken for a wrong answer.
-  const monitorDiedAt = minutesAgo(10);
+  const monitorDiedAt = staleBy(1.5);
+  const browserDiedAt = staleBy(3);
   await prisma.workSession.update({
     where: { id: shiftId },
-    data: { lastSeenAt: minutesAgo(30), lastMonitorSeenAt: monitorDiedAt },
+    data: { lastSeenAt: browserDiedAt, lastMonitorSeenAt: monitorDiedAt },
   });
 
   const stalePoll = await monitorPoll(aliceDevice2.accessToken);
@@ -624,7 +642,8 @@ async function main(): Promise<void> {
     "closed at the LATER of the two signals, not the browser's",
     closed?.endedAt?.getTime() === monitorDiedAt.getTime(),
     `got ${String(closed?.endedAt)}, wanted ${monitorDiedAt.toISOString()} ` +
-      `(the browser's ${minutesAgo(30).toISOString()} would be 20 minutes short)`,
+      `(the browser's ${browserDiedAt.toISOString()} would be ` +
+      `${Math.round((monitorDiedAt.getTime() - browserDiedAt.getTime()) / 60000)} minutes short)`,
   );
 
   const fresh = await openSessionOf(alice.id);
@@ -726,7 +745,8 @@ async function main(): Promise<void> {
     check(
       "and their tracked time counts the hidden hour, not just the beating half",
       typeof bobRow?.todaySeconds === "number" && (bobRow.todaySeconds as number) > 80 * 60,
-      `got ${String(bobRow?.todaySeconds)} — a browser-only clamp would give about ${35 * 60}`,
+      `got ${String(bobRow?.todaySeconds)} — a browser-only clamp would give about ` +
+        `${90 * 60 - (60 * 60 - STALE_MS / 1000)}`,
     );
   }
 
@@ -734,13 +754,36 @@ async function main(): Promise<void> {
   section("11. Existing behaviour is unchanged");
   /* ------------------------------------------------------------------------ */
 
+  /*
+   * The reported problem, as an assertion: an agent with no Monitor switches to
+   * another tab or minimises Chrome, so the portal stops beating, and ten
+   * minutes later they are still on the clock. Under the old five-minute window
+   * this shift was closed underneath them — twice over — with nothing else
+   * holding it open.
+   *
+   * Ten minutes is chosen because it is past the *old* window and inside the
+   * new one, so this check fails if the window is ever narrowed back.
+   */
+  check(
+    "a ten-minute-quiet tab with no Monitor is STILL on the clock",
+    await (async () => {
+      await prisma.workSession.update({
+        where: { id: bobShift!.id },
+        data: { lastSeenAt: minutesAgo(10), lastMonitorSeenAt: null },
+      });
+      const stillOn = await monitorPoll(bobDevice.accessToken);
+      const body = stillOn.body.workSession as Record<string, unknown> | undefined;
+      return body?.active === true;
+    })(),
+  );
+
   check(
     "a shift with no Monitor still goes stale on the browser heartbeat alone",
     await (async () => {
       // `last_monitor_seen_at` null — every shift worked before this shipped.
       await prisma.workSession.update({
         where: { id: bobShift!.id },
-        data: { lastSeenAt: minutesAgo(10), lastMonitorSeenAt: null },
+        data: { lastSeenAt: staleBy(2), lastMonitorSeenAt: null },
       });
       const bobPoll = await monitorPoll(bobDevice.accessToken);
       const body = bobPoll.body.workSession as Record<string, unknown> | undefined;

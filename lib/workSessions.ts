@@ -76,12 +76,12 @@ import { prisma } from "./prisma";
  * reports apply — goes through one of those two and therefore cannot drift into
  * disagreeing.
  *
- * What this deliberately is **not**: a longer grace window. {@link STALE_MS} is
- * unchanged at five beats. A workstation whose Monitor has died and whose
- * browser has gone quiet is stale on exactly the old schedule, and is closed at
- * the last instant either signal was seen — never at "now", so nothing is
- * credited for the silence. Both signals go quiet, the shift ends, and the
- * Monitor is told it is off the clock on its next poll.
+ * What this deliberately is **not**: a way to keep a shift alive on no signal
+ * at all. A workstation whose Monitor has died and whose browser has gone quiet
+ * is stale once {@link STALE_MS} has passed, and is closed at the last instant
+ * either signal was seen — never at "now", so nothing is credited for the
+ * silence. Both signals go quiet, the shift ends, and the Monitor is told it is
+ * off the clock on its next poll.
  *
  * What this is also not: a way for the Monitor to *start* a shift.
  * {@link touchMonitorLiveness} can only update a row that is already open and
@@ -100,20 +100,43 @@ import { prisma } from "./prisma";
 
 /*
  * The heartbeat interval lives in `lib/performanceRules.ts` — the browser sets
- * its timer from it and the staleness window below is derived from it, so the
- * two ends cannot drift into disagreeing about what a dead session is. It is
- * re-exported here because this is the module the server side reads it from.
+ * its timer from it, so both ends agree on how often a live tab checks in. The
+ * staleness window below is no longer derived from it and is stated outright;
+ * see {@link STALE_MS} for why the two were separated. It is re-exported here
+ * because this is the module the server side reads it from.
  */
 export { HEARTBEAT_SECONDS };
 
 /**
- * How long after the last heartbeat a session is presumed dead.
+ * How long after the last signal of life a session is presumed dead.
  *
- * Five beats. Generous enough that a laptop lid closed over lunch, a sleeping
- * phone or a minute of bad wifi does not chop a shift in half, tight enough
- * that a crash costs five minutes rather than the rest of the day.
+ * Thirty minutes, and **deliberately not a multiple of the heartbeat**. It was
+ * five beats, which tied two unrelated questions to one number: how often a
+ * live tab checks in, and how long a quiet one is given before its shift is
+ * closed. Those want opposite things — the first wants to be frequent, so an
+ * open tab is precisely tracked, and the second wants to be patient, so an
+ * agent is not punished for looking away.
+ *
+ * Five minutes was far too impatient. A tab does not beat while it is hidden
+ * (see the note in `WorkSessionProvider`), so an agent who switched to another
+ * tab or minimised Chrome to work in another application went quiet, and five
+ * minutes later the portal closed a shift they were in the middle of. For an
+ * agent running the Monitor the desktop signal covers this; for one who is not,
+ * nothing did, and this is the case that was actually breaking.
+ *
+ * Thirty minutes is long enough that ordinary work outside the browser — a
+ * call, a spreadsheet, a lunch break with the lid down — never interrupts a
+ * shift, and short enough that a crashed browser or a laptop taken home costs
+ * half an hour of over-count rather than a night. The two failure modes are not
+ * symmetric and this is not a midpoint: closing a live agent's shift is silent
+ * and wrong in the record, while over-counting an abandoned one is visible,
+ * bounded, and gets queried.
+ *
+ * The heartbeat itself is untouched at {@link HEARTBEAT_SECONDS}. A live tab
+ * still checks in once a minute, so this window is the *tolerance for silence*
+ * and never the resolution at which presence is measured.
  */
-const STALE_MS = 5 * HEARTBEAT_SECONDS * 1000;
+const STALE_MS = 30 * 60 * 1000;
 
 /*
  * Prisma stores `DateTime` as `timestamp(3)` — no timezone — holding UTC. Two
@@ -453,7 +476,7 @@ export async function heartbeatWorkSession(userId: string): Promise<WorkClock> {
       .update({ where: { id: active.id }, data: { lastSeenAt: new Date() } })
       .catch(() => {
         // Bookkeeping. A missed beat costs nothing: the next one lands, and the
-        // grace window is five of them wide.
+        // grace window is thirty of them wide.
       });
   }
 
@@ -469,8 +492,14 @@ export async function heartbeatWorkSession(userId: string): Promise<WorkClock> {
  * activity interval, an app-usage segment, a screenshot — and every one of them
  * is a liveness signal, so without a throttle a busy workstation would rewrite
  * the same column many times a minute for no gain. One beat, matching the
- * portal's, is a twentieth of the grace window and the same figure
+ * portal's, is a thirtieth of the grace window and the same figure
  * `lib/monitorAuth.ts` already throttles `monitor_devices.last_seen_at` with.
+ *
+ * Left at one minute when the grace window grew to thirty: this is a *write*
+ * throttle, and writing the column more often than the window needs costs
+ * nothing while keeping the Monitor's liveness precise. Tying it to the window
+ * would make a monitored shift's last-seen instant coarse by half an hour,
+ * which is the figure a stale shift is then closed at.
  */
 const MONITOR_TOUCH_AFTER_MS = HEARTBEAT_SECONDS * 1000;
 
@@ -507,7 +536,7 @@ const MONITOR_TOUCH_AFTER_MS = HEARTBEAT_SECONDS * 1000;
  * not defended against with a check, it is unrepresentable.
  *
  * Returns nothing and throws nothing. A missed touch costs a fraction of a
- * grace window that is twenty beats wide, and a monitoring request must never
+ * grace window that is thirty beats wide, and a monitoring request must never
  * fail because a bookkeeping write did.
  */
 export async function touchMonitorLiveness(userId: string): Promise<void> {

@@ -77,6 +77,12 @@ import { HEARTBEAT_SECONDS, type WorkClock } from "@/lib/performanceRules";
  * module note in `lib/workSessions.ts`), so a hidden tab beside a running
  * Monitor costs nothing at all.
  *
+ * For an agent with no Monitor there is only this beat, and the tolerance for
+ * its silence is the grace window rather than a second signal. That window is
+ * half an hour (`STALE_MS`), so switching tabs, minimising Chrome to work in
+ * another application, or taking a call does not end a shift — which at the
+ * original five minutes it very much did.
+ *
  * Nothing in this file ends a session, and nothing in it needed to change for
  * that: `visibilitychange` has only ever *skipped* a beat here, never sent a
  * "stop". Coming back to the front fires one immediately, and because the shift
@@ -191,9 +197,9 @@ export function WorkSessionProvider({
       const next = payload.clock;
       setState({ clock: next, skewMs: Date.now() - new Date(next.serverNow).getTime() });
     } catch {
-      // Offline, or the server restarting mid-deploy. The grace window is five
-      // beats wide, so a missed one costs nothing and a banner would cost an
-      // agent their attention in the middle of a call.
+      // Offline, or the server restarting mid-deploy. The grace window is
+      // thirty beats wide, so a missed one costs nothing and a banner would
+      // cost an agent their attention in the middle of a call.
     }
   }, []);
 
