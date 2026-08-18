@@ -20,6 +20,7 @@
     "test:screenshots": "tsx scripts/test-screenshots.ts",
     "test:screenshot-viewer": "tsx scripts/test-screenshot-viewer.ts",
     "test:screenshot-delete": "tsx scripts/test-screenshot-deletion.ts",
+    "test:agent-screenshots": "tsx scripts/test-agent-screenshots.ts",
     "test:productivity": "tsx scripts/test-productivity.ts",
     "test:app-usage": "tsx scripts/test-app-usage.ts",
     "test:monitor-download": "tsx scripts/test-monitor-download.ts",

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import CountUp from "./CountUp";
+import MyScreenshotsPanel from "./MyScreenshotsPanel";
 import { useSpotlight } from "./useSpotlight";
 import { useWorkSession } from "./WorkSessionProvider";
 import {
@@ -147,6 +148,18 @@ export default function MyPerformancePanel({
 
         <DailyChart days={daily} />
       </section>
+
+      {/* --- my screenshots ---------------------------------------------- */}
+      {/* Last on the page, and a client component of its own, because it is the
+          only thing here the server does not already know: the figures above
+          are rendered from one query the page awaited, and blocking that render
+          on a gallery nobody has scrolled to yet would make the numbers slower
+          for the sake of pictures. It fetches its own first page on mount and
+          the rest as they are scrolled to.
+
+          It shows this reader's captures and nothing else, and it has no
+          controls — see the note at the top of `MyScreenshotsPanel`. */}
+      <MyScreenshotsPanel />
     </div>
   );
 }

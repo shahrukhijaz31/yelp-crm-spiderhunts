@@ -169,6 +169,15 @@ const PUBLIC_PATHS = new Set<string>([
  * It is kept where it can actually be enforced: the endpoint takes no user id
  * at all and queries the session's own (see `app/api/performance/me/route.ts`).
  *
+ * `/api/performance/me/screenshots` and its `/:id/image` child are the same
+ * rule again, and are deliberately *not* on the admin list below even though
+ * they serve screenshots. They take no user id either — the subject is
+ * `auth.id` from the session row and there is no parameter that could name
+ * anyone else (see `lib/myScreenshots.ts`, where the id is a required argument
+ * rather than a filter). What an agent may now see is their own captures,
+ * read-only; what remains true is that no agent can see another person's,
+ * because the query cannot be asked about one.
+ *
  * The team-wide view *is* a path rule, and `/reports` already covers the page
  * side of it — `/reports/team` is prefixed by it, so `canAccess` hides the nav
  * item and the page's own `requireRole` refuses an agent who types the URL.
@@ -180,8 +189,11 @@ const PUBLIC_PATHS = new Set<string>([
  * `/screenshots` and `/api/screenshots` are the administrator's screenshot
  * viewer — the screen and the endpoints behind it. Unlike call recordings,
  * which are gated by *who uploaded them* and therefore cannot be a path rule,
- * this genuinely is one: no agent may see any screenshot, including their own.
- * A monitoring feature whose subject can read it back is a different feature.
+ * this genuinely is one: no agent may reach the administrator's viewer or any
+ * endpoint behind it, for their own captures or anybody's. Their own are served
+ * by `/api/performance/me/screenshots`, a separate read-only pair of endpoints
+ * that cannot be pointed at a person — see the note above. Nothing under this
+ * prefix has changed, and nothing under it is reachable by an agent.
  *
  * `/api/monitor/screenshots` is not affected and is not related. That is the
  * desktop client's upload route, bearer-authenticated per device, and it is
