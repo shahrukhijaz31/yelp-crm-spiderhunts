@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 
+import AccessDenied from "@/components/AccessDenied";
 import LeadWorkspace from "@/components/LeadWorkspace";
-import { requireUser } from "@/lib/authz";
+import { requireModule } from "@/lib/authz";
 import { getLeadDetail, nextLeadId } from "@/lib/leadDb";
 import { leadsListHref, leadWorkspaceHref, readLeadPosition } from "@/lib/leadLink";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
@@ -21,13 +22,19 @@ import { getRecordingSummaryFor } from "@/lib/recordings";
  * So everything is read from the id and the query string, and nothing is
  * assumed to have been handed over by the screen that linked here.
  *
- * `requireUser()` before any lead is read, exactly as the portal layout and the
- * worklist do it — the session lookup is memoised per request, so repeating the
- * guard costs nothing and means no lead reaches the wire on the strength of an
- * assumption about what a parent component did. Both roles: working a lead is
- * the agent's job, and there is nothing on this page an agent may not see. What
- * they may do with the *recording* is decided a layer down, by
+ * The guard runs before any lead is read, exactly as the portal layout and the
+ * worklist do it — both lookups are memoised per request, so repeating it costs
+ * nothing and means no lead reaches the wire on the strength of an assumption
+ * about what a parent component did. Both roles: working a lead is the agent's
+ * job, and there is nothing on this page an agent with the Leads module may not
+ * see. What they may do with the *recording* is decided a layer down, by
  * `getRecordingSummaryFor`, against the row rather than the route.
+ *
+ * `requireModule("leads")` rather than `requireUser()`: an account an
+ * administrator has taken off the worklist must not reach a lead by pasting its
+ * URL either, and this is the page that URL names. No redirect here, unlike the
+ * worklist — somebody who followed a link to a specific lead is refused rather
+ * than quietly moved somewhere else.
  *
  * The search params carry the list this lead was opened from — the queue, the
  * tab, the filters, the sort, the page and the lead's ordinal within it. They
@@ -38,7 +45,14 @@ import { getRecordingSummaryFor } from "@/lib/recordings";
  * not depend on any of them.
  */
 export default async function LeadPage(props: PageProps<"/leads/[id]">) {
-  const user = await requireUser();
+  const { user, access, allowed } = await requireModule("leads");
+  if (!allowed) {
+    return access.demoWebsites ? (
+      <AccessDenied homeHref="/demo-websites" homeLabel="Back to Demo Websites" />
+    ) : (
+      <AccessDenied />
+    );
+  }
 
   const { id } = await props.params;
   const params = toSearchParams(await props.searchParams);

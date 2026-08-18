@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 
 import { LOGIN_PATH, type Role, type SessionUser } from "./access";
 import { csrfRefusal } from "./csrf";
+import { moduleAccessFor } from "./moduleAccess";
+import { hasModule, type ModuleAccess, type PortalModule } from "./modules";
 import { getSessionUser } from "./session";
 
 /**
@@ -11,6 +13,7 @@ import { getSessionUser } from "./session";
  *
  *   requireUser / requireAdmin        pages — redirect or render Access Denied
  *   apiUser / apiAdmin                routes — 401 / 403 JSON, never a redirect
+ *   requireModule / apiModule         either — the Demo Websites module gate
  *
  * Both resolve the caller through `getSessionUser`, which reads the session
  * row from Postgres. There is no path here that takes the browser's word for
@@ -152,3 +155,65 @@ export async function apiRole(
 
 export const apiAdmin = (request?: Request): Promise<SessionUser | Response> =>
   apiRole("ADMIN", request);
+
+/**
+ * A page that requires one of the portal's modules.
+ *
+ * The module twin of {@link requireRole}, and it returns the same
+ * `{ user, allowed }` shape for the same reason: an agent who reaches
+ * `/demo-websites` without the Demo Websites module is refused, not lost, so
+ * the caller renders `<AccessDenied />` rather than bouncing them to a login
+ * form they already satisfied.
+ *
+ * `access` comes back too, because a page that has just paid for the lookup
+ * usually needs it again — to decide which nav items the shell draws, or
+ * whether to offer the other module as somewhere to go instead.
+ *
+ * Administrators are allowed by `moduleAccessFor` without a query. Nothing
+ * here reads a module from the request: the module is named by the *caller*,
+ * in code, and the only thing resolved from the wire is who is asking.
+ */
+export async function requireModule(
+  module: PortalModule,
+  callbackUrl?: string,
+): Promise<{ user: SessionUser; access: ModuleAccess; allowed: boolean }> {
+  const user = await requireUser(callbackUrl);
+  const access = await moduleAccessFor(user);
+  return { user, access, allowed: hasModule(access, module) };
+}
+
+/**
+ * Guard for a route handler behind one of the portal's modules.
+ *
+ * Same contract as {@link apiUser} — the user, or the Response to return — so
+ * a handler still opens with two lines it cannot accidentally continue past:
+ *
+ *   const auth = await apiModule("demoWebsites", request);
+ *   if (auth instanceof Response) return auth;
+ *
+ * 401 when signed out, 403 when the module is not granted. The 403 is the same
+ * opaque one every other refusal here sends: an agent probing the API learns
+ * that they may not, and not what would make them able to.
+ *
+ * **This is the authoritative check, and it is per endpoint.** The nav not
+ * drawing a link and `lib/access.ts` not listing the path are tidiness and
+ * documentation respectively; this is what an agent with curl actually meets,
+ * on every request, resolved against the `users` row in Postgres. Every
+ * endpoint calls it for itself — a module gate applied once at a parent and
+ * inherited would be a gate that a new sibling route silently escapes.
+ */
+export async function apiModule(
+  module: PortalModule,
+  request?: Request,
+): Promise<SessionUser | Response> {
+  const user = await getSessionUser();
+  if (!user) return unauthorizedJson();
+
+  const access = await moduleAccessFor(user);
+  if (!hasModule(access, module)) return forbiddenJson();
+
+  const crossSite = request ? csrfRefusal(request) : null;
+  if (crossSite) return crossSite;
+
+  return user;
+}

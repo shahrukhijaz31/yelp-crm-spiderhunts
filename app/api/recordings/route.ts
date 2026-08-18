@@ -1,4 +1,4 @@
-import { apiUser } from "@/lib/authz";
+import { apiModule } from "@/lib/authz";
 import { listRecordingsFor } from "@/lib/recordings";
 
 /**
@@ -24,7 +24,10 @@ import { listRecordingsFor } from "@/lib/recordings";
  * browser.
  */
 export async function GET(): Promise<Response> {
-  const auth = await apiUser();
+  // Call recordings belong to the Leads module — they hang off a lead and are
+  // keyed by one. An account without that module has no worklist to draw them
+  // beside, and is refused here as well as there.
+  const auth = await apiModule("leads");
   if (auth instanceof Response) return auth;
 
   try {

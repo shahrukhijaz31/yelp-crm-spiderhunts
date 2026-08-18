@@ -1,5 +1,9 @@
+import { redirect } from "next/navigation";
+
+import AccessDenied from "@/components/AccessDenied";
 import Worklist from "@/components/Worklist";
-import { requireUser } from "@/lib/authz";
+import { requireModule } from "@/lib/authz";
+import { landingPathFor } from "@/lib/modules";
 import { EMPTY_FILTERS } from "@/lib/filters";
 import { leadCategories, listLeadsPage } from "@/lib/leadDb";
 import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
@@ -26,12 +30,31 @@ import { DEFAULT_WORK_STATE } from "@/lib/workState";
  * by the same validators the API route uses — `?pageSize=100000` is a request
  * for the default page size, not for the table.
  *
- * `requireUser` is repeated even though the portal layout already ran it. It
- * costs nothing (the session lookup is memoised per request) and it means no
- * lead is read on the strength of an assumption about what a parent did.
+ * The guard is repeated even though the portal layout already ran one. It costs
+ * nothing (both lookups are memoised per request) and it means no lead is read
+ * on the strength of an assumption about what a parent did.
+ *
+ * ---------------------------------------------------------------------------
+ * When the worklist is not this account's home
+ * ---------------------------------------------------------------------------
+ * `/` is where every sign-in lands, and it is the worklist — which is wrong for
+ * an agent whose account has Demo Websites and not Leads. Refusing them here
+ * would mean the first screen after signing in is an Access Denied, which reads
+ * as a broken account rather than as a deliberate grant, so they are sent to the
+ * module they *do* have instead.
+ *
+ * The redirect is not a permission and does not stand in for one: an agent with
+ * neither module gets the refusal screen, and the Demo Websites page runs its
+ * own guard when they arrive. What this decides is where somebody lands, not
+ * what they may read.
  */
 export default async function Home(props: PageProps<"/">) {
-  await requireUser();
+  const { access, allowed } = await requireModule("leads");
+  if (!allowed) {
+    const elsewhere = landingPathFor(access);
+    if (elsewhere && elsewhere !== "/") redirect(elsewhere);
+    return <AccessDenied />;
+  }
 
   const params = await props.searchParams;
   const today = todayIso();

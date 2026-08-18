@@ -6,8 +6,9 @@ import { LeadQueueProvider } from "@/components/LeadQueueProvider";
 import { PortalStatsProvider } from "@/components/PortalStatsProvider";
 import { WorkSessionProvider } from "@/components/WorkSessionProvider";
 import { requireUser } from "@/lib/authz";
+import { moduleAccessFor } from "@/lib/moduleAccess";
 import { leadStats, leadWorkCounts } from "@/lib/leadDb";
-import { todayIso } from "@/lib/leadUtils";
+import { computeStats, todayIso } from "@/lib/leadUtils";
 import { NAV_MODE_COOKIE, readNavMode } from "@/lib/navPreference";
 import { getWorkClock } from "@/lib/workSessions";
 
@@ -73,9 +74,31 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
   // page load for a figure with no reader — and the provider it feeds would go
   // on writing a `work_sessions` row a minute for a shift nobody looks at.
   const tracked = user.role === "AGENT";
+
+  /*
+   * Which of the two workspaces this account may reach.
+   *
+   * Read here, once, for two jobs: the rail below draws only the modules the
+   * person has, and the two lead aggregates are skipped entirely for somebody
+   * who may not open the worklist. Free for an administrator, who is answered
+   * without a query (`lib/moduleAccess.ts`).
+   *
+   * It is not a permission check. Every page and every endpoint resolves this
+   * again for itself against the `users` row — this read decides what to *draw*
+   * and what to *bother reading*, and removing it would change nobody's access.
+   */
+  const access = await moduleAccessFor(user);
+
+  // Two aggregates and no rows — but only for someone who has the Leads module.
+  // An agent with Demo Websites alone is never shown the queue badges or the
+  // headline strip, so counting leads for them would be two queries per page
+  // load for figures with no reader, on a table they may not open.
   const [stats, workCounts, workClock] = await Promise.all([
-    leadStats(today),
-    leadWorkCounts(),
+    // `computeStats([])` rather than a hand-written zero object: it is the same
+    // function the aggregate mirrors, so a field added to `LeadStats` cannot be
+    // missing from this branch.
+    access.leads ? leadStats(today) : computeStats([], today),
+    access.leads ? leadWorkCounts() : { new: 0, called: 0 },
     tracked ? getWorkClock(user.id) : null,
   ]);
 
@@ -90,7 +113,12 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
             on, including the ones that draw no clock at all. Mounted for both
             roles but inert for administrators — see the note on `tracking`. */}
         <WorkSessionProvider initialClock={workClock} tracking={tracked}>
-          <AppShell today={today} user={user} navMode={navMode}>
+          <AppShell
+            today={today}
+            user={user}
+            access={access}
+            navMode={navMode}
+          >
             {children}
           </AppShell>
         </WorkSessionProvider>

@@ -74,6 +74,24 @@ export const LEAD_SEARCH_LIMIT: RateLimitRule = {
 };
 
 /**
+ * GET /api/demo-websites with a search term.
+ *
+ * The same rule as the worklist's search and for the same reason: the term is
+ * a `contains` over five columns, which is the one clause on that table that
+ * cannot use an index. A status filter or a page turn is an indexed read and is
+ * deliberately left alone.
+ *
+ * Counted against the session's user id, which the guard resolved from the
+ * session row in Postgres. Nothing in the request names the bucket, so an
+ * agent cannot spend somebody else's allowance or dodge their own.
+ */
+export const DEMO_WEBSITE_SEARCH_LIMIT: RateLimitRule = {
+  action: "demo-website-search",
+  limit: 120,
+  windowSeconds: 60,
+};
+
+/**
  * The Export Data screen, which reads every lead in the table to render.
  *
  * 30 in five minutes is a page load every ten seconds, sustained — far past

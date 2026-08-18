@@ -1,6 +1,7 @@
 import { LeadsProvider } from "@/components/LeadsProvider";
 import MeetingsPanel from "@/components/MeetingsPanel";
-import { requireUser } from "@/lib/authz";
+import AccessDenied from "@/components/AccessDenied";
+import { requireModule } from "@/lib/authz";
 import { listMeetingLeads } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 import { listRecordingsFor } from "@/lib/recordings";
@@ -15,10 +16,14 @@ import { listRecordingsFor } from "@/lib/recordings";
  * below is then free to be a straightforward client component: what it was
  * handed is what this user may see.
  *
- * `requireUser` is repeated even though the portal layout already ran it. It
- * costs nothing (the session lookup is memoised per request) and it means the
- * user object comes from a check on this page rather than from an assumption
- * about what a parent did.
+ * The guard is repeated even though the portal layout already ran one. It costs
+ * nothing (both lookups are memoised per request) and it means the user object
+ * comes from a check on this page rather than from an assumption about what a
+ * parent did.
+ *
+ * `requireModule("leads")` rather than `requireUser()`: the agenda is derived
+ * from leads and every row on it is one, so it belongs to the Leads module and
+ * an account without that module is refused here as well as on the worklist.
  *
  * Membership of the agenda is *derived* from the leads themselves
  * (`lib/meetings.ts`) — interested, or a date in the diary. That used to mean
@@ -38,7 +43,16 @@ import { listRecordingsFor } from "@/lib/recordings";
  * alone would report "12 leads" to a portal holding several thousand.
  */
 export default async function MeetingsPage() {
-  const user = await requireUser("/meetings");
+  const { user, access, allowed } = await requireModule("leads", "/meetings");
+  // Somebody refused here has no worklist to go back to, so the way out is
+  // whichever module they do have — see the note on `AccessDenied`.
+  if (!allowed) {
+    return access.demoWebsites ? (
+      <AccessDenied homeHref="/demo-websites" homeLabel="Back to Demo Websites" />
+    ) : (
+      <AccessDenied />
+    );
+  }
   const today = todayIso();
   const [recordings, leads] = await Promise.all([
     listRecordingsFor(user),

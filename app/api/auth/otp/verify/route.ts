@@ -1,4 +1,5 @@
 import { safeCallbackUrl } from "@/lib/access";
+import { landingRedirectFor } from "@/lib/moduleAccess";
 import { completeSignIn } from "@/lib/completeSignIn";
 import { clearPendingChallenge, pruneExpiredLoginOtps, verifyLoginOtp } from "@/lib/loginOtp";
 import { clientIp } from "@/lib/loginThrottle";
@@ -107,5 +108,11 @@ export async function POST(request: Request): Promise<Response> {
   void reconcileStaleWorkSessions();
   void pruneExpiredLoginOtps();
 
-  return Response.json({ ok: true, redirectTo }, { headers: { "Cache-Control": "no-store" } });
+  // An agent whose account has Demo Websites and not Leads is sent there rather
+  // than to the worklist they may not open — but only when they asked for
+  // nowhere in particular. See `landingRedirectFor`.
+  return Response.json(
+    { ok: true, redirectTo: await landingRedirectFor(result.userId, redirectTo) },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }

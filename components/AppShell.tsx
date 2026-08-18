@@ -7,6 +7,7 @@ import { X } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import AppTopBar from "./AppTopBar";
 import type { SessionUser } from "@/lib/access";
+import { ADMIN_MODULE_ACCESS, type ModuleAccess } from "@/lib/modules";
 import {
   NAV_LABEL_MIN_WIDTH,
   NAV_MODE_CLASSES,
@@ -44,11 +45,18 @@ import {
 export default function AppShell({
   today,
   user,
+  access = ADMIN_MODULE_ACCESS,
   navMode: initialNavMode = "auto",
   children,
 }: {
   today: string;
   user: SessionUser;
+  /**
+   * Which modules this account may reach. Passed straight through to the rail,
+   * which is the only thing in the shell that cares — and which uses it to
+   * decide what to *draw*, never what to allow. See `AppSidebar`.
+   */
+  access?: ModuleAccess;
   /** The rail's persisted width preference, read from the cookie by the layout. */
   navMode?: NavMode;
   children: React.ReactNode;
@@ -129,7 +137,7 @@ export default function AppShell({
       <aside
         className={`sticky top-0 hidden h-screen shrink-0 border-r border-line transition-[width] duration-200 ease-out md:block ${NAV_MODE_CLASSES[navMode].width}`}
       >
-        <AppSidebar role={user.role} mode={navMode} />
+        <AppSidebar role={user.role} access={access} mode={navMode} />
       </aside>
 
       {/* --- drawer (below md) ------------------------------------------- */}
@@ -157,6 +165,7 @@ export default function AppShell({
                 wide showing nothing but a column of icons. */}
             <AppSidebar
               role={user.role}
+              access={access}
               mode="expanded"
               onNavigate={() => setNavOpen(false)}
             />
@@ -186,6 +195,9 @@ export default function AppShell({
         <AppTopBar
           today={today}
           user={user}
+          // The lead counters belong to the Leads module. An account without it
+          // is never shown them — see the note on `showLeadStats`.
+          showLeadStats={access.leads}
           navMode={navMode}
           onOpenNav={() => setNavOpen(true)}
           onToggleNav={toggleNav}

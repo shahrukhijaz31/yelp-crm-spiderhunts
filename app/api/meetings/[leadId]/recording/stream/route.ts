@@ -1,4 +1,4 @@
-import { apiUser } from "@/lib/authz";
+import { apiModule } from "@/lib/authz";
 import { getRecordingFor } from "@/lib/recordings";
 import { recordingSize, recordingStream } from "@/lib/recordingStorage";
 
@@ -39,7 +39,10 @@ export async function GET(
   request: Request,
   context: RouteContext<"/api/meetings/[leadId]/recording/stream">,
 ): Promise<Response> {
-  const auth = await apiUser();
+  // The Leads module, like the metadata route beside it: a recording is part of
+  // a lead's record, and an account without the worklist has no business with
+  // one.
+  const auth = await apiModule("leads");
   if (auth instanceof Response) return auth;
 
   const { leadId } = await context.params;

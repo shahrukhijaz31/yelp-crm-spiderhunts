@@ -95,6 +95,12 @@ ReadWritePaths=/var/lib/leadportal/recordings
 # process and has to be able to *delete* here as well as write.
 ReadWritePaths=/var/lib/leadportal/screenshots
 
+# Demo website images (DEMO_IMAGES_DIR), on the same terms again. Writable
+# rather than merely creatable: replacing an image writes the new object and
+# then deletes the old one, and deleting a demo website deletes its image, so
+# this process has to be able to unlink here as well as write.
+ReadWritePaths=/var/lib/leadportal/demo-images
+
 # /var/lib/leadportal/downloads — the SpiderHunts Monitor installer — is
 # deliberately ABSENT from this list. ProtectSystem=strict makes the filesystem
 # read-only, not unreadable, so the process can still open the installer and

@@ -1,4 +1,5 @@
 import type { Role, SessionUser } from "./access";
+import { DEFAULT_MODULE_ACCESS, type ModuleAccess } from "./modules";
 import { describePasswordProblem, hashPassword, verifyPassword } from "./password";
 import { prisma } from "./prisma";
 
@@ -19,6 +20,12 @@ const PUBLIC_FIELDS = {
   role: true,
   isActive: true,
   requirePasswordChange: true,
+  // Which of the two workspaces the account may reach. Safe in a public
+  // selection — they are a fact about somebody's access that an administrator
+  // is looking at this list to see, and they are meaningless to anybody else
+  // because nothing anywhere reads them from a response (see `lib/modules.ts`).
+  canAccessLeads: true,
+  canAccessDemoWebsites: true,
   lastLoginAt: true,
   createdAt: true,
 } as const;
@@ -32,6 +39,14 @@ export interface PublicUser {
   isActive: boolean;
   /** True between an administrator issuing a reset code and it being redeemed. */
   requirePasswordChange: boolean;
+  /**
+   * Module access, as stored. For an administrator these are the columns and
+   * not the answer — an administrator has both modules whatever the row says
+   * (`ADMIN_MODULE_ACCESS`), and the user list draws their boxes ticked and
+   * disabled to say so.
+   */
+  canAccessLeads: boolean;
+  canAccessDemoWebsites: boolean;
   lastLoginAt: Date | null;
   createdAt: Date;
 }
@@ -98,6 +113,13 @@ export interface NewUser {
   email: string;
   password: string;
   role: Role;
+  /**
+   * Which workspaces the new account may reach. Optional, and the fallback is
+   * `DEFAULT_MODULE_ACCESS` — the worklist on, Demo Websites off — so a caller
+   * that has never heard of modules (the `scripts/create-user.ts` CLI, a future
+   * seed) creates the account it always created.
+   */
+  modules?: Partial<ModuleAccess>;
 }
 
 /**
@@ -143,6 +165,12 @@ export async function createUser(input: NewUser): Promise<PublicUser> {
       email,
       role: input.role,
       passwordHash: await hashPassword(input.password),
+      // Written for every role, including ADMIN, for the reason `updateUser`
+      // gives: the columns should mean one thing whoever the row belongs to,
+      // and an administrator's are simply never read.
+      canAccessLeads: input.modules?.leads ?? DEFAULT_MODULE_ACCESS.leads,
+      canAccessDemoWebsites:
+        input.modules?.demoWebsites ?? DEFAULT_MODULE_ACCESS.demoWebsites,
     },
     select: PUBLIC_FIELDS,
   });
@@ -155,6 +183,13 @@ export interface UserEdits {
   isActive?: boolean;
   name?: string;
   password?: string;
+  /**
+   * Module access. Settable only through `PATCH /api/users/:id`, which is
+   * behind `apiAdmin()` and refuses a self-edit of these two — so there is no
+   * path by which an account grants itself a module, at any privilege level.
+   */
+  canAccessLeads?: boolean;
+  canAccessDemoWebsites?: boolean;
 }
 
 /**
@@ -182,6 +217,8 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
     name?: string;
     passwordHash?: string;
     requirePasswordChange?: boolean;
+    canAccessLeads?: boolean;
+    canAccessDemoWebsites?: boolean;
   } = {};
 
   if (edits.role !== undefined) {
@@ -200,6 +237,34 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
     const name = edits.name.trim();
     if (name.length < 2) throw new UserInputError("Enter the person's full name.");
     data.name = name;
+  }
+
+  /*
+   * The two module switches.
+   *
+   * Written for any role, including an administrator, even though an
+   * administrator's are never read. Refusing to store them would mean an
+   * account demoted from ADMIN to AGENT arrived with whatever was in its row
+   * from before it was promoted, which is a surprising thing for a demotion to
+   * decide. Storing them keeps the columns meaning one thing.
+   *
+   * Nothing validates *which* modules are sensible: an agent with neither is a
+   * legitimate state — a new starter an administrator has not finished setting
+   * up — and it fails safe, because it grants nothing. The portal says so on
+   * the account's first screen rather than pretending it is broken.
+   */
+  if (edits.canAccessLeads !== undefined) {
+    if (typeof edits.canAccessLeads !== "boolean") {
+      throw new UserInputError("`canAccessLeads` must be true or false.");
+    }
+    data.canAccessLeads = edits.canAccessLeads;
+  }
+
+  if (edits.canAccessDemoWebsites !== undefined) {
+    if (typeof edits.canAccessDemoWebsites !== "boolean") {
+      throw new UserInputError("`canAccessDemoWebsites` must be true or false.");
+    }
+    data.canAccessDemoWebsites = edits.canAccessDemoWebsites;
   }
 
   if (edits.password !== undefined) {
@@ -233,6 +298,17 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
 }
 
 /** Whether an edit ends the target's access and so should end their sessions. */
+/*
+ * Deliberately *not* included below: a module change.
+ *
+ * The two flags are re-read from Postgres on every request that consults them
+ * (`lib/moduleAccess.ts`), so removing a module takes effect on that agent's
+ * very next click — there is no cached grant for a sign-out to clear. Ending
+ * their session would only throw away work in progress to achieve something
+ * that has already happened, and an agent whose Demo Websites access was
+ * removed while they were working a lead has no reason to be logged out of the
+ * worklist.
+ */
 export function editEndsAccess(edits: UserEdits): boolean {
   // A role change is included: an agent promoted to admin, or an admin demoted,
   // must not keep browsing on a session that was resolved under the old role.

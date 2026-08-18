@@ -6,6 +6,7 @@ import { KeyRound, Trash2 } from "lucide-react";
 
 import ResetPasswordDialog from "./ResetPasswordDialog";
 import type { Role } from "@/lib/access";
+import { MODULE_LABELS, PORTAL_MODULES, type PortalModule } from "@/lib/modules";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password";
 
 /**
@@ -31,6 +32,9 @@ export interface UserRow {
   isActive: boolean;
   /** Set by a reset, cleared when the person redeems the code. */
   requirePasswordChange: boolean;
+  /** Which workspaces this account may reach. Ignored for an administrator. */
+  canAccessLeads: boolean;
+  canAccessDemoWebsites: boolean;
   lastLoginAt: string | null;
   createdAt: string;
 }
@@ -128,9 +132,10 @@ export default function UsersPanel({
       <header>
         <h1 className="page-title">Users</h1>
         <p className="mt-3 page-intro">
-          Everyone who can sign in to this workspace. Agents get the worklist
-          and meetings; administrators get everything, including this page.
-          Disabling an account ends its sessions immediately.
+          Everyone who can sign in to this workspace. Module access decides
+          which of the two workspaces — Leads and Demo Websites — an agent is
+          shown; administrators get everything, including this page. Disabling
+          an account ends its sessions immediately.
         </p>
         {/* Said once, at the top, rather than repeated on every row: it is a
             property of the whole page. */}
@@ -216,6 +221,40 @@ export default function UsersPanel({
                   <option value="AGENT">Agent</option>
                 </select>
               </label>
+
+              {/* Module access.
+                  Two checkboxes rather than a multi-select, because the answer
+                  is two independent yes/nos and a list box would make them look
+                  like alternatives. Beside the role control because they are the
+                  same kind of decision — what this person may do — and one row
+                  down from it in reading order because the role is the coarser
+                  of the two.
+
+                  Ticked and disabled for an administrator: they have both
+                  modules whatever their row says (`ADMIN_MODULE_ACCESS`), and a
+                  live checkbox that changes nothing is worse than a fixed one
+                  that explains itself in its title.
+
+                  Disabled on your own row for any role. The API refuses a
+                  self-edit of these anyway — there is deliberately no way for an
+                  account to grant itself a module — so a live control here would
+                  only offer a mistake. */}
+              <ModuleAccess
+                user={user}
+                disabled={busy}
+                isSelf={isSelf}
+                onToggle={(module, next) =>
+                  void patchUser(
+                    user.id,
+                    module === "leads"
+                      ? { canAccessLeads: next }
+                      : { canAccessDemoWebsites: next },
+                    next
+                      ? `${user.name} can now open ${MODULE_LABELS[module]}.`
+                      : `${user.name} can no longer open ${MODULE_LABELS[module]}.`,
+                  )
+                }
+              />
 
               <button
                 type="button"
@@ -412,6 +451,70 @@ export default function UsersPanel({
   );
 }
 
+/**
+ * One account's two module switches.
+ *
+ * Nothing here is a permission. Every tick is a `PATCH /api/users/:id` behind
+ * `apiAdmin()`, which re-reads the caller's role from Postgres and refuses a
+ * self-edit of these two fields; and every module gate in the portal resolves
+ * the flags from the `users` row on the request that needs them, so unticking a
+ * box takes effect on that agent's very next click without anybody being signed
+ * out.
+ */
+function ModuleAccess({
+  user,
+  disabled,
+  isSelf,
+  onToggle,
+}: {
+  user: UserRow;
+  disabled: boolean;
+  isSelf: boolean;
+  onToggle: (module: PortalModule, next: boolean) => void;
+}) {
+  const isAdmin = user.role === "ADMIN";
+
+  return (
+    <fieldset className="flex min-w-[13rem] flex-col gap-1">
+      <legend className="field-label">Module access</legend>
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+        {PORTAL_MODULES.map((module) => {
+          const granted = isAdmin
+            ? true
+            : module === "leads"
+              ? user.canAccessLeads
+              : user.canAccessDemoWebsites;
+
+          return (
+            <label
+              key={module}
+              title={
+                isAdmin
+                  ? "Administrators always have every module"
+                  : isSelf
+                    ? "You cannot change your own module access"
+                    : `${granted ? "Remove" : "Grant"} ${MODULE_LABELS[module]} for ${user.name}`
+              }
+              className={`flex items-center gap-1.5 text-caption ${
+                isAdmin || isSelf ? "text-fg-4" : "cursor-pointer text-fg-2"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={granted}
+                disabled={isAdmin || isSelf || disabled}
+                onChange={(event) => onToggle(module, event.target.checked)}
+                className="h-3.5 w-3.5 accent-[var(--c-accent)]"
+              />
+              {MODULE_LABELS[module]}
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 function NewUserForm({
   onDone,
   onError,
@@ -436,6 +539,8 @@ function NewUserForm({
           email: form.get("email"),
           password: form.get("password"),
           role: form.get("role"),
+          canAccessLeads: form.get("leads") === "on",
+          canAccessDemoWebsites: form.get("demoWebsites") === "on",
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -473,6 +578,31 @@ function NewUserForm({
           </select>
         </label>
       </div>
+
+      {/* The same two switches the rows carry, with the same defaults the
+          database uses for an account nobody mentions: the worklist on, Demo
+          Websites off. Written out here rather than left to the column default
+          so the administrator creating the account can see what they are
+          agreeing to, and change it before the person first signs in. */}
+      <fieldset className="flex flex-col gap-2">
+        <legend className="field-label">Module access</legend>
+        <div className="flex flex-wrap gap-x-5 gap-y-2">
+          {PORTAL_MODULES.map((module) => (
+            <label key={module} className="flex items-center gap-2 text-ui text-fg-2">
+              <input
+                type="checkbox"
+                name={module}
+                defaultChecked={module === "leads"}
+                className="h-3.5 w-3.5 accent-[var(--c-accent)]"
+              />
+              {MODULE_LABELS[module]}
+            </label>
+          ))}
+        </div>
+        <p className="text-meta text-fg-4">
+          Ignored for an administrator, who always has both.
+        </p>
+      </fieldset>
 
       <Field
         label={`Password (${PASSWORD_MIN_LENGTH}+ characters)`}

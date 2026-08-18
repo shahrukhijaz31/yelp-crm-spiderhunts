@@ -242,6 +242,30 @@ const PUBLIC_PATHS = new Set<string>([
  * setting and no write verb anywhere in the feature. The installer is placed on
  * the server during deployment and the routes only ever read.
  */
+/*
+ * Deliberately not here: `/demo-websites` and `/api/demo-websites`. Demo
+ * Websites is a *module*, not an administrator's screen — an agent whose
+ * account has been granted it may read every record in it, and an agent who has
+ * not may read none — so "who may reach this path" cannot be answered by a role
+ * and therefore cannot be answered by this file. It is a column on the `users`
+ * row, and the rule lives where it can actually be enforced: `requireModule`
+ * and `apiModule` in `lib/authz.ts`, which read that column from Postgres on
+ * every request.
+ *
+ * The *writes* under that prefix are administrator-only, and they are not
+ * listed either, for the reason `/api/meetings/:id/recording*` is not: the
+ * split is by verb rather than by path. `GET /api/demo-websites/:id` and
+ * `DELETE /api/demo-websites/:id` are the same URL with two different answers,
+ * and a prefix list can only give one. Each handler names its own guard —
+ * `apiModule("demoWebsites")` to read, `apiAdmin()` to write — and that is what
+ * an agent with curl actually meets.
+ *
+ * The same is true in the other direction for the Leads module, which is why
+ * `/` and `/meetings` are not on this list either: they never were, because
+ * every role could reach them, and now they are gated by a column rather than
+ * by a role. `/import`, `/export` and the report paths below stay exactly as
+ * they are — those are administrator screens, which is a different statement.
+ */
 const ADMIN_PREFIXES = [
   "/api/admin",
   "/export",

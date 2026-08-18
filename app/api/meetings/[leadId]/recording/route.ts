@@ -1,4 +1,4 @@
-import { apiUser } from "@/lib/authz";
+import { apiModule } from "@/lib/authz";
 import {
   MAX_RECORDING_BYTES,
   normaliseDuration,
@@ -20,7 +20,9 @@ import {
  * The audio itself is not here — it is streamed by `./stream`, which needs
  * range handling and a different set of headers.
  *
- * Every handler opens with `apiUser()` and then hands the decision to
+ * Every handler opens with `apiModule("leads")` — call recordings hang off a
+ * lead, so they belong to the Leads module and an account without it is refused
+ * before a row is read — and then hands the decision to
  * `lib/recordings.ts`. `leadId` comes out of the URL, so it is client-supplied
  * by definition; it is used only to *select* a row, never as a statement about
  * who the caller is. The row it selects is then checked against the session
@@ -58,7 +60,7 @@ export async function GET(
   _request: Request,
   context: RouteContext<"/api/meetings/[leadId]/recording">,
 ): Promise<Response> {
-  const auth = await apiUser();
+  const auth = await apiModule("leads");
   if (auth instanceof Response) return auth;
 
   const { leadId } = await context.params;
@@ -81,7 +83,7 @@ export async function POST(
   request: Request,
   context: RouteContext<"/api/meetings/[leadId]/recording">,
 ): Promise<Response> {
-  const auth = await apiUser(request);
+  const auth = await apiModule("leads", request);
   if (auth instanceof Response) return auth;
 
   const { leadId } = await context.params;
@@ -154,7 +156,7 @@ export async function DELETE(
   request: Request,
   context: RouteContext<"/api/meetings/[leadId]/recording">,
 ): Promise<Response> {
-  const auth = await apiUser(request);
+  const auth = await apiModule("leads", request);
   if (auth instanceof Response) return auth;
 
   const { leadId } = await context.params;

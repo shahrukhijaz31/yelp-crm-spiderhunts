@@ -70,12 +70,23 @@ function titleFor(pathname: string): string {
 export default function AppTopBar({
   today,
   user,
+  showLeadStats = true,
   navMode = "auto",
   onOpenNav,
   onToggleNav,
 }: {
   today: string;
   user: SessionUser;
+  /**
+   * Whether the two lead counters are drawn.
+   *
+   * False for an agent whose account has Demo Websites and not Leads: the
+   * figures behind them are never read for such a person (see the portal
+   * layout), so drawing them would put a confident `0 leads` on the bar of
+   * somebody who simply is not shown the lead database. A number that is zero
+   * because nobody counted is worse than no number.
+   */
+  showLeadStats?: boolean;
   /** The rail's current width preference, for labelling the toggle. */
   navMode?: NavMode;
   /** Opens the off-canvas sidebar. Below `md` only. */
@@ -169,7 +180,9 @@ export default function AppTopBar({
          * Red only when something is actually owed — a permanently red counter
          * is a counter an agent stops seeing.
          */}
-        <p className="hidden items-center gap-2 text-caption text-fg-3 lg:flex">
+        <p
+          className={`items-center gap-2 text-caption text-fg-3 ${showLeadStats ? "hidden lg:flex" : "hidden"}`}
+        >
           <span title={`${stats.total} leads in this workspace`}>
             <span className="tnum font-mono font-medium text-fg-2">
               {stats.total.toLocaleString()}

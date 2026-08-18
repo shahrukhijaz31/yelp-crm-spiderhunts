@@ -11,8 +11,16 @@ import { createUser, isRole, listUsers, UserInputError } from "@/lib/userDb";
  * `{"role": "ADMIN"}` gets a 403 before the JSON is parsed.
  *
  * There is deliberately no endpoint anywhere that lets a user change their own
- * role, at any privilege level. Privilege escalation is not prevented by
- * validation here; it is prevented by the operation not existing.
+ * role — or their own module access — at any privilege level. Privilege
+ * escalation is not prevented by validation here; it is prevented by the
+ * operation not existing.
+ *
+ * The two module switches on a new account are read from this body for the same
+ * reason `role` is, and are safe for the same reason: only an administrator's
+ * request ever reaches the line that reads them. They fall back to
+ * `DEFAULT_MODULE_ACCESS` — the worklist on, Demo Websites off — when absent,
+ * so a caller that does not send them creates the account this portal has
+ * always created.
  */
 
 export async function GET(): Promise<Response> {
@@ -63,6 +71,16 @@ export async function POST(request: Request): Promise<Response> {
       email: String(payload.email ?? ""),
       password: String(payload.password ?? ""),
       role,
+      // Booleans only — a truthy string is not a grant. Anything else is
+      // dropped and the column default applies.
+      modules: {
+        ...(typeof payload.canAccessLeads === "boolean"
+          ? { leads: payload.canAccessLeads }
+          : {}),
+        ...(typeof payload.canAccessDemoWebsites === "boolean"
+          ? { demoWebsites: payload.canAccessDemoWebsites }
+          : {}),
+      },
     });
 
     return Response.json({ user }, { status: 201, headers: { "Cache-Control": "no-store" } });

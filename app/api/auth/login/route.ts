@@ -1,4 +1,5 @@
 import { safeCallbackUrl } from "@/lib/access";
+import { landingRedirectFor } from "@/lib/moduleAccess";
 import { completeSignIn } from "@/lib/completeSignIn";
 import { issueLoginOtp, pruneExpiredLoginOtps } from "@/lib/loginOtp";
 import {
@@ -236,7 +237,12 @@ export async function POST(request: Request): Promise<Response> {
     // missing `challenge`: the client branches on this one field, so the two
     // outcomes of this route are told apart by a value that is always present.
     return Response.json(
-      { ok: true, otpRequired: false, redirectTo },
+      // Where an account with no requested destination actually belongs. For an
+      // administrator that is always the worklist; the call is made anyway so
+      // both sign-in routes answer this question in one place, and so a future
+      // module cannot be added to one path and forgotten on the other. See
+      // `landingRedirectFor`.
+      { ok: true, otpRequired: false, redirectTo: await landingRedirectFor(user.id, redirectTo) },
       { headers: { "Cache-Control": "no-store" } },
     );
   }

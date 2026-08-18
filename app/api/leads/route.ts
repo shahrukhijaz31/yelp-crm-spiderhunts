@@ -1,4 +1,4 @@
-import { apiUser } from "@/lib/authz";
+import { apiModule } from "@/lib/authz";
 import { leadCategories, leadStats, leadWorkCounts, listLeadsPage } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
@@ -49,8 +49,25 @@ import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
  *
  * Not cached: an agent who changes a status expects the next read to show it.
  */
+/*
+ * The Leads module gate.
+ *
+ * `apiModule("leads")` rather than `apiUser()`: this portal now has two
+ * workspaces, and an agent may be granted either, both or — for a brand-new
+ * account an administrator has not finished setting up — neither. The guard is
+ * the same one the Demo Websites endpoints use with the other key, and it
+ * resolves role *and* module access from the `users` row in Postgres on every
+ * request.
+ *
+ * Nothing changed for anybody who already had access. `can_access_leads`
+ * defaults to TRUE and every account that existed before the module switch was
+ * added kept it, so this refuses exactly the accounts an administrator has
+ * deliberately taken off the worklist, and nobody else. Administrators are
+ * never subject to it.
+ */
+
 export async function GET(request: Request): Promise<Response> {
-  const auth = await apiUser();
+  const auth = await apiModule("leads");
   if (auth instanceof Response) return auth;
 
   const url = new URL(request.url);

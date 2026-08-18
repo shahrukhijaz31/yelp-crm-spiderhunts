@@ -50,13 +50,15 @@ binary** — the same build runs on Windows and Ubuntu.
   blue/      release slot, port 3031
   green/     release slot, port 3032
 /etc/leadportal/
-  env             root:root 0600 — DATABASE_URL, NODE_ENV, HOSTNAME, RECORDINGS_DIR
+  env             root:root 0600 — DATABASE_URL, NODE_ENV, HOSTNAME, RECORDINGS_DIR,
+                  SCREENSHOTS_DIR, DEMO_IMAGES_DIR
   slot-blue.env   PORT=3031
   slot-green.env  PORT=3032
   db-password     root:root 0600
 /var/lib/leadportal/
   recordings/     uploaded call audio, leadportal:leadportal 0750
   screenshots/    desktop screenshots, leadportal:leadportal 0750
+  demo-images/    demo website images, leadportal:leadportal 0750
   downloads/      SpiderHunts Monitor installer, leadportal:leadportal 0750 (read-only to the app)
 /etc/nginx/sites-available/leadportal
 /etc/nginx/conf.d/leadportal-upstream.conf   ← rewritten by deploy.sh

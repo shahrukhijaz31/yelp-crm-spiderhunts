@@ -1,4 +1,4 @@
-import { apiUser } from "@/lib/authz";
+import { apiModule } from "@/lib/authz";
 import {
   getLeadDetail,
   LeadEditError,
@@ -28,7 +28,9 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiUser();
+  // The Leads module, resolved from the `users` row — see `GET /api/leads` for
+  // why the guard changed and why it changes nothing for existing accounts.
+  const auth = await apiModule("leads");
   if (auth instanceof Response) return auth;
 
   const { id } = await params;
@@ -85,7 +87,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiUser(request);
+  const auth = await apiModule("leads", request);
   if (auth instanceof Response) return auth;
 
   const { id } = await params;

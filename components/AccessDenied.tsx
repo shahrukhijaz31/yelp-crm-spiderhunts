@@ -15,7 +15,30 @@ import Link from "next/link";
  * Same materials as the rest of the portal: surface card on base, `border-line`
  * hairline, Fraunces heading, the accent used once and only as an outline.
  */
-export default function AccessDenied() {
+export default function AccessDenied({
+  /**
+   * Where the way out goes, and what it is called.
+   *
+   * Defaulted to the worklist, which is right for the case this screen was
+   * written for: an agent at an administrator's URL, who has the worklist and
+   * was simply somewhere they should not be.
+   *
+   * It is a parameter because module access made the default wrong for one
+   * case. An agent whose account has Demo Websites and not Leads meets this
+   * screen *at* `/meetings` or `/leads/:id`, and "Back to the worklist" would
+   * offer them a second door they also may not open. The pages that know this
+   * pass their own.
+   *
+   * Nothing here is a permission, in either direction: this is the screen shown
+   * *after* a refusal, and the link it draws is checked again by whatever it
+   * points at.
+   */
+  homeHref = "/",
+  homeLabel = "Back to the worklist",
+}: {
+  homeHref?: string;
+  homeLabel?: string;
+} = {}) {
   return (
     <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
       <div className="panel mx-auto flex max-w-md flex-col items-center gap-5 px-6 py-12 text-center">
@@ -34,11 +57,8 @@ export default function AccessDenied() {
           </p>
         </div>
 
-        <Link
-          href="/"
-          className="ui-btn ui-btn-primary"
-        >
-          Back to the worklist
+        <Link href={homeHref} className="ui-btn ui-btn-primary">
+          {homeLabel}
         </Link>
       </div>
     </main>

@@ -11,6 +11,7 @@ import {
   ClipboardList,
   Clock,
   Gauge,
+  Globe,
   Inbox,
   Monitor,
   PhoneOutgoing,
@@ -23,6 +24,13 @@ import {
 
 import { useLeadQueue } from "./LeadQueueProvider";
 import { canAccess, type Role } from "@/lib/access";
+import {
+  ADMIN_MODULE_ACCESS,
+  hasModule,
+  landingPathFor,
+  type ModuleAccess,
+  type PortalModule,
+} from "@/lib/modules";
 import { NAV_MODE_CLASSES, type NavMode } from "@/lib/navPreference";
 import {
   LEAD_WORK_STATES,
@@ -85,6 +93,19 @@ interface NavItem {
    * be — see the note on My performance below.
    */
   roles?: readonly Role[];
+
+  /**
+   * Which module this row belongs to, when it belongs to one.
+   *
+   * A third filter beside `canAccess` and `roles`, and the only one of the
+   * three that is a real permission rather than a statement about usefulness:
+   * an agent without the Leads module is not shown Meetings because they may
+   * not open it, and the page says so again against the `users` row in
+   * Postgres. Absent means the row belongs to neither module and is governed by
+   * the other two filters alone — Downloads and the account screens, which
+   * every signed-in person needs whatever they are working on.
+   */
+  module?: PortalModule;
 }
 
 /**
@@ -108,7 +129,27 @@ const QUEUE_ICONS: Record<LeadWorkState, LucideIcon> = {
 
 /** The workspaces an agent moves between all day. Order is a day's work. */
 const WORKSPACE: NavItem[] = [
-  { href: "/meetings", label: "Meetings", icon: CalendarDays },
+  { href: "/meetings", label: "Meetings", icon: CalendarDays, module: "leads" },
+  /*
+   * The second workspace, and the reason `module` exists on a nav item.
+   *
+   * Beside Meetings rather than in Data or Admin, because that is what it is:
+   * somewhere a person works, the same way they work the call list. It is drawn
+   * for both roles — an administrator manages the records from this screen and
+   * an agent presents them from it — and for neither role unless the account
+   * has the module.
+   *
+   * Not drawing it is tidiness. `/demo-websites` refuses an agent without the
+   * module independently (`requireModule`), and so does every endpoint behind
+   * it — deleting this line would change nothing about who can see a demo
+   * website.
+   */
+  {
+    href: "/demo-websites",
+    label: "Demo Websites",
+    icon: Globe,
+    module: "demoWebsites",
+  },
   /*
    * An agent's own figures, and drawn for agents only.
    *
@@ -200,6 +241,16 @@ const NAV_HREFS: readonly string[] = [...WORKSPACE, ...DATA, ...ADMIN].map(
 
 export default function AppSidebar({
   role,
+  /**
+   * Which modules this account may reach, resolved from Postgres by the portal
+   * layout. Administrators arrive with both, always — see `ADMIN_MODULE_ACCESS`.
+   *
+   * Defaulted so the rail cannot be the thing that breaks when a caller forgets
+   * it, and defaulted to *everything* rather than nothing: a missing prop should
+   * draw a nav whose pages then refuse, not silently hide a module somebody has
+   * been granted. The pages and the API are what enforce this either way.
+   */
+  access = ADMIN_MODULE_ACCESS,
   /** Mobile only: the drawer is open. Ignored from `md` up. */
   onNavigate,
   /**
@@ -212,6 +263,7 @@ export default function AppSidebar({
   mode = "auto",
 }: {
   role: Role;
+  access?: ModuleAccess;
   onNavigate?: () => void;
   mode?: NavMode;
 }) {
@@ -222,6 +274,10 @@ export default function AppSidebar({
   // What this mode does to a label, a heading and a nav row. See the note on
   // NAV_MODE_CLASSES for why these are whole literal strings.
   const style = NAV_MODE_CLASSES[mode];
+
+  // Where the brand mark points. Null — an account with neither module — falls
+  // back to `/`, which is the screen that then explains the situation.
+  const home = landingPathFor(access) ?? "/";
 
   /**
    * Which row is lit — the *most specific* item that matches, not every item
@@ -272,7 +328,9 @@ export default function AppSidebar({
       ...group,
       items: group.items.filter(
         (item) =>
-          canAccess(role, item.href) && (item.roles === undefined || item.roles.includes(role)),
+          canAccess(role, item.href) &&
+          (item.roles === undefined || item.roles.includes(role)) &&
+          (item.module === undefined || hasModule(access, item.module)),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -287,10 +345,16 @@ export default function AppSidebar({
       {/* 52px, matching the top bar beside it exactly, so the two rules meet
           in one continuous line across the whole application. */}
       <div className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-line px-3 2xl:px-4">
+        {/* The brand goes to whichever workspace this account actually has.
+            `/` for almost everybody, because almost everybody has Leads — but
+            an agent with Demo Websites alone would otherwise be sent to a
+            worklist that immediately bounces them back, which looks like a
+            broken logo. `landingPathFor` is the same function the sign-in uses
+            to decide where that person lands. */}
         <Link
-          href="/"
+          href={home}
           onClick={onNavigate}
-          aria-label="SpiderHunts Leads Portal — go to the leads workspace"
+          aria-label="SpiderHunts Leads Portal — go to your workspace"
           className="flex min-w-0 items-center gap-2.5 rounded-md outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--c-focus)]"
         >
           {/* `unoptimized`: .ico is not a format the image optimiser handles,
@@ -323,7 +387,11 @@ export default function AppSidebar({
             than links: they go to the same place and differ in what is shown
             there, so a `href` would be a lie and a middle-click would promise
             a second tab that opened on the wrong queue. */}
-        {canAccess(role, "/") && (
+        {/* Gone entirely for an agent without the Leads module: the queues are
+            the lead workspace, and a counter for a list they may not open is
+            worse than no counter. The worklist itself refuses them and sends
+            them to whichever module they do have. */}
+        {canAccess(role, "/") && hasModule(access, "leads") && (
           <div className="flex flex-col gap-1">
             <p className={`eyebrow px-2 pb-1 ${style.hide}`}>Leads</p>
             {LEAD_WORK_STATES.map((candidate) => {

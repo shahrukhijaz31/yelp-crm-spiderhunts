@@ -39,6 +39,11 @@ RECORDINGS_DIR_PATH="/var/lib/${SITE}/recordings"
 # all day — which is why retention (below) is provisioned alongside it rather
 # than left as something to remember later.
 SCREENSHOTS_DIR_PATH="/var/lib/${SITE}/screenshots"
+# Demo website images, on exactly the same terms as the two above and outside
+# APP_ROOT for the identical reason. The volume is the smallest of the three —
+# one image per demo website, replaced by hand and rarely, capped at 5MB — so
+# there is no retention sweep for it: an image goes when its record does.
+DEMO_IMAGES_DIR_PATH="/var/lib/${SITE}/demo-images"
 # The SpiderHunts Monitor Windows installer, which agents download from the
 # portal. Beside the other two and outside APP_ROOT for the identical reason: a
 # deploy replaces the release directory wholesale, and an installer kept inside
@@ -166,10 +171,10 @@ chown -R root:root "${APP_ROOT}/repo"
 # all under 0750, and root is what puts a new one there — the application has no
 # code path that writes to this directory, and the unit file does not list it
 # under ReadWritePaths.
-log "Creating ${RECORDINGS_DIR_PATH}, ${SCREENSHOTS_DIR_PATH} and ${DOWNLOADS_DIR_PATH}"
-mkdir -p "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH" "$DOWNLOADS_DIR_PATH"
+log "Creating ${RECORDINGS_DIR_PATH}, ${SCREENSHOTS_DIR_PATH}, ${DEMO_IMAGES_DIR_PATH} and ${DOWNLOADS_DIR_PATH}"
+mkdir -p "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH" "$DEMO_IMAGES_DIR_PATH" "$DOWNLOADS_DIR_PATH"
 chown -R "${DB_USER}:${DB_USER}" "/var/lib/${SITE}"
-chmod 750 "/var/lib/${SITE}" "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH" "$DOWNLOADS_DIR_PATH"
+chmod 750 "/var/lib/${SITE}" "$RECORDINGS_DIR_PATH" "$SCREENSHOTS_DIR_PATH" "$DEMO_IMAGES_DIR_PATH" "$DOWNLOADS_DIR_PATH"
 
 # Say plainly whether the installer is actually there. The portal answers a
 # clean "temporarily unavailable" when it is not — which is the right behaviour
@@ -283,6 +288,9 @@ RECORDINGS_DIR="${RECORDINGS_DIR_PATH}"
 # release tree for the same reason as recordings, and on a path the unit file
 # grants write access to.
 SCREENSHOTS_DIR="${SCREENSHOTS_DIR_PATH}"
+# Where demo website images are written. Outside the release tree for the same
+# reason as the two above, and on a path the unit file grants write access to.
+DEMO_IMAGES_DIR="${DEMO_IMAGES_DIR_PATH}"
 # How long screenshots are kept. The server owns this number; nothing on an
 # agent's workstation can change it. Unset it and the sweep uses 30 days.
 SCREENSHOT_RETENTION_DAYS=30
@@ -330,6 +338,14 @@ else
   if ! grep -q '^SCREENSHOTS_DIR=' "${ENV_DIR}/env"; then
     printf 'SCREENSHOTS_DIR="%s"\n' "$SCREENSHOTS_DIR_PATH" >> "${ENV_DIR}/env"
     log "Added SCREENSHOTS_DIR to the existing ${ENV_DIR}/env"
+  fi
+  # Added with the Demo Websites module. Without it the application falls back
+  # to `.data/demo-images` *inside the release tree*, which ProtectSystem=strict
+  # makes read-only — so every image upload would fail, and any that somehow
+  # succeeded would be destroyed by the next deploy.
+  if ! grep -q '^DEMO_IMAGES_DIR=' "${ENV_DIR}/env"; then
+    printf 'DEMO_IMAGES_DIR="%s"\n' "$DEMO_IMAGES_DIR_PATH" >> "${ENV_DIR}/env"
+    log "Added DEMO_IMAGES_DIR to the existing ${ENV_DIR}/env"
   fi
   if ! grep -q '^SCREENSHOT_RETENTION_DAYS=' "${ENV_DIR}/env"; then
     printf 'SCREENSHOT_RETENTION_DAYS=%s\n' "30" >> "${ENV_DIR}/env"

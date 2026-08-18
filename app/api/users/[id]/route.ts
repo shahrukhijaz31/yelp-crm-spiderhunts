@@ -1,4 +1,5 @@
 import { apiAdmin } from "@/lib/authz";
+import { moduleEditsFrom } from "@/lib/moduleAccess";
 import { destroyAllSessionsFor } from "@/lib/session";
 import {
   deleteUser,
@@ -19,6 +20,14 @@ import {
  *   demoting or disabling themselves mid-session is a self-inflicted lockout,
  *   and it is never what was meant. (`lib/userDb` separately refuses to remove
  *   the *last* administrator, whoever asks.)
+ *
+ *   Self-edits of the two module switches are refused for the same reason and
+ *   one more: an administrator who could edit their own module access would be
+ *   an account that can grant itself a module, which is the one thing this
+ *   permission model must not allow. (It would grant nothing today — an
+ *   administrator already has both, and the columns are never read for them —
+ *   but "harmless because of a rule somewhere else" is exactly the kind of hole
+ *   a later change opens.)
  *
  *   Any change that alters what the target may do ends their sessions. Roles
  *   are resolved per request from the database, so a demoted admin would lose
@@ -51,6 +60,10 @@ export async function PATCH(
   if (payload.isActive !== undefined) edits.isActive = payload.isActive as boolean;
   if (payload.name !== undefined) edits.name = String(payload.name);
   if (payload.password !== undefined) edits.password = String(payload.password);
+  // Booleans only, and only if actually boolean: `moduleEditsFrom` ignores
+  // anything else rather than coercing it, so `{"canAccessLeads": "false"}` is
+  // not a way to grant a module by sending a truthy string.
+  Object.assign(edits, moduleEditsFrom(payload));
 
   if (Object.keys(edits).length === 0) {
     return Response.json(
@@ -59,11 +72,18 @@ export async function PATCH(
     );
   }
 
-  if (id === auth.id && (edits.role !== undefined || edits.isActive !== undefined)) {
+  const editsOwnModules =
+    edits.canAccessLeads !== undefined || edits.canAccessDemoWebsites !== undefined;
+
+  if (
+    id === auth.id &&
+    (edits.role !== undefined || edits.isActive !== undefined || editsOwnModules)
+  ) {
     return Response.json(
       {
         error: "self_edit_refused",
-        message: "You cannot change your own role or disable your own account.",
+        message:
+          "You cannot change your own role, your own module access, or disable your own account.",
       },
       { status: 400 },
     );
