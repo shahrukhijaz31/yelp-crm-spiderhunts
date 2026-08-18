@@ -47,11 +47,14 @@ export const LOGIN_PATH = "/login";
  * bearer token (`lib/ingestAuth.ts`) — neither can carry a session cookie, and
  * both were already exempted at the nginx layer for the same reason.
  *
- * The two reset endpoints are public for the obvious reason: someone redeeming
- * a one-time code has no password and therefore cannot have a session. They are
- * not unauthenticated in any meaningful sense — the code *is* the credential,
- * it is checked server-side against a hash on every call, and neither endpoint
- * ever issues a session (see `lib/passwordReset.ts`).
+ * The three reset endpoints are public for the obvious reason: someone asking
+ * for or redeeming a one-time code has no password and therefore cannot have a
+ * session. The two that take a code are not unauthenticated in any meaningful
+ * sense — the code *is* the credential, it is checked server-side against a
+ * hash on every call, and neither ever issues a session. `request` genuinely
+ * is anonymous, and is built so that this costs nothing: it changes no account
+ * state at all, answers every caller identically, and can only cause an email
+ * to be sent to an address it was never told (see `lib/passwordReset.ts`).
  *
  * The three OTP endpoints are public for the same reason and with the same
  * caveat: somebody halfway through signing in has, by design, no session yet.
@@ -66,6 +69,7 @@ const PUBLIC_PATHS = new Set<string>([
   "/api/auth/otp/verify",
   "/api/auth/otp/resend",
   "/api/auth/otp/cancel",
+  "/api/auth/reset/request",
   "/api/auth/reset/verify",
   "/api/auth/reset/complete",
   "/api/health",

@@ -15,8 +15,6 @@ import { PASSWORD_MIN_LENGTH } from "./password";
  * `lib/passwordReset.ts`, which can never be.
  */
 
-export const RESET_CODE_PLACEHOLDER = "SH-7K4P-92XM";
-
 /**
  * Format a code as it is typed: upper-cased, dashes inserted, junk dropped.
  *
@@ -125,6 +123,20 @@ export function changePassword(input: {
   confirmPassword: string;
 }): Promise<Outcome<Record<string, never>>> {
   return post("/api/account/password", input);
+}
+
+/**
+ * Login → Forgot your password? → ask for a code.
+ *
+ * Succeeds whether or not the account exists — the endpoint answers every
+ * caller identically on purpose (`app/api/auth/reset/request`), so there is
+ * nothing here for the form to branch on and nothing it could report about
+ * whose account is real.
+ */
+export function requestResetCode(input: {
+  username: string;
+}): Promise<Outcome<Record<string, never>>> {
+  return post("/api/auth/reset/request", input);
 }
 
 /** Login → Forgot your password? → step one. */

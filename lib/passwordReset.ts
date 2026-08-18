@@ -1,18 +1,33 @@
 import { randomBytes } from "node:crypto";
 
+import { sendMail } from "./mail";
 import { describePasswordProblem, hashPassword, verifyPassword } from "./password";
 import { prisma } from "./prisma";
+import { buildResetEmail } from "./resetEmail";
 import { destroyAllSessionsFor } from "./session";
 
 /**
  * One-time reset codes: the whole recovery path, on the server.
  *
- * This workspace has no outbound email — the addresses in `users` are sign-in
- * identifiers, not verified mailboxes — so the usual "we sent you a link" is
- * not available and is not faked. Recovery is instead an out-of-band handoff:
- * an administrator generates a code, reads it to the person, and the person
- * redeems it for a password of their own choosing. The server is the only
- * party that ever decides whether a code is good.
+ * Two ways in, one code, one redemption:
+ *
+ *   administrator  `issueResetCode` — generated on the Users screen and read
+ *                  out to the person. Kills the current password on the spot.
+ *   self-service   `requestResetCode` — asked for on the sign-in screen and
+ *                  emailed to the address on the account. Changes nothing
+ *                  about the account until the code is actually redeemed.
+ *
+ * **That asymmetry is the load-bearing decision in this file.** An
+ * administrator's reset is an authenticated, deliberate act against a named
+ * account, so ending the password immediately is what was asked for. A
+ * self-service request is made by an anonymous caller who typed a username —
+ * if it scrambled the password, then knowing somebody's username would be
+ * enough to lock them out of their own portal, over and over, with no code and
+ * no mailbox. So it does not: the old password keeps working until the person
+ * holding the emailed code chooses a new one, and someone who ignores an
+ * unexpected reset email has lost nothing.
+ *
+ * The server is the only party that ever decides whether a code is good.
  *
  * Four properties, each enforced here rather than by the caller:
  *
@@ -36,12 +51,14 @@ import { destroyAllSessionsFor } from "./session";
  * cost because lookup is by user id — there is at most one live code per
  * account, so redeeming is one hash, not a table scan.
  *
- * **Issuing a code invalidates the current password.** That is the point of a
- * reset and it is stated on the confirmation dialog: the hash is replaced with
- * one of 64 random bytes that nobody holds the preimage of, `requirePasswordChange`
- * goes up, and every session for the account is ended. Between the reset and
- * the redemption the account is genuinely unreachable, by the old password, by
- * an open tab, and by the administrator who pressed the button.
+ * **An administrator issuing a code invalidates the current password.** That is
+ * the point of that operation and it is stated on the confirmation dialog: the
+ * hash is replaced with one of 64 random bytes that nobody holds the preimage
+ * of, `requirePasswordChange` goes up, and every session for the account is
+ * ended. Between the reset and the redemption the account is genuinely
+ * unreachable, by the old password, by an open tab, and by the administrator
+ * who pressed the button. A self-service request does none of that, for the
+ * reason given above.
  */
 
 /** Ambiguous glyphs are out: no 0/O, no 1/I/L. Codes get read down a phone. */
@@ -104,10 +121,10 @@ export function normaliseResetCode(raw: string): string {
 
 /** The one place that says how long a code lives, in words a person reads. */
 export const RESET_EXPIRED_MESSAGE =
-  "This reset code has expired. Please contact your workspace administrator for a new code.";
+  "This reset code has expired. Go back and request a new one.";
 
 export const RESET_INVALID_MESSAGE =
-  "That username and reset code do not match. Check both, or ask your administrator for a new code.";
+  "That username and reset code do not match. Check both, or request a new code.";
 
 export class ResetError extends Error {
   constructor(
@@ -125,36 +142,77 @@ export interface IssuedReset {
   expiresAt: Date;
 }
 
+interface MintedCode {
+  /** Plaintext, held only long enough to be shown once or emailed once. */
+  code: string;
+  codeHash: string;
+  expiresAt: Date;
+  /** The instant the code was minted, so the two writes agree on "now". */
+  now: Date;
+}
+
+/**
+ * Mint a code and hash it. Writes nothing.
+ *
+ * Split out because scrypt takes ~100ms and must not happen inside a
+ * transaction, and because it is the one step both entry points perform
+ * identically — an administrator's code and a self-service code are the same
+ * kind of credential with the same entropy and the same clock.
+ */
+async function mintResetCode(): Promise<MintedCode> {
+  const code = generateCode();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + RESET_CODE_TTL_MS);
+  const codeHash = await hashPassword(code);
+
+  return { code, codeHash, expiresAt, now };
+}
+
+/**
+ * The two writes every issue performs: expire the old codes, store the new one.
+ *
+ * Returned as statements rather than executed, so an administrator's reset can
+ * run them in the same transaction as the password scramble while a
+ * self-service request runs them on their own.
+ *
+ * `issuedById` is the administrator who pressed the button, or null when the
+ * person asked for the code themselves — see the note on the column in
+ * `prisma/schema.prisma` for why the subject is not written into it instead.
+ */
+function resetCodeWrites(userId: string, issuedById: string | null, minted: MintedCode) {
+  return [
+    // Any earlier code for this account stops working the moment a new one is
+    // issued, so "generate another" is never "now there are two".
+    prisma.passwordReset.updateMany({
+      where: { userId, usedAt: null, expiresAt: { gt: minted.now } },
+      data: { expiresAt: minted.now },
+    }),
+    prisma.passwordReset.create({
+      data: { userId, codeHash: minted.codeHash, issuedById, expiresAt: minted.expiresAt },
+    }),
+  ];
+}
+
 /**
  * Issue a reset code for a user, invalidating their password and sessions.
+ *
+ * The administrator's path, and the only one that ends the current password —
+ * see the file header for why the self-service path deliberately does not.
  *
  * Everything except the scrypt hashing runs inside one transaction, so the
  * account cannot be left in a half-reset state — a password that still works
  * beside a live code, or a code with nothing to unlock.
  */
 export async function issueResetCode(userId: string, issuedById: string): Promise<IssuedReset> {
-  const code = generateCode();
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + RESET_CODE_TTL_MS);
+  const minted = await mintResetCode();
 
-  // Hashing is deliberately outside the transaction: scrypt takes ~100ms, and
-  // holding a write transaction open for it would be a lock nobody needs.
-  const codeHash = await hashPassword(code);
   // Nobody, including this process, ever holds the preimage of this. It is not
   // an "empty password" sentinel — `verifyPassword` must keep returning false
   // for every input rather than being special-cased anywhere.
   const unusablePasswordHash = await hashPassword(randomBytes(64).toString("base64"));
 
   await prisma.$transaction([
-    // Any earlier code for this account stops working the moment a new one is
-    // issued, so "generate another" is never "now there are two".
-    prisma.passwordReset.updateMany({
-      where: { userId, usedAt: null, expiresAt: { gt: now } },
-      data: { expiresAt: now },
-    }),
-    prisma.passwordReset.create({
-      data: { userId, codeHash, issuedById, expiresAt },
-    }),
+    ...resetCodeWrites(userId, issuedById, minted),
     prisma.user.update({
       where: { id: userId },
       data: { passwordHash: unusablePasswordHash, requirePasswordChange: true },
@@ -166,7 +224,87 @@ export async function issueResetCode(userId: string, issuedById: string): Promis
   // ordering costs nothing.
   await destroyAllSessionsFor(userId);
 
-  return { code, expiresAt };
+  return { code: minted.code, expiresAt: minted.expiresAt };
+}
+
+/**
+ * How close together one account's self-service codes may be asked for.
+ *
+ * The rate limiter in front of the route bounds how *many* can be requested;
+ * this bounds how close together they arrive, which is the part that decides
+ * whether the button is a way to put ten messages in somebody's inbox in ten
+ * seconds. It also spares the ordinary case — a double-clicked button, or a
+ * second tab — from invalidating the code that is already in flight.
+ */
+const RESET_REQUEST_COOLDOWN_MS = 60 * 1000;
+
+export type ResetRequestOutcome =
+  /** A code was generated and SMTP accepted the message. */
+  | { sent: true }
+  /**
+   * Nothing was sent, and the caller must not learn which of these it was:
+   *
+   *   unknown_account  no such username or email, or the account is disabled
+   *   cooldown         a code was already emailed within the last minute
+   */
+  | { sent: false; reason: "unknown_account" | "cooldown" }
+  /** SMTP refused the message. The one failure worth reporting honestly. */
+  | { sent: false; reason: "email_failed" };
+
+/**
+ * Someone on the sign-in screen has asked for a code. Email it to them.
+ *
+ * **Nothing about the account changes.** No password is scrambled, no session
+ * is ended, no flag is raised. The entire effect of a request from a stranger
+ * who guessed a username correctly is an email its owner can ignore — which is
+ * what makes this safe to expose to anonymous callers at all, and why the
+ * message says in as many words that the current password still works.
+ *
+ * **The code goes to the address on the account and nowhere else.** The caller
+ * supplies a username or email to *look up*, never a destination, so a request
+ * naming somebody else's account mails that person's mailbox: useless to the
+ * sender, noise to the recipient, and no help to either.
+ *
+ * **The mail goes out before the row is written**, the ordering
+ * `lib/loginOtp.ts` uses and for the same reason — a failed send must not
+ * expire the code the person is already holding and replace it with one that
+ * never arrived.
+ *
+ * The outcomes here are finer-grained than the response the route may give: an
+ * unknown account and a cooldown are the same answer to the browser, because an
+ * endpoint that distinguished them would be a way to ask which usernames exist.
+ */
+export async function requestResetCode(identifier: string): Promise<ResetRequestOutcome> {
+  const lookup = (identifier ?? "").trim().toLowerCase();
+  if (!lookup) return { sent: false, reason: "unknown_account" };
+
+  const user = await prisma.user.findFirst({
+    where: { OR: [{ username: lookup }, { email: lookup }] },
+    select: { id: true, email: true, isActive: true },
+  });
+  // A disabled account is deliberately indistinguishable from a missing one: a
+  // new password would not get them in, and saying so would confirm the account
+  // exists.
+  if (!user || !user.isActive) return { sent: false, reason: "unknown_account" };
+
+  const recent = await prisma.passwordReset.findFirst({
+    where: {
+      userId: user.id,
+      usedAt: null,
+      createdAt: { gt: new Date(Date.now() - RESET_REQUEST_COOLDOWN_MS) },
+    },
+    select: { id: true },
+  });
+  if (recent) return { sent: false, reason: "cooldown" };
+
+  const minted = await mintResetCode();
+
+  const sent = await sendMail(buildResetEmail(user.email, minted.code, RESET_CODE_TTL_MINUTES));
+  if (!sent) return { sent: false, reason: "email_failed" };
+
+  await prisma.$transaction(resetCodeWrites(user.id, null, minted));
+
+  return { sent: true };
 }
 
 interface ResetSubject {

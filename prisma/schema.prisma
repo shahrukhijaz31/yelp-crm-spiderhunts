@@ -997,7 +997,15 @@ model TimeAdjustment {
   @@map("time_adjustments")
 }
 
-/// A one-time credential an administrator hands to someone who cannot sign in.
+/// A one-time credential for someone who cannot sign in.
+///
+/// Two origins, one row shape. An administrator issues one from the Users
+/// screen and reads it out; or the person asks for one themselves on the
+/// sign-in screen and it is emailed to the address on their account.
+/// `issuedById` is what tells the two apart, and the difference matters
+/// elsewhere: an administrator's reset scrambles the password immediately, a
+/// self-service request leaves it working until the code is actually redeemed
+/// (see `lib/passwordReset.ts`).
 ///
 /// A separate table rather than four more columns on `users`, for the same
 /// reason sessions are a separate table: these rows are short-lived, there can
@@ -1022,11 +1030,14 @@ model PasswordReset {
   /// scrypt hash of the code, in `lib/password.ts` format.
   codeHash String @map("code_hash")
 
-  /// The administrator who issued it. Restrict, matching recordings: accounts
-  /// are disabled rather than deleted, and the record of who reset whose
-  /// password should not be removable by deleting a user.
-  issuedById String @map("issued_by_user_id")
-  issuedBy   User   @relation("PasswordResetIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
+  /// The administrator who issued it, or null when the person requested it
+  /// themselves from the sign-in screen — a self-service code has no issuer,
+  /// and recording the subject twice would make "who reset this account"
+  /// unanswerable. Restrict, matching recordings: accounts are disabled rather
+  /// than deleted, and the record of who reset whose password should not be
+  /// removable by deleting a user.
+  issuedById String? @map("issued_by_user_id")
+  issuedBy   User?   @relation("PasswordResetIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
 
   /// Enforced server-side on every use. 30 minutes from issue.
   expiresAt DateTime  @map("expires_at")

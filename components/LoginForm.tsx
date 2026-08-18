@@ -505,7 +505,7 @@ export default function LoginForm({
               Forgot your password?
             </button>
             <p className="mt-1.5 text-caption leading-relaxed text-fg-3">
-              Contact your workspace administrator to reset your password.
+              A one-time code will be emailed to the address on your account.
             </p>
           </div>
 

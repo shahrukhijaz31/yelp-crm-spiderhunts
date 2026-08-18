@@ -111,6 +111,47 @@ export const SCREENSHOT_BULK_DELETE_LIMIT: RateLimitRule = {
   windowSeconds: 5 * 60,
 };
 
+/**
+ * POST /api/auth/reset/request — "email me a reset code".
+ *
+ * The odd one out in this file, and worth saying why it belongs here anyway.
+ * Every other rule above throttles an authenticated caller, so the subject is a
+ * user id from the session; this endpoint is public by necessity — somebody
+ * locked out has no session — so the subject is the username they typed, and,
+ * separately, their IP. That is weaker: a caller picks their own bucket by
+ * picking what to type. It is still worth having, because what it protects is
+ * not the server's CPU but somebody else's inbox, and the account bucket bounds
+ * exactly that no matter who is doing the typing.
+ *
+ * `lib/loginThrottle.ts` would be the natural home, but its windows live in a
+ * `Map` per process — fine for a brake whose real cost is scrypt, wrong for one
+ * that decides how many emails get sent, where two PM2 workers would mean two
+ * allowances. This limiter is a row in Postgres and does not have that problem.
+ *
+ * Five an hour per account is far past anyone recovering a password once (a
+ * one-minute cooldown in `lib/passwordReset.ts` already covers double-clicks
+ * and second tabs), and short of anything that could be called a mail flood.
+ */
+export const PASSWORD_RESET_REQUEST_LIMIT: RateLimitRule = {
+  action: "password-reset-request",
+  limit: 5,
+  windowSeconds: 60 * 60,
+};
+
+/**
+ * The same endpoint, counted by source address instead.
+ *
+ * The account bucket stops one mailbox being flooded; this stops one machine
+ * walking a list of usernames to find out which of them send mail. Higher,
+ * because a whole office shares one NAT address — the same reason
+ * `lib/loginThrottle.ts` sets its per-IP ceiling above its per-account one.
+ */
+export const PASSWORD_RESET_REQUEST_IP_LIMIT: RateLimitRule = {
+  action: "password-reset-request-ip",
+  limit: 20,
+  windowSeconds: 60 * 60,
+};
+
 export interface RateLimitVerdict {
   allowed: boolean;
   /** Seconds until the current window closes. Sent as `Retry-After`. */
@@ -122,9 +163,11 @@ export interface RateLimitVerdict {
 /**
  * Count this request against the caller's window and say whether to serve it.
  *
- * `subject` is the user id from the session — never anything the client sent.
- * There is no parameter here a request could use to be counted as somebody
- * else, because the caller does not name the bucket.
+ * `subject` is the user id from the session for every authenticated rule —
+ * never anything the client sent, so there is no parameter a request could use
+ * to be counted as somebody else. The two password-reset rules are the stated
+ * exception and say so at their definitions: a caller with no session can only
+ * be identified by what they typed and where they connected from.
  *
  * Fails **open** on a database error, and that is the opposite of what
  * `lib/screenshotRateLimit.ts` does — deliberately, because the two are

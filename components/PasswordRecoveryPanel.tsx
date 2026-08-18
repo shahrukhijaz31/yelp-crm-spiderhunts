@@ -8,8 +8,8 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
+  MailCheck,
   ShieldQuestion,
-  UserCog,
 } from "lucide-react";
 
 import PasswordField, { PasswordRequirements } from "./PasswordField";
@@ -17,30 +17,45 @@ import {
   completePasswordReset,
   formatResetCodeInput,
   passwordChecks,
-  RESET_CODE_PLACEHOLDER,
+  requestResetCode,
   verifyResetCode,
 } from "@/lib/passwordRecovery";
 
 /**
  * "Forgot your password?" — the whole recovery path, on the sign-in screen.
  *
- * This workspace issues no verified email addresses, so there is no reset link
- * to send and none is pretended: the first thing this panel says is who to ask.
- * Recovery is an out-of-band handoff — an administrator generates a one-time
- * code and reads it to the person — and the second thing the panel offers is
- * the place to type that code in.
+ * Anyone with an account can get themselves back in without asking anybody:
+ * they type the username they sign in with, and a one-time code goes to the
+ * address on that account. An administrator can still issue a code by hand from
+ * the Users screen — for someone who has lost the mailbox too — and the two
+ * kinds of code are redeemed by the identical two steps below.
  *
- * Three steps, one at a time, because the person arriving here is already
- * having a bad minute:
+ * Four steps, one at a time, because the person arriving here is already having
+ * a bad minute:
  *
- *   ask       who to contact, and the way in if they already have a code
+ *   ask       who they are, so the code has somewhere to go
  *   code      username + code, checked by the server before anything is shown
- *   password  choose a new one, then back to the ordinary sign-in form
+ *   password  choose a new one
+ *   done      back to the ordinary sign-in form
  *
- * Nothing here signs anybody in. The reset endpoints issue no session by
- * design (`app/api/auth/reset/complete`), so the last step hands back to the
- * form this panel replaced — which is also the clearest possible signal that
- * the new password works.
+ * **The ask step never says whether the account exists.** The endpoint answers
+ * every request identically (`app/api/auth/reset/request`), so this screen has
+ * nothing to branch on, and says the only thing that is true either way: if
+ * that account exists, a code is on its way to it. The wording is not
+ * defensive vagueness — it is the whole reason an anonymous person can press
+ * this button at all.
+ *
+ * **Asking for a code changes nothing about the account.** The current password
+ * keeps working until somebody holding the emailed code chooses a new one, so a
+ * request made in error — or by somebody who typed the wrong username — costs
+ * its owner one email. The panel says so, because a person who receives an
+ * unexpected reset code needs to know that ignoring it is the entire required
+ * response.
+ *
+ * Nothing here signs anybody in. The reset endpoints issue no session by design
+ * (`app/api/auth/reset/complete`), so the last step hands back to the form this
+ * panel replaced — which is also the clearest possible signal that the new
+ * password works.
  *
  * It renders inside the sign-in page's right-hand column, at the same width
  * and with the same field chassis, so switching between the two reads as one
@@ -55,6 +70,13 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
   const [username, setUsername] = useState("");
   const [code, setCode] = useState("");
   const [name, setName] = useState<string | null>(null);
+  /**
+   * Whether the code screen was reached by asking for one, rather than by
+   * "I already have a code". It only decides whether the confirmation line is
+   * shown — the step itself is identical either way, because an emailed code
+   * and one read out by an administrator are the same credential.
+   */
+  const [emailed, setEmailed] = useState(false);
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -65,6 +87,32 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
   const checks = passwordChecks(password, confirm);
   const ready = checks.every((check) => check.met);
   const mismatch = confirm.length > 0 && password !== confirm;
+
+  function goToStep(next: Step) {
+    setError(null);
+    setStep(next);
+  }
+
+  async function sendCode(event: React.FormEvent) {
+    event.preventDefault();
+    if (submitting || !username.trim()) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    const result = await requestResetCode({ username: username.trim() });
+    setSubmitting(false);
+
+    // Only a rate limit, a broken mailer or an unreachable server fails here.
+    // "No such account" does not, and must not.
+    if (!result.ok) {
+      setError(result.message);
+      return;
+    }
+
+    setEmailed(true);
+    setStep("code");
+  }
 
   async function submitCode(event: React.FormEvent) {
     event.preventDefault();
@@ -104,7 +152,7 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
       setError(result.message);
       // An expired or already-spent code cannot be rescued by retyping the
       // password, so send them back to the step that can actually be fixed —
-      // with a new code from their administrator. A password the server
+      // where they can also ask for a fresh code. A password the server
       // rejected as too short is fixed right here, so that stays put.
       if (result.code === "expired" || result.code === "invalid") setStep("code");
       return;
@@ -122,7 +170,7 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
     <div className="flex flex-col">
       <button
         type="button"
-        onClick={step === "ask" || step === "done" ? onBack : () => setStep("ask")}
+        onClick={step === "ask" || step === "done" ? onBack : () => goToStep("ask")}
         className="ui-btn ui-btn-ghost -ml-2 mb-5 h-8 w-fit px-2 text-caption"
       >
         <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
@@ -132,17 +180,110 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
       {/* One region announced as a whole, so a screen reader hears the new step
           rather than a scatter of individually-changed fields. */}
       <div aria-live="polite">
-        {step === "ask" && <AskStep onHaveCode={() => setStep("code")} />}
+        {step === "ask" && (
+          <form onSubmit={sendCode} noValidate className="flex flex-col gap-5">
+            <header>
+              <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-line-2 bg-surface text-fg-3">
+                <ShieldQuestion className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+              </span>
+              <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.028em] text-fg">
+                Forgot your password?
+              </h1>
+              <p className="mt-2 text-ui leading-relaxed text-fg-3">
+                Type the username you sign in with and we will email a one-time
+                reset code to the address on your account.
+              </p>
+            </header>
+
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="reset-request-username" className="field-label">
+                Username or email
+              </label>
+              <input
+                id="reset-request-username"
+                value={username}
+                onChange={(event) => {
+                  setUsername(event.target.value);
+                  setError(null);
+                }}
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                // The person pressed a button to reach this form; the caret
+                // belongs in its first field.
+                autoFocus
+                disabled={submitting}
+                className="ui-field h-11 w-full"
+              />
+            </div>
+
+            <ErrorBanner message={error} />
+
+            <div className="flex flex-col gap-2">
+              <button
+                type="submit"
+                disabled={submitting || !username.trim()}
+                aria-busy={submitting}
+                className="ui-btn ui-btn-primary h-11 w-full"
+              >
+                {submitting && (
+                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden="true" />
+                )}
+                {submitting ? "Sending…" : "Email me a reset code"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmailed(false);
+                  goToStep("code");
+                }}
+                className="ui-btn ui-btn-ghost h-9 w-full text-caption"
+              >
+                I already have a code
+              </button>
+            </div>
+
+            <div className="panel-inset flex items-start gap-3 px-4 py-3.5">
+              <ShieldQuestion
+                className="mt-0.5 h-4 w-4 shrink-0 text-fg-4"
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              <p className="text-caption leading-relaxed text-fg-3">
+                Your current password keeps working until you use the code, so
+                asking for one changes nothing. No longer have access to your
+                email? Your workspace administrator can issue a code directly.
+              </p>
+            </div>
+          </form>
+        )}
 
         {step === "code" && (
           <form onSubmit={submitCode} noValidate className="flex flex-col gap-4">
             <header>
+              {emailed && (
+                <p className="panel-inset mb-4 flex items-start gap-3 px-4 py-3 text-caption leading-relaxed text-fg-3">
+                  <MailCheck
+                    className="mt-0.5 h-4 w-4 shrink-0 text-fg-4"
+                    strokeWidth={1.75}
+                    aria-hidden="true"
+                  />
+                  {/* Not "we sent you a code" — the server does not tell this
+                      screen whether the account exists, and neither does it. */}
+                  <span>
+                    If that account exists, a code is on its way to the email
+                    address on it.
+                  </span>
+                </p>
+              )}
               <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.028em] text-fg">
                 Enter reset code
               </h1>
               <p className="mt-2 text-ui leading-relaxed text-fg-3">
-                Type your username and the one-time code your administrator gave
-                you.
+                {emailed
+                  ? "Check your inbox, then type the code below."
+                  : "Type your username and the one-time code you were given."}
               </p>
             </header>
 
@@ -161,11 +302,10 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
-                // The person pressed a button to reach this form; the caret
-                // belongs in its first field.
-                autoFocus
+                // Filled in already when a code was just requested; the caret
+                // belongs on the code instead.
+                autoFocus={!emailed}
                 disabled={submitting}
-                placeholder="you@spiderhunts.com"
                 className="ui-field h-11 w-full"
               />
             </div>
@@ -188,8 +328,8 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
                 autoCapitalize="characters"
                 autoCorrect="off"
                 spellCheck={false}
+                autoFocus={emailed}
                 disabled={submitting}
-                placeholder={RESET_CODE_PLACEHOLDER}
                 className="ui-field h-11 w-full font-mono tracking-[0.08em]"
               />
               <p className="flex items-center gap-1.5 text-caption text-fg-4">
@@ -214,6 +354,18 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
               )}
               {submitting ? "Checking…" : "Continue"}
             </button>
+
+            <p className="text-center text-caption text-fg-4">
+              Code not arrived?{" "}
+              <button
+                type="button"
+                onClick={() => goToStep("ask")}
+                disabled={submitting}
+                className="font-medium text-fg-2 underline underline-offset-2 hover:text-fg disabled:opacity-60"
+              >
+                Send another
+              </button>
+            </p>
           </form>
         )}
 
@@ -247,6 +399,10 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
               autoComplete="new-password"
               autoFocus
               disabled={submitting}
+              // No placeholder anywhere on the sign-in screen: the labels say
+              // what each field is, and a row of dots in an empty password box
+              // reads as a value that is already there.
+              placeholder=""
             />
 
             <PasswordField
@@ -259,6 +415,7 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
               autoComplete="new-password"
               disabled={submitting}
               error={mismatch ? "The new passwords do not match." : undefined}
+              placeholder=""
             />
 
             <PasswordRequirements password={password} checks={checks} />
@@ -302,49 +459,6 @@ export default function PasswordRecoveryPanel({ onBack }: { onBack: () => void }
             </button>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The first thing someone locked out sees.
- *
- * It leads with the answer — ask your administrator — because that is true for
- * everyone arriving here, and only then offers the code entry, which is true
- * for the smaller group who have already made that call.
- */
-function AskStep({ onHaveCode }: { onHaveCode: () => void }) {
-  return (
-    <div className="flex flex-col gap-5">
-      <header>
-        <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-line-2 bg-surface text-fg-3">
-          <ShieldQuestion className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
-        </span>
-        <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.028em] text-fg">
-          Forgot your password?
-        </h1>
-        <p className="mt-2 text-ui leading-relaxed text-fg-3">
-          Contact your workspace administrator to reset your password.
-        </p>
-      </header>
-
-      <div className="panel-inset flex items-start gap-3 px-4 py-3.5">
-        <UserCog className="mt-0.5 h-4 w-4 shrink-0 text-fg-4" strokeWidth={1.75} aria-hidden="true" />
-        <p className="text-caption leading-relaxed text-fg-3">
-          They will generate a one-time reset code for you. Nobody — including
-          your administrator — can see your existing password; a reset replaces
-          it rather than revealing it.
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <button type="button" onClick={onHaveCode} className="ui-btn ui-btn-primary h-11 w-full">
-          Enter reset code
-        </button>
-        <p className="text-center text-caption text-fg-4">
-          Already have a code? It is valid for 30 minutes.
-        </p>
       </div>
     </div>
   );

@@ -3,17 +3,19 @@ import nodemailer, { type Transporter } from "nodemailer";
 /**
  * Outbound email, on one SMTP mailbox.
  *
- * The portal sends exactly one kind of message — the sign-in verification code
- * — so this module is deliberately not a mail framework: one transport, one
- * `sendMail`, and a configuration check that can be asked about before anything
- * commits to sending.
+ * The portal sends two kinds of message — the sign-in verification code and a
+ * password reset code — and they differ only in their copy, so this module is
+ * deliberately not a mail framework: one transport, one `sendMail`, and a
+ * configuration check that can be asked about before anything commits to
+ * sending. The wording of each lives in its own file (`lib/otpEmail.ts`,
+ * `lib/resetEmail.ts`), which is where a change to it belongs.
  *
  * **Everything here is server-only.** The credentials are read from
  * `process.env` with no `NEXT_PUBLIC_` prefix, so Next has nothing to inline
- * into a browser bundle, and the only importers are route handlers and
- * `lib/loginOtp.ts`. Nodemailer itself would fail the build if it were ever
- * pulled into a client component, which is a second, structural guarantee on
- * top of the naming one.
+ * into a browser bundle, and the only importers are route handlers,
+ * `lib/loginOtp.ts` and `lib/passwordReset.ts`. Nodemailer itself would fail
+ * the build if it were ever pulled into a client component, which is a second,
+ * structural guarantee on top of the naming one.
  *
  * **Nothing is logged that identifies the message.** Errors are reported to the
  * caller as a boolean; the code being carried never appears in a log line, an
@@ -34,6 +36,11 @@ const FROM = process.env.SMTP_FROM || USER;
  * complete sign-in, so a deployment that forgot the SMTP variables fails with
  * "we could not send your code" rather than quietly falling back to a
  * password-only session. The safe direction to fail is no session.
+ *
+ * Checked again by `/api/auth/reset/request`, before it looks anybody up, for a
+ * different reason: a silent failure there is a person waiting for a code that
+ * is never coming, and asking first means every caller is refused identically
+ * rather than only the ones whose account turns out to exist.
  */
 export function isMailConfigured(): boolean {
   return Boolean(HOST && PORT && USER && PASSWORD && FROM);

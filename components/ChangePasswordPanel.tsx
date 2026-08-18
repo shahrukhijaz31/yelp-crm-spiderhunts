@@ -224,8 +224,8 @@ export default function ChangePasswordPanel() {
       <p className="flex items-start gap-2.5 text-caption leading-relaxed text-fg-4">
         <ShieldCheck className="mt-px h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
         Passwords are stored hashed and cannot be read by anyone, including
-        administrators. If you ever forget yours, an administrator can issue a
-        one-time reset code — never reveal it.
+        administrators. If you ever forget yours, Forgot your password? on the
+        sign-in screen emails you a one-time code — never reveal it.
       </p>
     </div>
   );
