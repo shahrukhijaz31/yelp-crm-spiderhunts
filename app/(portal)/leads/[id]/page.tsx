@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import AccessDenied from "@/components/AccessDenied";
 import LeadWorkspace from "@/components/LeadWorkspace";
 import { requireModule } from "@/lib/authz";
+import { demoSummaryFor } from "@/lib/demoWebsites";
 import { getLeadDetail, nextLeadId } from "@/lib/leadDb";
 import { leadsListHref, leadWorkspaceHref, readLeadPosition } from "@/lib/leadLink";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
@@ -45,17 +46,34 @@ import { getRecordingSummaryFor } from "@/lib/recordings";
  * not depend on any of them.
  */
 export default async function LeadPage(props: PageProps<"/leads/[id]">) {
-  const { user, access, allowed } = await requireModule("leads");
+  /*
+   * Which module this URL needs depends on which list it was opened from.
+   *
+   * `?section=demo` is written into every link out of the Demo Websites table
+   * (`buildLeadSearchParams`), so a lead reached from there is checked against
+   * the Demo Websites module and one reached from the worklist against New
+   * Leads. An agent granted only one is refused the other's URL even when they
+   * know the lead id — and the id itself grants nothing, because both modules
+   * cover the whole pool.
+   *
+   * Read before the guard rather than after: the parameter chooses which
+   * question to ask, and the answer still comes from the `users` row.
+   */
+  const rawParams = toSearchParams(await props.searchParams);
+  const wantsDemo = rawParams.get("section") === "demo";
+
+  const { user, access, allowed } = await requireModule(wantsDemo ? "demoWebsites" : "leads");
   if (!allowed) {
-    return access.demoWebsites ? (
-      <AccessDenied homeHref="/demo-websites" homeLabel="Back to Demo Websites" />
-    ) : (
-      <AccessDenied />
-    );
+    // The way out points at whichever list this person actually has.
+    if (wantsDemo && access.leads) return <AccessDenied />;
+    if (!wantsDemo && access.demoWebsites) {
+      return <AccessDenied homeHref="/demo-websites" homeLabel="Back to Demo Websites" />;
+    }
+    return <AccessDenied />;
   }
 
   const { id } = await props.params;
-  const params = toSearchParams(await props.searchParams);
+  const params = rawParams;
 
   const query = parseLeadSearchParams(params, todayIso());
   const position = readLeadPosition(params.get("pos"));
@@ -66,8 +84,19 @@ export default async function LeadPage(props: PageProps<"/leads/[id]">) {
   // there is nothing here to work.
   if (!detail) notFound();
 
-  const [recording, nextId] = await Promise.all([
-    getRecordingSummaryFor(id, user),
+  /*
+   * Three reads, and the demo one is only made in the demo view.
+   *
+   * Not because it would leak anything — the demo image and link belong to the
+   * lead, not to a person — but because the worklist has no use for it and a
+   * query per page load for a panel nobody draws is a query nobody should pay
+   * for. The recording is the mirror image: `getRecordingSummaryFor` is skipped
+   * in the demo view, which is the server-side half of "no audio in Demo
+   * Websites".
+   */
+  const [recording, demo, nextId] = await Promise.all([
+    wantsDemo ? Promise.resolve(null) : getRecordingSummaryFor(id, user),
+    wantsDemo ? demoSummaryFor(id) : Promise.resolve(null),
     nextLeadId(query, id, position),
   ]);
 
@@ -79,6 +108,8 @@ export default async function LeadPage(props: PageProps<"/leads/[id]">) {
       key={detail.lead.id}
       detail={detail}
       initialRecording={recording}
+      initialDemo={demo}
+      section={query.section}
       serverToday={query.today}
       nav={{
         variant: "page",

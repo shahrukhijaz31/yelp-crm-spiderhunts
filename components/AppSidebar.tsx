@@ -131,26 +131,6 @@ const QUEUE_ICONS: Record<LeadWorkState, LucideIcon> = {
 const WORKSPACE: NavItem[] = [
   { href: "/meetings", label: "Meetings", icon: CalendarDays, module: "leads" },
   /*
-   * The second workspace, and the reason `module` exists on a nav item.
-   *
-   * Beside Meetings rather than in Data or Admin, because that is what it is:
-   * somewhere a person works, the same way they work the call list. It is drawn
-   * for both roles — an administrator manages the records from this screen and
-   * an agent presents them from it — and for neither role unless the account
-   * has the module.
-   *
-   * Not drawing it is tidiness. `/demo-websites` refuses an agent without the
-   * module independently (`requireModule`), and so does every endpoint behind
-   * it — deleting this line would change nothing about who can see a demo
-   * website.
-   */
-  {
-    href: "/demo-websites",
-    label: "Demo Websites",
-    icon: Globe,
-    module: "demoWebsites",
-  },
-  /*
    * An agent's own figures, and drawn for agents only.
    *
    * Not because an administrator may not see them — the page and its endpoint
@@ -387,14 +367,28 @@ export default function AppSidebar({
             than links: they go to the same place and differ in what is shown
             there, so a `href` would be a lie and a middle-click would promise
             a second tab that opened on the wrong queue. */}
-        {/* Gone entirely for an agent without the Leads module: the queues are
-            the lead workspace, and a counter for a list they may not open is
-            worse than no counter. The worklist itself refuses them and sends
-            them to whichever module they do have. */}
-        {canAccess(role, "/") && hasModule(access, "leads") && (
+        {/*
+          * The Leads group: the two queues, then Demo Websites.
+          *
+          * All three are the same lead pool looked at three ways, which is why
+          * they share a heading rather than Demo Websites sitting in Workspace
+          * beside Meetings. An agent granted one module and not the other sees
+          * only their half of this block, and an agent with neither sees no
+          * block at all.
+          *
+          * The queues are gone entirely without the Leads module: a counter for
+          * a list somebody may not open is worse than no counter. Demo Websites
+          * is drawn from the group's items below, which `canAccess` and the
+          * module filter have already narrowed.
+          *
+          * None of this is security. Every page and endpoint behind these links
+          * re-reads the module from the `users` row on the request.
+          */}
+        {canAccess(role, "/") && (hasModule(access, "leads") || hasModule(access, "demoWebsites")) && (
           <div className="flex flex-col gap-1">
             <p className={`eyebrow px-2 pb-1 ${style.hide}`}>Leads</p>
-            {LEAD_WORK_STATES.map((candidate) => {
+            {hasModule(access, "leads") &&
+              LEAD_WORK_STATES.map((candidate) => {
               // Only lit while the worklist is actually on screen. On Meetings
               // these are a way *back* to a queue, not a description of what is
               // in front of you, and a highlight there would say otherwise.
@@ -427,7 +421,31 @@ export default function AppSidebar({
                   </span>
                 </button>
               );
-            })}
+              })}
+
+            {/*
+              * Demo Websites: the same leads, with a demo image and a link on
+              * each. A `Link` rather than a queue button because it is a real
+              * destination with its own URL — the queues are app state and
+              * deliberately are not.
+              *
+              * Drawn only with the module, and that is tidiness:
+              * `/demo-websites` refuses an agent without it independently
+              * (`requireModule`), and so does every endpoint behind it.
+              */}
+            {hasModule(access, "demoWebsites") && (
+              <Link
+                href="/demo-websites"
+                onClick={onNavigate}
+                data-active={isActive("/demo-websites")}
+                aria-current={isActive("/demo-websites") ? "page" : undefined}
+                title="Demo Websites"
+                className={`nav-item ${style.center}`}
+              >
+                <Globe className="nav-icon h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+                <span className={`truncate ${style.srOnly}`}>Demo Websites</span>
+              </Link>
+            )}
           </div>
         )}
 

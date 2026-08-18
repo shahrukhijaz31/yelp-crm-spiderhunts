@@ -21,6 +21,7 @@ import Pagination from "./Pagination";
 import ViewTabs from "./ViewTabs";
 import { useLeadQueue } from "./LeadQueueProvider";
 import { usePortalStats } from "./PortalStatsProvider";
+import type { DemoSummary, DemoSummaryMap } from "@/lib/demoWebsiteRules";
 import { EMPTY_FILTERS, type CategoryOption, type LeadFilters } from "@/lib/filters";
 import { leadPosition, leadWorkspaceHref } from "@/lib/leadLink";
 import { todayIso, type LeadStats } from "@/lib/leadUtils";
@@ -29,6 +30,7 @@ import {
   DEFAULT_SORT,
   type LeadPageMeta,
   type LeadPageQuery,
+  type LeadSection,
   type LeadSort,
   type LeadSortKey,
   type PageSize,
@@ -96,6 +98,7 @@ import {
 
 /** Identifies a request, so one already answered is not made twice. */
 function fetchKey(
+  section: LeadSection,
   workState: LeadWorkState,
   view: WorklistView,
   filters: LeadFilters,
@@ -104,7 +107,7 @@ function fetchKey(
   page: number,
   pageSize: number,
 ): string {
-  return JSON.stringify([workState, view, filters, sort, today, page, pageSize]);
+  return JSON.stringify([section, workState, view, filters, sort, today, page, pageSize]);
 }
 
 /** How long the search box may go quiet before the query is sent. */
@@ -123,13 +126,36 @@ export default function Worklist({
   initialLeads,
   initialMeta,
   initialCategories,
+  initialDemos,
+  section = "leads",
   serverToday,
 }: {
   initialLeads: Lead[];
   initialMeta: LeadPageMeta;
   initialCategories: CategoryOption[];
+  /**
+   * Demo metadata for the first page, when the demo view rendered it. Sparse,
+   * and absent for the worklist, which draws no demo columns.
+   */
+  initialDemos?: DemoSummaryMap;
+  /**
+   * Which of the two views this is.
+   *
+   * **The same screen, the same query and the same leads either way.** The
+   * queue, the tabs, the filters, the search, the sort and the pager are
+   * identical, because they are one implementation over one lead pool — what
+   * changes is the two columns at the right of each row, the audio the demo
+   * view does not draw, and which module the endpoint behind it demands.
+   *
+   * This is not what enforces the permission. `GET /api/leads` picks its guard
+   * from the section it is *sent* and re-reads the module from the `users` row
+   * in Postgres; the page above this component runs the same check before a
+   * lead is read at all.
+   */
+  section?: LeadSection;
   serverToday: string;
 }) {
+  const demoSection = section === "demo";
   const { stats, setStats } = usePortalStats();
 
   // Which queue — New or Called — chosen in the sidebar and held for the whole
@@ -173,6 +199,21 @@ export default function Worklist({
    * perfectly good answer: the column simply offers to upload.
    */
   const [recordings, setRecordings] = useState<Record<string, RecordingSummary>>({});
+
+  /*
+   * The demo image and link for the rows on screen, keyed by lead id.
+   *
+   * Unlike `recordings` above, this arrives *with* the page rather than in a
+   * request of its own, and the difference is volume: recordings are rare
+   * enough to fetch for the whole workspace once, while demo metadata is a
+   * per-lead thing on a table of twenty thousand. It is asked for by lead id,
+   * bounded by the page, on the same round trip that fetched the page.
+   *
+   * Sparse by design — a lead with no demo row has no entry, and the cells draw
+   * "upload" and "add link". That is what makes every pre-existing lead appear
+   * here with nothing having been backfilled.
+   */
+  const [demos, setDemos] = useState<DemoSummaryMap>(initialDemos ?? {});
 
   /*
    * Which lead is open over this list, and where in the list it was.
@@ -228,7 +269,7 @@ export default function Worklist({
    * by business name and staying on page 4 lands an agent in the middle of the
    * alphabet, which is not where anyone means to be after clicking a heading.
    */
-  const criteriaKey = JSON.stringify([workState, view, appliedFilters, sort, today]);
+  const criteriaKey = JSON.stringify([section, workState, view, appliedFilters, sort, today]);
   const [lastCriteria, setLastCriteria] = useState(criteriaKey);
   if (lastCriteria !== criteriaKey) {
     setLastCriteria(criteriaKey);
@@ -240,6 +281,7 @@ export default function Worklist({
   // screen from fetching on mount the data it was handed.
   const settledKey = useRef(
     fetchKey(
+      section,
       DEFAULT_WORK_STATE,
       "all",
       EMPTY_FILTERS,
@@ -252,6 +294,7 @@ export default function Worklist({
 
   useEffect(() => {
     const request = {
+      section,
       workState,
       view,
       filters: appliedFilters,
@@ -261,6 +304,7 @@ export default function Worklist({
       pageSize,
     };
     const requestKey = fetchKey(
+      request.section,
       request.workState,
       request.view,
       request.filters,
@@ -289,12 +333,14 @@ export default function Worklist({
           leads: Lead[];
           stats: LeadStats;
           workCounts: LeadWorkCounts;
+          demos?: DemoSummaryMap;
         };
 
         // The server clamps a page past the end of the result set, so record
         // the page it actually served — otherwise the state change below reads
         // as a new request and fetches the same rows a second time.
         settledKey.current = fetchKey(
+          request.section,
           request.workState,
           request.view,
           request.filters,
@@ -305,6 +351,10 @@ export default function Worklist({
         );
 
         setLeads(data.leads);
+        // Replaced wholesale rather than merged: the map describes *this* page,
+        // and keeping entries for rows no longer on screen would grow without
+        // bound as an agent pages through twenty thousand leads.
+        if (data.demos) setDemos(data.demos);
 
         // A page turned from inside the workspace: open the row the agent was
         // walking towards, at whichever end of the new page it arrived at. An
@@ -345,6 +395,7 @@ export default function Worklist({
     // the seven values that actually describe a request plus the two ways of
     // reporting its counts — this does not re-run per render.
   }, [
+    section,
     workState,
     view,
     appliedFilters,
@@ -357,6 +408,16 @@ export default function Worklist({
   ]);
 
   useEffect(() => {
+    /*
+     * Not in the demo view, and this is the load-bearing half of "no audio in
+     * Demo Websites": the request is never made, so the browser never learns
+     * which leads have recordings and there is nothing for a stray control to
+     * render from. An agent granted only Demo Websites would be refused this
+     * endpoint anyway (it sits behind the Leads module), and not asking is how
+     * that refusal stays invisible rather than logging a 403 per page load.
+     */
+    if (demoSection) return;
+
     const controller = new AbortController();
 
     void (async () => {
@@ -378,11 +439,22 @@ export default function Worklist({
     })();
 
     return () => controller.abort();
-  }, []);
+  }, [demoSection]);
 
   /** A quick upload from a row. One entry changes; nothing is re-fetched. */
   const handleRecordingSaved = useCallback((saved: RecordingSummary) => {
     setRecordings((current) => ({ ...current, [saved.leadId]: saved }));
+  }, []);
+
+  /**
+   * A demo image or link saved from a row or from the window.
+   *
+   * One entry changes and nothing is re-fetched: the PATCH and the upload both
+   * return the saved summary, so the cell and the map agree without a re-read —
+   * the same contract the recording upload keeps.
+   */
+  const handleDemoSaved = useCallback((leadId: string, saved: DemoSummary) => {
+    setDemos((current) => ({ ...current, [leadId]: saved }));
   }, []);
 
   /*
@@ -480,6 +552,7 @@ export default function Worklist({
    */
   const linkQuery = useMemo<LeadPageQuery>(
     () => ({
+      section,
       workState,
       view,
       filters: appliedFilters,
@@ -488,7 +561,7 @@ export default function Worklist({
       page: meta.page,
       pageSize: meta.pageSize as PageSize,
     }),
-    [workState, view, appliedFilters, sort, today, meta.page, meta.pageSize],
+    [section, workState, view, appliedFilters, sort, today, meta.page, meta.pageSize],
   );
 
   const hrefFor = useCallback(
@@ -739,6 +812,7 @@ export default function Worklist({
           <LeadTable
             leads={leads}
             today={today}
+            section={section}
             sort={sort}
             onSort={cycleSort}
             hrefFor={hrefFor}
@@ -749,6 +823,8 @@ export default function Worklist({
             datasetKey={`${lastCriteria}|${meta.page}|${meta.pageSize}`}
             recordings={recordings}
             onRecordingSaved={handleRecordingSaved}
+            demos={demos}
+            onDemoSaved={handleDemoSaved}
           />
         </div>
 
@@ -783,7 +859,9 @@ export default function Worklist({
             leadId={open.id}
             leadName={open.name}
             positionLabel={`${leadPosition(meta.page, meta.pageSize, open.index)} of ${meta.total}`}
+            section={section}
             serverToday={today}
+            onDemoSaved={handleDemoSaved}
             onClose={closeLead}
             onPrev={hasPrev ? goPrev : null}
             onNext={hasNext ? goNext : null}

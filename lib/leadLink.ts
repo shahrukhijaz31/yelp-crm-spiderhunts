@@ -1,5 +1,6 @@
 import {
   buildLeadSearchParams,
+  type LeadSection,
   DEFAULT_PAGE_SIZE,
   type LeadPageQuery,
 } from "./leadQuery";
@@ -82,10 +83,17 @@ export function readLeadPosition(value: string | null | undefined): number | nul
 export function leadsListHref(query: {
   page?: number;
   pageSize?: number;
+  /**
+   * Which list this lead was opened from. Back has to return to it: a lead
+   * reached from Demo Websites and sent back to `/` would drop the agent in a
+   * view they may not even have the module for.
+   */
+  section?: LeadSection;
 }): string {
   const params = new URLSearchParams({
     page: String(Math.max(1, Math.floor(query.page ?? 1))),
     pageSize: String(query.pageSize ?? DEFAULT_PAGE_SIZE),
   });
-  return `/?${params}`;
+  const path = query.section === "demo" ? "/demo-websites" : "/";
+  return `${path}?${params}`;
 }

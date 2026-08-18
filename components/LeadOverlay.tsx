@@ -6,6 +6,8 @@ import { X } from "lucide-react";
 
 import LeadWorkspace from "./LeadWorkspace";
 import type { LeadDetail } from "@/lib/leadDb";
+import type { DemoSummary } from "@/lib/demoWebsiteRules";
+import type { LeadSection } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
 
@@ -57,16 +59,20 @@ import type { Lead } from "@/lib/types";
 interface LeadOverlayData {
   detail: LeadDetail;
   recording: RecordingSummary | null;
+  /** The demo image and link, or null for a lead that has neither yet. */
+  demo: DemoSummary | null;
 }
 
 export default function LeadOverlay({
   leadId,
   leadName,
   positionLabel,
+  section = "leads",
   serverToday,
   onClose,
   onPrev,
   onNext,
+  onDemoSaved,
   onSaved,
 }: {
   leadId: string;
@@ -74,6 +80,13 @@ export default function LeadOverlay({
   leadName: string;
   /** "12 of 340" within the list behind the window, when it is known. */
   positionLabel: string | null;
+  /**
+   * Which view the window was opened from. Passed straight through: it decides
+   * whether the workspace draws the call recording or the demo panel, and
+   * nothing else. The lead itself is identical either way — same request, same
+   * record, same fields.
+   */
+  section?: LeadSection;
   serverToday: string;
   onClose: () => void;
   /** Move within the list behind the window; null at either end of it. */
@@ -81,6 +94,8 @@ export default function LeadOverlay({
   onNext: (() => void) | null;
   /** The saved row, so the list underneath can agree with the window. */
   onSaved: (lead: Lead) => void;
+  /** A demo image or link saved in the window, for the row behind it. */
+  onDemoSaved?: (leadId: string, demo: DemoSummary) => void;
 }) {
   const reduced = useReducedMotion();
 
@@ -266,6 +281,8 @@ export default function LeadOverlay({
             key={data.detail.lead.id}
             detail={data.detail}
             initialRecording={data.recording}
+            initialDemo={data.demo}
+            section={section}
             serverToday={serverToday}
             nav={{
               variant: "overlay",
@@ -275,6 +292,7 @@ export default function LeadOverlay({
               positionLabel,
             }}
             onSaved={onSaved}
+            onDemoSaved={onDemoSaved}
             onDirtyChange={setDirty}
           />
         ) : (

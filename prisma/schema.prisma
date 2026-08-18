@@ -109,6 +109,12 @@ model Lead {
   /// uploaded. At most one — see `MeetingRecording`.
   recording MeetingRecording?
 
+  /// The demo-specific half of this lead: an image and a link, and nothing
+  /// else. Optional, and absent for almost every row — a lead appears in the
+  /// Demo Websites view whether or not this exists (see {@link DemoWebsite}),
+  /// so this is null until somebody actually saves one of the two fields.
+  demoWebsite DemoWebsite?
+
   /// The log of who worked this lead and when. The lead itself keeps only the
   /// current outcome; this keeps every one of them, with a name against it.
   activity LeadActivity[]
@@ -499,11 +505,11 @@ model User {
   /// {@link ProductivitySettings}, which is a singleton.
   productivitySettings ProductivitySettings[]
 
-  /// Demo websites this administrator created. `SetNull` on the far side, so
-  /// this is a back-reference that never blocks a delete — see the note on
+  /// Demo image/link edits this person last made. `SetNull` on the far side,
+  /// so this is a back-reference that never blocks a delete — see the note on
   /// {@link DemoWebsite}, which explains why it is not `Restrict` like
   /// recordings.
-  demoWebsites DemoWebsite[] @relation("DemoWebsiteAuthor")
+  demoWebsiteEdits DemoWebsite[] @relation("DemoWebsiteEditor")
 
   @@map("users")
 }
@@ -1227,106 +1233,72 @@ model RateLimit {
   @@map("rate_limits")
 }
 
-/// The state a demo website is in, from the portal's point of view.
-///
-/// Deliberately *not* `CallStatus`. A demo website is not a lead and does not
-/// travel through a call outcome: "Called - No answer" says nothing about a
-/// site an agent is showing someone. Reusing the lead enum would have coupled
-/// two workflows that share no vocabulary, and the first status either one
-/// needed on its own would have broken the other.
-///
-/// Four values, snake_case like `CallStatus` for the same reason — the value
-/// stored is the key the UI already uses, and the human labels live in
-/// `DEMO_WEBSITE_STATUS_LABELS` (`lib/demoWebsiteRules.ts`) so copy changes
-/// stay out of the database.
-enum DemoWebsiteStatus {
-  /// Being built. Not ready to put in front of a client.
-  draft
-  /// Ready to demo. The state most rows sit in.
-  active
-  /// Has been shown to a client at least once.
-  presented
-  /// Kept for the record, no longer demoed.
-  archived
-
-  @@map("demo_website_status")
-}
-
-/// A website an agent can present to a client.
+/// The demo-specific half of a lead.
 ///
 /// ---------------------------------------------------------------------------
-/// Why this is its own table
+/// This is metadata, not a record
 /// ---------------------------------------------------------------------------
-/// Because it is its own thing. A demo website is not a lead with a different
-/// status: nobody calls it, it has no callback date, no meeting, no owner, no
-/// scraped rating and no call recording. Putting these rows in `leads` behind a
-/// type column would have meant every lead query growing a filter it could
-/// forget, every lead figure quietly counting demos, and the CSV import,
-/// the exports and the performance reports all learning about a kind of row
-/// they have no business knowing exists.
+/// A "demo website" is not a thing this portal stores. It is a **lead**, looked
+/// at through a second view, plus the two pieces of information that view adds:
+/// an image of the demo, and a link to it. Everything else a demo screen shows
+/// — the business name, the phone, the address, the owner, the status, the
+/// notes — is read from `leads` on every request, so a status changed on the
+/// worklist is already changed here, with nothing to synchronise and no way for
+/// the two views to disagree.
 ///
-/// Nothing here references `leads`, in either direction, and no row in either
-/// table is derived from the other. Creating a demo website creates one row in
-/// this table and nothing anywhere else.
+/// That is why this table holds **no lead columns at all**. There is no `name`,
+/// no `phone`, no `email`, no `address`, no `status`, no `notes` and no `owner`
+/// here, and none may ever be added: a copy of a lead field in this table is a
+/// copy that goes stale the first time somebody edits the lead, and the bug it
+/// produces — two screens showing different values for the same business — is
+/// the exact failure this shape exists to make impossible.
 ///
 /// ---------------------------------------------------------------------------
-/// Who may read and write one
+/// One row per lead, and only when there is something to store
 /// ---------------------------------------------------------------------------
-/// Reading is administrators and agents with the Demo Websites module
-/// (`users.can_access_demo_websites`); writing is administrators only. Neither
-/// rule is expressible in a schema, so neither is written here — both live in
-/// the route handlers, which resolve the caller from the session row in
-/// Postgres on every request. There is deliberately no per-agent ownership
-/// column: access is by module, not by record, so there is nothing here for an
-/// agent to be the owner of.
+/// `lead_id` is UNIQUE, so a lead has at most one of these. A row is created
+/// the first time an image or a link is saved and not before: **a lead with no
+/// row here still appears in the Demo Websites view**, with an empty image cell
+/// and an empty link. The view is a left join over `leads`, never an inner one,
+/// so the twenty thousand leads that predate this feature are all present from
+/// the moment it ships and nothing had to be backfilled.
+///
+/// `onDelete: Cascade`, because this row is part of the lead: deleting the lead
+/// takes its demo metadata with it, and the image file is removed by the same
+/// code path that removes the row.
 ///
 /// ---------------------------------------------------------------------------
 /// The image
 /// ---------------------------------------------------------------------------
-/// Six nullable columns rather than a second table, because a demo website has
-/// at most one image and a one-to-one relation would only be a join to reach
-/// them. They move together — all six are set by an upload and all six are
-/// cleared by a removal — and `image_storage_key` is unique so two rows can
-/// never point at the same object on disk.
+/// Six nullable columns rather than a second table, on the same reasoning the
+/// screenshot and recording stores use: they are written as a set and cleared
+/// as a set. `image_storage_key` is unique so two leads can never point at the
+/// same object on disk.
 ///
 /// The key is a path *within* the demo image store and never an absolute path;
 /// it is generated by the server (`lib/demoImageStorage.ts`) and is never
 /// accepted from a client. Nothing serves that directory: the bytes leave only
-/// through `GET /api/demo-websites/:id/image`, which authorizes the caller and
-/// reads the key off the row.
+/// through `GET /api/leads/:id/demo/image`, which authorizes the caller and
+/// reads the key off this row.
 ///
-/// There is deliberately **no recording relation here**. Demo websites have no
-/// audio: the two things an agent presents are the link and the image, and a
-/// relation nothing writes would only be an invitation to add the upload
-/// button this module is specified not to have.
+/// There is deliberately **no recording relation here and no audio of any
+/// kind**. Call recordings belong to the lead and are reached through
+/// `MeetingRecording`; the Demo Websites view does not draw them, and this
+/// table has nothing for one to hang from.
 model DemoWebsite {
-  /// cuid rather than a serial, for the reason `Lead` gives: this id appears in
-  /// URLs and in the image endpoint, so it must be safe to hand out and must
-  /// not leak how many rows the table holds.
   id String @id @default(cuid())
 
-  /// What the demo is called — "Example Restaurant Demo". Required.
-  name String
+  /// The lead this describes. UNIQUE — one demo record per lead — and the only
+  /// foreign key in the table. Everything a demo screen shows apart from the
+  /// two fields below is read through this relation, never copied across it.
+  leadId String @unique @map("lead_id")
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
-  /// The client or company it was built for. Empty string rather than null,
-  /// matching `Lead.address`: the UI has one way to render "not set" and it is
-  /// not two.
-  clientName String @default("") @map("client_name")
-
-  /// Where the demo lives. Validated server-side before it is stored — http
-  /// and https only, no credentials, no `javascript:` — by `normaliseDemoUrl`
-  /// in `lib/demoWebsiteRules.ts`. Stored as ordinary text: it is data, and the
-  /// portal never redirects to it, it only renders a link the reader clicks.
-  demoUrl String @map("demo_url")
-
-  /// Contact details, when there are any. Optional in both the form and the
-  /// column — plenty of demos are built before anyone is spoken to.
-  phone String?
-  email String?
-
-  status DemoWebsiteStatus @default(active)
-
-  notes String @default("")
+  /// Where the demo lives. Validated server-side before it is stored — http and
+  /// https only, no credentials, no `javascript:` — by `normaliseDemoUrl` in
+  /// `lib/demoWebsiteRules.ts`. Nullable: a lead may have an image and no link,
+  /// or a link and no image, and a row exists as soon as either is set.
+  demoUrl String? @map("demo_url")
 
   /// The demo image, or six nulls. See the note above on why it is not a table.
   imageStorageKey String?   @unique @map("image_storage_key")
@@ -1340,23 +1312,21 @@ model DemoWebsite {
   imageFileSize   Int?      @map("image_file_size")
   imageUpdatedAt  DateTime? @map("image_updated_at")
 
-  /// The administrator who created the row. `SetNull` rather than `Restrict`:
-  /// a demo website outlives the account that added it, and it carries no
-  /// performance figure that an absent author would falsify — unlike
-  /// `lead_activities`, where the attribution *is* the data.
-  createdById String? @map("created_by_user_id")
-  createdBy   User?   @relation("DemoWebsiteAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+  /// Who last touched the demo fields. `SetNull` rather than `Restrict`: this
+  /// is a note about who edited a link, not a performance figure that an absent
+  /// author would falsify — unlike `lead_activities`, where the attribution
+  /// *is* the data.
+  updatedById String? @map("updated_by_user_id")
+  updatedBy   User?   @relation("DemoWebsiteEditor", fields: [updatedById], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  /// The list screen's two orderings, and its one filter. `created_at` is
-  /// indexed because the default sort is newest-first and the pager walks it;
-  /// `status` because the status filter is the only narrowing that is a plain
-  /// equality. The free-text search is a `contains` over four columns and
-  /// cannot use either — it is bounded by a length cap and a rate limit
-  /// instead, exactly as the worklist's search is.
-  @@index([createdAt])
-  @@index([status])
+  /// No index beyond the two uniques above, and that is deliberate. Nothing
+  /// ever queries this table on its own: every read is "the demo rows for these
+  /// twenty lead ids", driven by the page of leads the worklist query already
+  /// chose, which is a primary-key lookup on `lead_id`. Ordering, filtering and
+  /// searching all happen against `leads` and its indexes, exactly as they do
+  /// for the ordinary worklist.
   @@map("demo_websites")
 }

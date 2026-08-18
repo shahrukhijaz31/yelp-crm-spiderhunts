@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
 
@@ -9,47 +9,42 @@ import { config as loadEnv } from "dotenv";
 import { PrismaClient } from "../lib/generated/prisma/client";
 import { demoImageRoot } from "../lib/demoImageStorage";
 import { sniffDemoImage } from "../lib/demoImageRules";
-import {
-  DemoWebsiteError,
-  normaliseDemoUrl,
-  DEMO_PAGE_SIZES,
-} from "../lib/demoWebsiteRules";
+import { DemoWebsiteError, normaliseDemoUrl } from "../lib/demoWebsiteRules";
 import { DEFAULT_MODULE_ACCESS } from "../lib/modules";
 import { hashPassword } from "../lib/password";
 
 /**
- * The Demo Websites module, end to end.
+ * Demo Websites: the same leads, a second view, two extra fields.
  *
- *   npm run dev              (in one terminal)
+ *   npm run dev                  (in one terminal)
  *   npm run test:demo-websites   (in another)
  *
  * Written for the reason `test-agent-screenshots.ts` gives: every claim worth
- * checking here is a claim about a cookie, a session row, a role column, a
- * module column, a `where` clause and an HTTP status. A mocked version of any
- * of them would pass whether or not the real thing works, so this speaks HTTP
- * to the real routes with real session cookies and checks what actually comes
- * back.
+ * checking here is a claim about a cookie, a session row, a module column, a
+ * `where` clause and an HTTP status. A mocked version of any of them would pass
+ * whether or not the real thing works, so this speaks HTTP to the real routes
+ * with real session cookies and checks what actually comes back.
  *
- * The question it exists to answer is not "does the list load". It is whether
- * an agent holding a valid session and a text editor can reach or change one
- * byte they should not: by typing the URL, by changing an id, by adding a
- * `userId` to a body, by claiming a role, by supplying a storage key, by
- * calling a write verb, or by asking for an image they have no module for.
- * Every one of those is below, and every one of them must fail.
+ * ---------------------------------------------------------------------------
+ * The claim this file exists to prove
+ * ---------------------------------------------------------------------------
+ * **There is one lead pool and no copy of it.** The Demo Websites view reads
+ * `leads`, so a name, a status or a note edited on the worklist is already
+ * edited in the demo view — not synchronised, not eventually consistent, the
+ * same row. The strongest test below writes a change through the *lead* API and
+ * reads it back through the *demo* section, with no demo-side write in between.
  *
- * It also checks the two claims the brief cares most about and that no unit
- * test can make: that Demo Websites are stored **separately** from leads, and
- * that adding the module changed nothing about leads, recordings or meetings.
+ * The second claim is the boundary: an agent granted one section cannot reach
+ * the other, by URL, by API, or by changing an id — and an agent granted the
+ * demo section is never served an audio control or the endpoint behind one.
  *
  * ---------------------------------------------------------------------------
  * What it creates, and what it never touches
  * ---------------------------------------------------------------------------
- * Four throwaway accounts (`dwtest-*`) — an administrator and three agents with
- * three different module grants — their sessions, and a handful of demo
- * websites with real image files on disk. All of it is deleted on the way out,
- * including after a failure. It never creates, edits or deletes a lead, a
- * recording, a meeting or a real user; the lead-side checks are counts taken
- * before and after and compared.
+ * Four throwaway accounts (`dwtest-*`) with four different grants, their
+ * sessions, and three throwaway leads it creates and deletes. No existing lead,
+ * recording or meeting is created, edited or deleted, and the counts are
+ * compared before and after to prove it.
  *
  * Sessions are inserted directly rather than signed in for: a real portal
  * sign-in needs a six-digit code delivered by email, which a test cannot read.
@@ -66,8 +61,6 @@ const origin = new URL(BASE_URL).origin;
 /** Matches `SESSION_COOKIE` in `lib/access.ts`, which the server is using. */
 const SESSION_COOKIE =
   process.env.NODE_ENV === "production" ? "__Host-lp_session" : "lp_session";
-
-const API = "/api/demo-websites";
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
@@ -91,9 +84,13 @@ function section(title: string): void {
   console.log(`\n${title}`);
 }
 
-// --- fixtures ----------------------------------------------------------------
+// --- image fixtures ----------------------------------------------------------
 
-/** A minimal JPEG whose SOF0 states the dimensions. Same trick as Stage 5's. */
+function toBytes(buffer: Buffer): Uint8Array {
+  return new Uint8Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length));
+}
+
+/** A minimal JPEG whose SOF0 states the dimensions. */
 function fakeJpeg(width: number, height: number, padding = 2048): Uint8Array {
   const comment = Buffer.alloc(2 + 2 + padding);
   comment.writeUInt8(0xff, 0);
@@ -109,15 +106,15 @@ function fakeJpeg(width: number, height: number, padding = 2048): Uint8Array {
   sof.writeUInt16BE(width, 7);
   sof.writeUInt8(1, 9);
 
-  const joined = Buffer.concat([
-    Buffer.from([0xff, 0xd8]),
-    comment,
-    sof,
-    Buffer.from([0x00, 0x01, 0x11, 0x00]),
-    Buffer.from([0xff, 0xd9]),
-  ]);
-
-  return new Uint8Array(joined.buffer.slice(joined.byteOffset, joined.byteOffset + joined.length));
+  return toBytes(
+    Buffer.concat([
+      Buffer.from([0xff, 0xd8]),
+      comment,
+      sof,
+      Buffer.from([0x00, 0x01, 0x11, 0x00]),
+      Buffer.from([0xff, 0xd9]),
+    ]),
+  );
 }
 
 const CRC_TABLE = (() => {
@@ -145,44 +142,35 @@ function pngChunk(type: string, data: Buffer): Buffer {
   return Buffer.concat([length, body, crc]);
 }
 
-/**
- * A genuinely valid greyscale PNG, not a header with padding after it.
- *
- * A real file rather than a plausible one, because "the sniffer accepts a PNG"
- * is only worth checking against something a viewer would actually open.
- */
+/** A genuinely valid greyscale PNG, not a header with padding after it. */
 function realPng(width: number, height: number): Uint8Array {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
-  ihdr.writeUInt8(8, 8); // bit depth
-  ihdr.writeUInt8(0, 9); // greyscale
-  ihdr.writeUInt8(0, 10); // deflate
-  ihdr.writeUInt8(0, 11); // adaptive filtering
-  ihdr.writeUInt8(0, 12); // no interlace
+  ihdr.writeUInt8(8, 8);
+  ihdr.writeUInt8(0, 9);
+  ihdr.writeUInt8(0, 10);
+  ihdr.writeUInt8(0, 11);
+  ihdr.writeUInt8(0, 12);
 
-  // One filter byte per scanline, then the pixels.
   const raw = Buffer.alloc(height * (1 + width));
   for (let y = 0; y < height; y += 1) {
     raw[y * (1 + width)] = 0;
-    for (let x = 0; x < width; x += 1) {
-      raw[y * (1 + width) + 1 + x] = (x * 7 + y * 3) % 256;
-    }
+    for (let x = 0; x < width; x += 1) raw[y * (1 + width) + 1 + x] = (x * 7 + y * 3) % 256;
   }
 
-  const png = Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk("IHDR", ihdr),
-    pngChunk("IDAT", deflateSync(raw)),
-    pngChunk("IEND", Buffer.alloc(0)),
-  ]);
-
-  return new Uint8Array(png.buffer.slice(png.byteOffset, png.byteOffset + png.length));
+  return toBytes(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      pngChunk("IHDR", ihdr),
+      pngChunk("IDAT", deflateSync(raw)),
+      pngChunk("IEND", Buffer.alloc(0)),
+    ]),
+  );
 }
 
 // --- HTTP --------------------------------------------------------------------
 
-/** Mint a portal session for a user and return the cookie header value. */
 async function signIn(userId: string): Promise<string> {
   const token = randomBytes(32).toString("base64url");
   const now = Date.now();
@@ -220,16 +208,14 @@ async function readReply(response: Response): Promise<Reply> {
 }
 
 async function get(url: string, cookie?: string): Promise<Reply> {
-  const response = await fetch(`${BASE_URL}${url}`, {
-    headers: cookie ? { cookie } : {},
-    // The portal redirects unauthenticated *pages*; the API answers 401. Either
-    // way a redirect must not be followed, or the status under test is lost.
-    redirect: "manual",
-  });
-  return readReply(response);
+  return readReply(
+    await fetch(`${BASE_URL}${url}`, {
+      headers: cookie ? { cookie } : {},
+      redirect: "manual",
+    }),
+  );
 }
 
-/** Headers a browser on this origin would send with a state-changing request. */
 function sameOriginHeaders(cookie: string): Record<string, string> {
   return {
     cookie,
@@ -239,22 +225,17 @@ function sameOriginHeaders(cookie: string): Record<string, string> {
   };
 }
 
-async function send(
-  method: string,
-  url: string,
-  cookie: string,
-  body?: unknown,
-): Promise<Reply> {
-  const response = await fetch(`${BASE_URL}${url}`, {
-    method,
-    headers: sameOriginHeaders(cookie),
-    body: body === undefined ? undefined : JSON.stringify(body),
-    redirect: "manual",
-  });
-  return readReply(response);
+async function send(method: string, url: string, cookie: string, body?: unknown): Promise<Reply> {
+  return readReply(
+    await fetch(`${BASE_URL}${url}`, {
+      method,
+      headers: sameOriginHeaders(cookie),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      redirect: "manual",
+    }),
+  );
 }
 
-/** A multipart upload, with the same origin headers minus the content type. */
 async function upload(
   url: string,
   cookie: string,
@@ -265,84 +246,95 @@ async function upload(
   const form = new FormData();
   form.append("file", new Blob([bytes as BlobPart], { type: declaredType }), fileName);
 
-  const response = await fetch(`${BASE_URL}${url}`, {
-    method: "POST",
-    headers: { cookie, origin, "sec-fetch-site": "same-origin" },
-    body: form,
-    redirect: "manual",
-  });
-  return readReply(response);
+  return readReply(
+    await fetch(`${BASE_URL}${url}`, {
+      method: "POST",
+      headers: { cookie, origin, "sec-fetch-site": "same-origin" },
+      body: form,
+      redirect: "manual",
+    }),
+  );
 }
 
-interface Card {
+async function getPage(url: string, cookie: string): Promise<{ status: number; html: string }> {
+  const response = await fetch(`${BASE_URL}${url}`, { headers: { cookie }, redirect: "manual" });
+  return { status: response.status, html: await response.text() };
+}
+
+interface LeadRow {
   id: string;
   name: string;
-  clientName: string;
-  demoUrl: string;
+  phone: string | null;
+  address: string;
   status: string;
   notes: string;
+  owner: string | null;
+}
+
+interface DemoSummaryShape {
+  leadId: string;
+  demoUrl: string | null;
   image: { width: number; height: number; fileSize: number; updatedAt: string } | null;
 }
 
-function cardsOf(reply: Reply): Card[] {
-  return (reply.body.demoWebsites as Card[] | undefined) ?? [];
+function leadsOf(reply: Reply): LeadRow[] {
+  return (reply.body.leads as LeadRow[] | undefined) ?? [];
 }
 
-function cardOf(reply: Reply): Card | null {
-  return (reply.body.demoWebsite as Card | undefined) ?? null;
+function demosOf(reply: Reply): Record<string, DemoSummaryShape> {
+  return (reply.body.demos as Record<string, DemoSummaryShape> | undefined) ?? {};
 }
 
-function metaOf(reply: Reply): { page: number; pageSize: number; total: number; totalPages: number } {
-  return (
-    (reply.body.meta as { page: number; pageSize: number; total: number; totalPages: number } | undefined) ?? {
-      page: 0,
-      pageSize: 0,
-      total: -1,
-      totalPages: -1,
-    }
-  );
+function findLead(reply: Reply, id: string): LeadRow | undefined {
+  return leadsOf(reply).find((lead) => lead.id === id);
+}
+
+function demoOf(reply: Reply): DemoSummaryShape | null {
+  return (reply.body.demo as DemoSummaryShape | null | undefined) ?? null;
+}
+
+async function fileExists(key: string): Promise<boolean> {
+  try {
+    return (await stat(path.resolve(demoImageRoot(), key))).isFile();
+  } catch {
+    return false;
+  }
 }
 
 // --- the run -----------------------------------------------------------------
 
 async function main(): Promise<void> {
   const suffix = randomBytes(4).toString("hex");
-  const createdIds: string[] = [];
 
-  console.log(`\nDemo Websites — module access, CRUD and the boundary around it — ${BASE_URL}\n`);
+  console.log(`\nDemo Websites — one lead pool, two views — ${BASE_URL}\n`);
 
   // =========================================================================
-  section("Pure rules — the demo link");
+  section("The demo link rule");
   // =========================================================================
-  // No server needed for these. They are here rather than in a file of their
-  // own because a URL that is accepted by the validator and refused by the
-  // route (or the other way round) is the bug worth catching, and running both
-  // in one pass is what makes that visible.
-
-  const urlAccepts: Array<[string, string]> = [
+  for (const [input, expected] of [
     ["https://example-demo.com", "https://example-demo.com/"],
     ["http://example-demo.com/menu", "http://example-demo.com/menu"],
     ["example-demo.com", "https://example-demo.com/"],
     ["  https://example-demo.com/a?b=c  ", "https://example-demo.com/a?b=c"],
-    ["//example-demo.com", "https://example-demo.com/"],
-  ];
-  for (const [input, expected] of urlAccepts) {
+  ] as const) {
     let actual = "";
     try {
       actual = normaliseDemoUrl(input);
     } catch (error) {
       actual = `threw: ${(error as Error).message}`;
     }
-    check(`normaliseDemoUrl(${JSON.stringify(input)}) -> ${expected}`, actual === expected, actual);
+    check(`${JSON.stringify(input)} -> ${expected}`, actual === expected, actual);
   }
 
-  const urlRefuses = [
+  for (const input of [
     "javascript:alert(1)",
     "JavaScript:alert(1)",
     "data:text/html,<script>alert(1)</script>",
     "file:///etc/passwd",
-    "ftp://example-demo.com",
     "vbscript:msgbox(1)",
+    "ftp://example-demo.com",
+    "//evil.com",
+    "//evil.com/path",
     "https://user:pass@example-demo.com",
     "https://localhost",
     "https://",
@@ -350,8 +342,7 @@ async function main(): Promise<void> {
     "   ",
     "https://example-demo.com/\r\nSet-Cookie: a=b",
     `https://example-demo.com/${"a".repeat(3000)}`,
-  ];
-  for (const input of urlRefuses) {
+  ]) {
     let refused = false;
     let detail = "";
     try {
@@ -359,43 +350,48 @@ async function main(): Promise<void> {
     } catch (error) {
       refused = error instanceof DemoWebsiteError;
     }
-    check(`normaliseDemoUrl refuses ${JSON.stringify(input.slice(0, 46))}`, refused, `returned ${detail}`);
+    check(`refuses ${JSON.stringify(input.slice(0, 44))}`, refused, `returned ${detail}`);
   }
 
   // =========================================================================
-  section("Pure rules — the image sniffer");
+  section("The image sniffer");
   // =========================================================================
   const png = realPng(320, 200);
   const jpeg = fakeJpeg(800, 600);
 
-  check("a real PNG is identified, with its true size", (() => {
-    const facts = sniffDemoImage(png);
-    return facts?.type === "image/png" && facts.width === 320 && facts.height === 200;
-  })());
+  check(
+    "a real PNG is identified, with its true size",
+    (() => {
+      const facts = sniffDemoImage(png);
+      return facts?.type === "image/png" && facts.width === 320 && facts.height === 200;
+    })(),
+  );
+  check(
+    "a JPEG is identified, with its true size",
+    (() => {
+      const facts = sniffDemoImage(jpeg);
+      return facts?.type === "image/jpeg" && facts.width === 800 && facts.height === 600;
+    })(),
+  );
 
-  check("a JPEG is identified, with its true size", (() => {
-    const facts = sniffDemoImage(jpeg);
-    return facts?.type === "image/jpeg" && facts.width === 800 && facts.height === 600;
-  })());
-
-  const notImages: Array<[string, Uint8Array]> = [
+  for (const [label, buffer] of [
     ["an HTML page named .png", Buffer.from(`<html><script>alert(1)</script></html>${"x".repeat(400)}`)],
     ["an SVG", Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>${"x".repeat(400)}`)],
     ["a PDF", Buffer.concat([Buffer.from("%PDF-1.7\n"), Buffer.alloc(500, 0x41)])],
-    ["the PNG signature with rubbish after it", Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(500, 0x41)])],
-    ["a truncated PNG", Buffer.from(png.subarray(0, 12))],
+    [
+      "the PNG signature with rubbish after it",
+      Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        Buffer.alloc(500, 0x41),
+      ]),
+    ],
     ["empty", Buffer.alloc(0)],
-  ].map(([label, buffer]) => [
-    label as string,
-    new Uint8Array((buffer as Buffer).buffer.slice((buffer as Buffer).byteOffset, (buffer as Buffer).byteOffset + (buffer as Buffer).length)),
-  ]);
-
-  for (const [label, bytes] of notImages) {
-    check(`the sniffer refuses ${label}`, sniffDemoImage(bytes) === null);
+  ] as const) {
+    check(`the sniffer refuses ${label}`, sniffDemoImage(toBytes(buffer)) === null);
   }
 
   check(
-    "the application's default module grant matches the column defaults",
+    "the application's default grant matches the column defaults",
     DEFAULT_MODULE_ACCESS.leads === true && DEFAULT_MODULE_ACCESS.demoWebsites === false,
   );
 
@@ -406,9 +402,9 @@ async function main(): Promise<void> {
     (
       [
         ["admin", "Demo Admin", "ADMIN", true, false],
-        ["both", "Demo Agent Both", "AGENT", true, true],
-        ["demoonly", "Demo Agent Demo Only", "AGENT", false, true],
-        ["leadsonly", "Demo Agent Leads Only", "AGENT", true, false],
+        ["both", "Agent Both", "AGENT", true, true],
+        ["demoonly", "Agent Demo Only", "AGENT", false, true],
+        ["leadsonly", "Agent Leads Only", "AGENT", true, false],
       ] as const
     ).map(async ([stem, name, role, leads, demos]) =>
       prisma.user.create({
@@ -427,19 +423,45 @@ async function main(): Promise<void> {
     ),
   );
 
-  // What the lead side of the portal looks like before any of this runs. Nothing
-  // below writes a lead, a recording or a meeting; these are compared at the end.
+  /*
+   * Two throwaway leads, created through Prisma rather than the portal so the
+   * test does not depend on the import path. They carry the values the "existing
+   * lead data carries over" checks look for — a status, notes, an owner, an
+   * address — because a lead with empty fields would pass those checks without
+   * proving anything.
+   */
+  const subject = await prisma.lead.create({
+    data: {
+      name: `Demo Test Restaurant ${suffix}`,
+      address: "12 Test Street, Lahore",
+      categories: ["Restaurants"],
+      phone: `0300${suffix.slice(0, 6)}`,
+      website: "example-restaurant.test",
+      rating: 4.5,
+      owner: "Test Owner",
+      status: "interested",
+      notes: "Client wants a modern website",
+    },
+    select: { id: true, name: true },
+  });
+
+  const other = await prisma.lead.create({
+    data: {
+      name: `Demo Test Dental ${suffix}`,
+      address: "9 Other Road, Lahore",
+      categories: ["Dentists"],
+      phone: `0301${suffix.slice(0, 6)}`,
+      status: "not_called",
+      notes: "",
+    },
+    select: { id: true, name: true },
+  });
+
+  // The state of the world before anything below runs.
   const before = {
     leads: await prisma.lead.count(),
     recordings: await prisma.meetingRecording.count(),
-    activity: await prisma.leadActivity.count(),
-    meetings: await prisma.lead.count({ where: { NOT: { meetingTime: null } } }),
-    leadIds: (
-      await prisma.lead.findMany({ select: { id: true }, orderBy: { id: "asc" }, take: 200 })
-    ).map((row) => row.id),
-    updatedAt: (
-      await prisma.lead.findMany({ select: { updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 1 })
-    )[0]?.updatedAt ?? null,
+    demoRows: await prisma.demoWebsite.count(),
   };
 
   try {
@@ -450,675 +472,505 @@ async function main(): Promise<void> {
       signIn(leadsOnly.id),
     ]);
 
-    // =======================================================================
-    section("Authorization — who may read the list");
-    // =======================================================================
-    const anonymous = await get(API);
-    check("a signed-out caller gets 401", anonymous.status === 401, `status ${anonymous.status}`);
+    const demoList = `/api/leads?section=demo&pageSize=100&q=${encodeURIComponent(suffix)}`;
+    const leadList = `/api/leads?pageSize=100&q=${encodeURIComponent(suffix)}`;
 
-    const adminList = await get(API, adminCookie);
-    check("an administrator gets 200", adminList.status === 200, `status ${adminList.status}`);
-
-    const bothList = await get(API, bothCookie);
-    check(
-      "an agent with the Demo Websites module gets 200",
-      bothList.status === 200,
-      `status ${bothList.status}`,
-    );
-
-    const demoList = await get(API, demoCookie);
-    check(
-      "an agent with Demo Websites but not Leads gets 200",
-      demoList.status === 200,
-      `status ${demoList.status}`,
-    );
-
-    const leadsList = await get(API, leadsCookie);
-    check(
-      "an agent without the Demo Websites module gets 403",
-      leadsList.status === 403,
-      `status ${leadsList.status}`,
-    );
-    check(
-      "and the 403 body carries no demo website data",
-      cardsOf(leadsList).length === 0 && !("meta" in leadsList.body),
-    );
-
-    const anonPage = await get("/demo-websites");
-    check(
-      "a signed-out caller is redirected away from the page",
-      anonPage.status === 307 || anonPage.status === 302,
-      `status ${anonPage.status}`,
-    );
+    /*
+     * The same two lists, on the Called queue.
+     *
+     * Recording a call outcome sets `first_called_at`, which is what moves a
+     * lead from New to Called (`lib/workState.ts`) — so the lead edited below
+     * legitimately leaves the queue it started in. That is the worklist's
+     * behaviour and the demo view inherits it, which is the point: the two
+     * views share the queue, the filters and the pager, not just the rows.
+     */
+    const demoCalled = `${demoList}&work=called`;
+    const leadCalled = `${leadList}&work=called`;
 
     // =======================================================================
-    section("Creating — administrators only");
+    section("One lead pool — the demo view shows the same records");
     // =======================================================================
-    for (const [label, cookie] of [
-      ["an agent with the module", bothCookie],
-      ["an agent without it", leadsCookie],
-    ] as const) {
-      const refused = await send("POST", API, cookie, {
-        name: "Should never exist",
-        demoUrl: "https://evil-demo.invalid",
-      });
-      check(`${label} cannot POST a demo website`, refused.status === 403, `status ${refused.status}`);
-    }
+    const viaLeads = await get(leadList, adminCookie);
+    const viaDemo = await get(demoList, adminCookie);
 
-    const created = await send("POST", API, adminCookie, {
-      name: `Example Restaurant Demo ${suffix}`,
-      clientName: "ABC Restaurant",
-      demoUrl: "example-restaurant-demo.test",
-      phone: "+44 7700 900123",
-      email: "OWNER@abc-restaurant.test",
-      status: "active",
-      notes: "Menu page is the one to show first.",
-      // Fields the client must not be able to set. Every one of these is either
-      // server-owned or does not exist as an input; none may reach the row.
-      id: "forged-id",
-      createdById: leadsOnly.id,
-      imageStorageKey: "../../../../etc/passwd",
-      imageFormat: "text/html",
-      createdAt: "1999-01-01T00:00:00.000Z",
-      userId: leadsOnly.id,
-      role: "ADMIN",
+    check(
+      "the lead section returns the fixture leads",
+      viaLeads.status === 200 && leadsOf(viaLeads).length === 2,
+      `status ${viaLeads.status}, ${leadsOf(viaLeads).length} rows`,
+    );
+    check("the demo section returns 200", viaDemo.status === 200, `status ${viaDemo.status}`);
+    check(
+      "…and returns the very same lead ids",
+      leadsOf(viaDemo)
+        .map((lead) => lead.id)
+        .sort()
+        .join(",") ===
+        leadsOf(viaLeads)
+          .map((lead) => lead.id)
+          .sort()
+          .join(","),
+    );
+
+    const demoRow = findLead(viaDemo, subject.id);
+    check(
+      "the demo view carries the lead's real name, address and owner",
+      demoRow?.name === subject.name &&
+        demoRow?.address === "12 Test Street, Lahore" &&
+        demoRow?.owner === "Test Owner",
+      JSON.stringify(demoRow),
+    );
+    check(
+      "…and the status and notes the lead already had",
+      demoRow?.status === "interested" && demoRow?.notes === "Client wants a modern website",
+      `${demoRow?.status} / ${demoRow?.notes}`,
+    );
+    check(
+      "a lead with no demo row still appears, with no demo metadata",
+      findLead(viaDemo, other.id) !== undefined && demosOf(viaDemo)[other.id] === undefined,
+    );
+    check(
+      "and no demo row was created merely by looking",
+      (await prisma.demoWebsite.count()) === before.demoRows,
+    );
+
+    // =======================================================================
+    section("Edits on the worklist appear in the demo view — the same row");
+    // =======================================================================
+    // The heart of the correction. This writes through the *lead* API and reads
+    // back through the *demo* section, with no demo-side write in between.
+    const edit = await send("PATCH", `/api/leads/${subject.id}`, adminCookie, {
+      status: "no_answer",
+      notes: "Call again tomorrow",
     });
-    check("an administrator can create one", created.status === 201, `status ${created.status}`);
+    check("an edit through the lead API succeeds", edit.status === 200, `status ${edit.status}`);
 
-    const record = cardOf(created);
-    if (!record) throw new Error("the create returned no record; the rest of the run cannot continue");
-    createdIds.push(record.id);
-
-    check("the id is server-generated, not the one posted", record.id !== "forged-id", record.id);
+    // Read from the Called queue: the edit above is what moved it there, in
+    // both views at once.
+    const afterEdit = await get(demoCalled, adminCookie);
+    const edited = findLead(afterEdit, subject.id);
+    check("the demo view shows the new status immediately", edited?.status === "no_answer", String(edited?.status));
     check(
-      "a schemeless demo link is normalised to https",
-      record.demoUrl === "https://example-restaurant-demo.test/",
-      record.demoUrl,
+      "the demo view shows the new notes immediately",
+      edited?.notes === "Call again tomorrow",
+      String(edited?.notes),
     );
-    check("the email is normalised to lower case", (
-      await prisma.demoWebsite.findUnique({ where: { id: record.id }, select: { email: true } })
-    )?.email === "owner@abc-restaurant.test");
 
-    const row = await prisma.demoWebsite.findUnique({
-      where: { id: record.id },
-      select: { createdById: true, imageStorageKey: true, imageFormat: true, createdAt: true },
+    await prisma.lead.update({
+      where: { id: subject.id },
+      data: { name: `Renamed Restaurant ${suffix}` },
     });
+    const renamedDemo = findLead(await get(demoCalled, adminCookie), subject.id);
+    const renamedLeads = findLead(await get(leadCalled, adminCookie), subject.id);
     check(
-      "the author is the session's administrator, not the posted userId",
-      row?.createdById === admin.id,
-      String(row?.createdById),
+      "a rename appears in both views, with no synchronisation step",
+      renamedDemo?.name === `Renamed Restaurant ${suffix}` &&
+        renamedLeads?.name === `Renamed Restaurant ${suffix}`,
+      `${renamedDemo?.name} / ${renamedLeads?.name}`,
     );
-    check("the posted storage key was ignored", row?.imageStorageKey === null);
-    check("the posted image format was ignored", row?.imageFormat === null);
-    check(
-      "the posted createdAt was ignored",
-      (row?.createdAt?.getFullYear() ?? 0) >= 2020,
-      String(row?.createdAt),
-    );
-    check("no image is attached to a new record", record.image === null);
 
     // =======================================================================
-    section("Creating — the demo link is validated at the endpoint too");
+    section("Access — which section each agent may open");
     // =======================================================================
-    for (const badUrl of [
-      "javascript:alert(1)",
-      "data:text/html;base64,PHNjcmlwdD4=",
-      "file:///etc/passwd",
-      "https://user:pass@example.test",
-      "not a url at all",
-    ]) {
-      const refused = await send("POST", API, adminCookie, {
-        name: "Bad link demo",
-        demoUrl: badUrl,
-      });
+    check("a signed-out caller gets 401 from the demo section", (await get(demoList)).status === 401);
+    check("a signed-out caller gets 401 from the lead section", (await get(leadList)).status === 401);
+    check(
+      "an administrator may read both",
+      (await get(demoList, adminCookie)).status === 200 && (await get(leadList, adminCookie)).status === 200,
+    );
+    check(
+      "an agent with both may read both",
+      (await get(demoList, bothCookie)).status === 200 && (await get(leadList, bothCookie)).status === 200,
+    );
+
+    const demoOnlyDemo = await get(demoList, demoCookie);
+    const demoOnlyLeads = await get(leadList, demoCookie);
+    check("an agent with Demo Websites only may read the demo section", demoOnlyDemo.status === 200, `status ${demoOnlyDemo.status}`);
+    check("…and is refused the New Leads section", demoOnlyLeads.status === 403, `status ${demoOnlyLeads.status}`);
+    check("…with no lead in the refusal body", leadsOf(demoOnlyLeads).length === 0);
+
+    const leadsOnlyLeads = await get(leadList, leadsCookie);
+    const leadsOnlyDemo = await get(demoList, leadsCookie);
+    check("an agent with New Leads only may read the lead section", leadsOnlyLeads.status === 200, `status ${leadsOnlyLeads.status}`);
+    check("…and is refused the demo section", leadsOnlyDemo.status === 403, `status ${leadsOnlyDemo.status}`);
+    check("…with no lead in the refusal body", leadsOf(leadsOnlyDemo).length === 0);
+
+    for (const spelling of ["section=demo", "section=demo&section=leads"]) {
+      const attempt = await get(`/api/leads?${spelling}&pageSize=10`, leadsCookie);
       check(
-        `POST refuses ${JSON.stringify(badUrl.slice(0, 40))}`,
+        `an agent without the module cannot reach the demo section via ?${spelling}`,
+        attempt.status === 403,
+        `status ${attempt.status}`,
+      );
+    }
+    check(
+      "a demo-only agent cannot reach the worklist by omitting the section",
+      (await get("/api/leads?pageSize=10", demoCookie)).status === 403,
+    );
+
+    // =======================================================================
+    section("The demo fields — the link");
+    // =======================================================================
+    const demoApi = `/api/leads/${subject.id}/demo`;
+
+    check("a signed-out caller cannot read demo metadata", (await get(demoApi)).status === 401);
+    check("an agent without the module cannot read demo metadata", (await get(demoApi, leadsCookie)).status === 403);
+    check(
+      "an agent without the module cannot write a demo link",
+      (await send("PATCH", demoApi, leadsCookie, { demoUrl: "https://evil.test" })).status === 403,
+    );
+    check(
+      "…and nothing was written",
+      (await prisma.demoWebsite.count({ where: { leadId: subject.id } })) === 0,
+    );
+
+    const setLink = await send("PATCH", demoApi, bothCookie, { demoUrl: "example-restaurant-demo.test" });
+    check("an agent with the module can set a demo link", setLink.status === 200, `status ${setLink.status} ${setLink.raw.slice(0, 140)}`);
+    check(
+      "…normalised to https by the server",
+      demoOf(setLink)?.demoUrl === "https://example-restaurant-demo.test/",
+      JSON.stringify(demoOf(setLink)),
+    );
+    check(
+      "…and it persists across a fresh read",
+      demoOf(await get(demoApi, bothCookie))?.demoUrl === "https://example-restaurant-demo.test/",
+    );
+
+    const changed = await send("PATCH", demoApi, adminCookie, { demoUrl: "https://changed-demo.test/x" });
+    check(
+      "changing the link persists the new value",
+      demoOf(changed)?.demoUrl === "https://changed-demo.test/x",
+      JSON.stringify(demoOf(changed)),
+    );
+
+    for (const bad of ["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "//evil.com", "not a url"]) {
+      const refused = await send("PATCH", demoApi, adminCookie, { demoUrl: bad });
+      check(
+        `the endpoint refuses ${JSON.stringify(bad.slice(0, 30))}`,
         refused.status === 400 && refused.body.error === "invalid_url",
         `status ${refused.status} ${String(refused.body.error)}`,
       );
     }
+    check(
+      "…and none of those refusals changed the stored link",
+      (await prisma.demoWebsite.findUnique({ where: { leadId: subject.id }, select: { demoUrl: true } }))
+        ?.demoUrl === "https://changed-demo.test/x",
+    );
 
-    const noName = await send("POST", API, adminCookie, { name: "x", demoUrl: "https://a.test" });
-    check("POST refuses a one-character name", noName.status === 400, `status ${noName.status}`);
-
-    const badStatus = await send("POST", API, adminCookie, {
-      name: "Bad status demo",
-      demoUrl: "https://a.test",
-      status: "not_called",
+    // A body carrying lead fields sets none of them: they are not read.
+    await send("PATCH", demoApi, adminCookie, {
+      demoUrl: "https://changed-demo.test/x",
+      name: "HACKED",
+      status: "do_not_call",
+      notes: "HACKED",
+      leadId: other.id,
+      updatedById: leadsOnly.id,
+      imageStorageKey: "../../etc/passwd",
+    });
+    const untouched = await prisma.lead.findUnique({
+      where: { id: subject.id },
+      select: { name: true, status: true, notes: true },
     });
     check(
-      "POST refuses a lead's call status as a demo status",
-      badStatus.status === 400 && badStatus.body.error === "invalid_status",
-      `status ${badStatus.status}`,
+      "lead fields in a demo body are ignored — the lead is untouched",
+      untouched?.name === `Renamed Restaurant ${suffix}` &&
+        untouched?.status === "no_answer" &&
+        untouched?.notes === "Call again tomorrow",
+      JSON.stringify(untouched),
+    );
+    const demoRowNow = await prisma.demoWebsite.findUnique({
+      where: { leadId: subject.id },
+      select: { leadId: true, imageStorageKey: true, updatedById: true },
+    });
+    check("…the demo row still points at its own lead", demoRowNow?.leadId === subject.id);
+    check("…the posted storage key was ignored", demoRowNow?.imageStorageKey === null);
+    check(
+      "…and the editor is the session user, not the posted one",
+      demoRowNow?.updatedById === admin.id,
+      String(demoRowNow?.updatedById),
     );
 
     // =======================================================================
-    section("Reading one record");
+    section("The demo fields — the image");
     // =======================================================================
-    const detailForAgent = await get(`${API}/${record.id}`, bothCookie);
+    const imageApi = `/api/leads/${subject.id}/demo/image`;
+
+    check("a lead with no image answers 404", (await get(imageApi, adminCookie)).status === 404);
+    check("a signed-out caller cannot fetch it", (await get(imageApi)).status === 401);
+    check("an agent without the module cannot fetch it", (await get(imageApi, leadsCookie)).status === 403);
     check(
-      "an agent with the module can read one record",
-      detailForAgent.status === 200,
-      `status ${detailForAgent.status}`,
-    );
-    check(
-      "and the payload carries no storage key or filesystem path",
-      !/imageStorageKey|storageKey|\/var\/|\.data|C:\\\\/.test(detailForAgent.raw),
-      detailForAgent.raw.slice(0, 160),
+      "an agent without the module cannot upload one",
+      (await upload(imageApi, leadsCookie, png)).status === 403,
     );
 
-    const detailForOutsider = await get(`${API}/${record.id}`, leadsCookie);
+    const uploaded = await upload(imageApi, bothCookie, png);
+    check("an agent with the module can upload an image", uploaded.status === 201, `status ${uploaded.status} ${uploaded.raw.slice(0, 160)}`);
     check(
-      "an agent without the module gets 403 for a record whose id they know",
-      detailForOutsider.status === 403,
-      `status ${detailForOutsider.status}`,
+      "the stored dimensions are read from the file, not the request",
+      demoOf(uploaded)?.image?.width === 320 && demoOf(uploaded)?.image?.height === 200,
+      JSON.stringify(demoOf(uploaded)?.image),
     );
 
-    const missing = await get(`${API}/clnonexistentid00000000`, adminCookie);
-    check("an unknown id is 404", missing.status === 404, `status ${missing.status}`);
-
-    // =======================================================================
-    section("Editing — administrators only");
-    // =======================================================================
-    for (const [label, cookie] of [
-      ["an agent with the module", bothCookie],
-      ["an agent without it", leadsCookie],
-    ] as const) {
-      const refused = await send("PATCH", `${API}/${record.id}`, cookie, { status: "archived" });
-      check(`${label} cannot PATCH a demo website`, refused.status === 403, `status ${refused.status}`);
-    }
-
-    const stillActive = await prisma.demoWebsite.findUnique({
-      where: { id: record.id },
-      select: { status: true },
-    });
-    check("and the refused edits changed nothing", stillActive?.status === "active", String(stillActive?.status));
-
-    const edited = await send("PATCH", `${API}/${record.id}`, adminCookie, {
-      status: "presented",
-      notes: "Shown on the 18th.",
-      // Again: server-owned fields offered to a whitelist that does not know them.
-      imageStorageKey: "../../etc/shadow",
-      id: "another-forged-id",
-      createdById: leadsOnly.id,
-    });
-    check("an administrator can edit one", edited.status === 200, `status ${edited.status}`);
-    check("the edit applied", cardOf(edited)?.status === "presented");
-    check("the id did not change", cardOf(edited)?.id === record.id);
-
-    const afterEdit = await prisma.demoWebsite.findUnique({
-      where: { id: record.id },
-      select: { imageStorageKey: true, createdById: true },
-    });
-    check("the storage key is still unset after a PATCH that tried to set it", afterEdit?.imageStorageKey === null);
-    check("the author is unchanged", afterEdit?.createdById === admin.id);
-
-    const emptyPatch = await send("PATCH", `${API}/${record.id}`, adminCookie, {});
-    check("an empty PATCH is 400 rather than a silent no-op", emptyPatch.status === 400, `status ${emptyPatch.status}`);
-
-    const badPatchUrl = await send("PATCH", `${API}/${record.id}`, adminCookie, {
-      demoUrl: "javascript:alert(1)",
-    });
+    const firstKey =
+      (
+        await prisma.demoWebsite.findUnique({
+          where: { leadId: subject.id },
+          select: { imageStorageKey: true },
+        })
+      )?.imageStorageKey ?? null;
+    check("the row carries a server-generated key", typeof firstKey === "string" && firstKey.length > 0);
     check(
-      "PATCH refuses a javascript: link",
-      badPatchUrl.status === 400 && badPatchUrl.body.error === "invalid_url",
-      `status ${badPatchUrl.status}`,
-    );
-
-    // =======================================================================
-    section("The image — uploading");
-    // =======================================================================
-    const imageUrl = `${API}/${record.id}/image`;
-
-    const beforeUpload = await get(imageUrl, adminCookie);
-    check("a record with no image answers 404", beforeUpload.status === 404, `status ${beforeUpload.status}`);
-
-    for (const [label, cookie] of [
-      ["an agent with the module", bothCookie],
-      ["an agent without it", leadsCookie],
-    ] as const) {
-      const refused = await upload(imageUrl, cookie, png);
-      check(`${label} cannot upload an image`, refused.status === 403, `status ${refused.status}`);
-    }
-
-    const uploaded = await upload(imageUrl, adminCookie, png);
-    check("an administrator can upload an image", uploaded.status === 201, `status ${uploaded.status} ${uploaded.raw.slice(0, 120)}`);
-
-    const withImage = cardOf(uploaded);
-    check(
-      "the stored dimensions are read from the file, not from the request",
-      withImage?.image?.width === 320 && withImage?.image?.height === 200,
-      JSON.stringify(withImage?.image),
-    );
-
-    const storedRow = await prisma.demoWebsite.findUnique({
-      where: { id: record.id },
-      select: { imageStorageKey: true, imageFormat: true },
-    });
-    const firstKey = storedRow?.imageStorageKey ?? null;
-    check("the row now carries a server-generated key", typeof firstKey === "string" && firstKey.length > 0);
-    check(
-      "the key contains no traversal and stays under the store",
+      "the key contains no traversal and is relative to the store",
       firstKey !== null && !firstKey.includes("..") && !path.isAbsolute(firstKey),
       String(firstKey),
     );
-    check("the stored format was sniffed, not declared", storedRow?.imageFormat === "image/png");
+    check("the file is on disk", firstKey !== null && (await fileExists(firstKey)));
 
-    // A file whose declared type and extension both lie. The sniff is the
-    // authority, so this must be stored as the JPEG it actually is.
-    const liar = await upload(imageUrl, adminCookie, jpeg, "screenshot.png", "image/png");
-    check("an upload whose declared type lies is stored as what it really is", (
-      await prisma.demoWebsite.findUnique({ where: { id: record.id }, select: { imageFormat: true } })
-    )?.imageFormat === "image/jpeg", `status ${liar.status}`);
-
-    const secondKey = (
-      await prisma.demoWebsite.findUnique({ where: { id: record.id }, select: { imageStorageKey: true } })
-    )?.imageStorageKey ?? null;
-    check("replacing the image writes a new key", secondKey !== firstKey);
-    check(
-      "and the replaced file is gone from disk, not orphaned",
-      firstKey === null || !(await fileExists(firstKey)),
-      String(firstKey),
-    );
-
-    // =======================================================================
-    section("The image — what is refused");
-    // =======================================================================
-    const htmlBytes = Buffer.from(`<html><script>alert(1)</script></html>${"x".repeat(400)}`);
-    const asHtml = await upload(
-      imageUrl,
-      adminCookie,
-      new Uint8Array(htmlBytes.buffer.slice(htmlBytes.byteOffset, htmlBytes.byteOffset + htmlBytes.length)),
-      "page.png",
-      "image/png",
-    );
-    check(
-      "an HTML file named .png is refused",
-      asHtml.status === 415,
-      `status ${asHtml.status}`,
-    );
-
-    const svgBytes = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>${"x".repeat(400)}`);
-    const asSvg = await upload(
-      imageUrl,
-      adminCookie,
-      new Uint8Array(svgBytes.buffer.slice(svgBytes.byteOffset, svgBytes.byteOffset + svgBytes.length)),
-      "logo.svg",
-      "image/svg+xml",
-    );
-    check("an SVG is refused", asSvg.status === 415, `status ${asSvg.status}`);
-
-    const empty = await upload(imageUrl, adminCookie, new Uint8Array(0));
-    check("an empty file is refused", empty.status === 400, `status ${empty.status}`);
-
-    const oversized = new Uint8Array(6 * 1024 * 1024);
-    oversized.set(png.subarray(0, Math.min(png.length, oversized.length)));
-    const tooBig = await upload(imageUrl, adminCookie, oversized);
-    check("a 6MB upload is refused with 413", tooBig.status === 413, `status ${tooBig.status}`);
-
-    const noFile = await fetch(`${BASE_URL}${imageUrl}`, {
-      method: "POST",
-      headers: { cookie: adminCookie, origin, "sec-fetch-site": "same-origin" },
-      body: new FormData(),
-      redirect: "manual",
-    }).then(readReply);
-    check("a multipart body with no file is refused", noFile.status === 400, `status ${noFile.status}`);
-
-    const surviving = await prisma.demoWebsite.findUnique({
-      where: { id: record.id },
+    // The declared type and extension both lie; the sniff is the authority.
+    await upload(imageApi, adminCookie, jpeg, "screenshot.png", "image/png");
+    const afterReplace = await prisma.demoWebsite.findUnique({
+      where: { leadId: subject.id },
       select: { imageStorageKey: true, imageFormat: true },
     });
     check(
-      "and none of those refusals disturbed the image that was already there",
-      surviving?.imageStorageKey === secondKey && surviving?.imageFormat === "image/jpeg",
+      "an upload whose declared type lies is stored as what it really is",
+      afterReplace?.imageFormat === "image/jpeg",
+      String(afterReplace?.imageFormat),
     );
-
-    // =======================================================================
-    section("The image — who may see it");
-    // =======================================================================
-    const anonImage = await fetch(`${BASE_URL}${imageUrl}`, { redirect: "manual" });
-    check("a signed-out caller cannot fetch the image", anonImage.status === 401, `status ${anonImage.status}`);
-    await anonImage.body?.cancel();
-
-    const outsiderImage = await fetch(`${BASE_URL}${imageUrl}`, {
-      headers: { cookie: leadsCookie },
-      redirect: "manual",
-    });
+    check("replacing writes a new key", afterReplace?.imageStorageKey !== firstKey);
     check(
-      "an agent without the module cannot fetch the image by guessing its URL",
-      outsiderImage.status === 403,
-      `status ${outsiderImage.status}`,
+      "and the replaced file is gone from disk, not orphaned",
+      firstKey !== null && !(await fileExists(firstKey)),
     );
-    await outsiderImage.body?.cancel();
 
-    const grantedImage = await fetch(`${BASE_URL}${imageUrl}`, {
-      headers: { cookie: bothCookie },
+    const secondKey = afterReplace?.imageStorageKey ?? null;
+
+    for (const [label, bytes, expected] of [
+      ["an HTML file named .png", toBytes(Buffer.from(`<html><script>x</script></html>${"y".repeat(400)}`)), 415],
+      ["an SVG", toBytes(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg"/>${"y".repeat(400)}`)), 415],
+      ["an empty file", new Uint8Array(0), 400],
+    ] as const) {
+      const refused = await upload(imageApi, adminCookie, bytes, "x.png", "image/png");
+      check(`${label} is refused`, refused.status === expected, `status ${refused.status}`);
+    }
+
+    const oversized = new Uint8Array(6 * 1024 * 1024);
+    oversized.set(png.subarray(0, Math.min(png.length, oversized.length)));
+    check("a 6MB upload is refused with 413", (await upload(imageApi, adminCookie, oversized)).status === 413);
+
+    check(
+      "and none of those refusals disturbed the image already there",
+      (
+        await prisma.demoWebsite.findUnique({
+          where: { leadId: subject.id },
+          select: { imageStorageKey: true },
+        })
+      )?.imageStorageKey === secondKey,
+    );
+
+    const served = await fetch(`${BASE_URL}${imageApi}`, {
+      headers: { cookie: demoCookie },
       redirect: "manual",
     });
-    check("an agent with the module can view the image", grantedImage.status === 200, `status ${grantedImage.status}`);
+    check("an agent with the module can view the image", served.status === 200, `status ${served.status}`);
     check(
       "served with the sniffed type and nosniff",
-      grantedImage.headers.get("content-type") === "image/jpeg" &&
-        grantedImage.headers.get("x-content-type-options") === "nosniff",
-      `${grantedImage.headers.get("content-type")} / ${grantedImage.headers.get("x-content-type-options")}`,
+      served.headers.get("content-type") === "image/jpeg" &&
+        served.headers.get("x-content-type-options") === "nosniff",
+      `${served.headers.get("content-type")} / ${served.headers.get("x-content-type-options")}`,
     );
-    // `proxy.ts` stamps `no-store` over every authenticated response, so that
-    // is what actually reaches the browser — checked here rather than the
-    // route's own header, because the header that matters is the one sent.
-    check(
-      "never stored by any cache",
-      (grantedImage.headers.get("cache-control") ?? "").includes("no-store"),
-      String(grantedImage.headers.get("cache-control")),
-    );
+    check("never stored by any cache", (served.headers.get("cache-control") ?? "").includes("no-store"));
     check(
       "and the filename it offers exposes no storage layout",
-      !(grantedImage.headers.get("content-disposition") ?? "").includes("/"),
-      String(grantedImage.headers.get("content-disposition")),
+      !(served.headers.get("content-disposition") ?? "").includes("/"),
     );
-    const servedBytes = new Uint8Array(await grantedImage.arrayBuffer());
+    const bytesBack = new Uint8Array(await served.arrayBuffer());
     check(
       "the bytes served are the image that was stored",
-      servedBytes.length === jpeg.length && servedBytes[0] === 0xff && servedBytes[1] === 0xd8,
-      `${servedBytes.length} bytes`,
+      bytesBack.length === jpeg.length && bytesBack[0] === 0xff && bytesBack[1] === 0xd8,
+      `${bytesBack.length} bytes`,
     );
 
-    // The one shape of traversal a caller can even attempt: the id segment.
-    for (const attempt of [
-      "..%2f..%2f..%2fetc%2fpasswd",
-      "%2e%2e%2f%2e%2e%2fetc%2fpasswd",
-      `${record.id}%00.png`,
-    ]) {
-      const traversal = await get(`${API}/${attempt}/image`, adminCookie);
+    for (const attempt of ["..%2f..%2f..%2fetc%2fpasswd", `${subject.id}%00.png`, "%2e%2e%2fetc"]) {
+      const traversal = await get(`/api/leads/${attempt}/demo/image`, adminCookie);
       check(
-        `a traversal-shaped id (${attempt.slice(0, 24)}) returns no file`,
+        `a traversal-shaped lead id (${attempt.slice(0, 22)}) returns no file`,
         traversal.status === 404 || traversal.status === 400,
         `status ${traversal.status}`,
       );
     }
 
-    // =======================================================================
-    section("The image — removing it");
-    // =======================================================================
-    for (const [label, cookie] of [
-      ["an agent with the module", bothCookie],
-      ["an agent without it", leadsCookie],
-    ] as const) {
-      const refused = await send("DELETE", imageUrl, cookie);
-      check(`${label} cannot delete an image`, refused.status === 403, `status ${refused.status}`);
-    }
+    // An agent *with* the module reaching another lead's image is by design —
+    // the module grants the whole pool, exactly as the list does. What must not
+    // happen is a stray file coming back for a lead that has none.
     check(
-      "and the image is still attached after those refusals",
-      (await prisma.demoWebsite.findUnique({ where: { id: record.id }, select: { imageStorageKey: true } }))
-        ?.imageStorageKey === secondKey,
+      "changing the id to a lead with no image gets a 404, not a stray file",
+      (await get(`/api/leads/${other.id}/demo/image`, bothCookie)).status === 404,
     );
 
-    const removedImage = await send("DELETE", imageUrl, adminCookie);
-    check("an administrator can remove the image", removedImage.status === 200, `status ${removedImage.status}`);
-    check("the row's image columns are cleared", (() => {
-      const card = (removedImage.body.demoWebsite as Card | undefined) ?? null;
-      return card?.image === null;
-    })());
     check(
-      "the file is gone from disk",
-      secondKey === null || !(await fileExists(secondKey)),
-      String(secondKey),
+      "an agent without the module cannot delete an image",
+      (await send("DELETE", imageApi, leadsCookie)).status === 403,
     );
-    check("the removal reports no orphan", removedImage.body.imageOrphaned === false);
+    check(
+      "…and it is still attached",
+      (
+        await prisma.demoWebsite.findUnique({
+          where: { leadId: subject.id },
+          select: { imageStorageKey: true },
+        })
+      )?.imageStorageKey === secondKey,
+    );
 
-    const afterRemoval = await get(imageUrl, adminCookie);
-    check("and the image endpoint is 404 again", afterRemoval.status === 404, `status ${afterRemoval.status}`);
+    const removed = await send("DELETE", imageApi, bothCookie);
+    check("an agent with the module can remove the image", removed.status === 200, `status ${removed.status}`);
+    check("the row's image columns are cleared", demoOf(removed)?.image === null);
+    check("the file is gone from disk", secondKey !== null && !(await fileExists(secondKey)));
+    check("no orphan is reported", removed.body.imageOrphaned === false);
+    check("the demo link survived the image removal", demoOf(removed)?.demoUrl === "https://changed-demo.test/x");
+    check("and the image endpoint is 404 again", (await get(imageApi, adminCookie)).status === 404);
 
     // =======================================================================
-    section("Search, filters, sorting and paging");
+    section("No duplication — the demo row is metadata, not a record");
     // =======================================================================
-    const fixtures = await Promise.all(
-      [
-        ["Dental Demo", "XYZ Dental", "https://xyz-dental.test/", "draft", "01611234567", "hi@xyz-dental.test"],
-        ["Barber Demo", "Sharp Cuts", "https://sharp-cuts.test/", "active", "01617654321", "hi@sharp-cuts.test"],
-        ["Gym Demo", "Iron Works", "https://iron-works.test/", "archived", null, null],
-        ["Cafe Demo", "Bean There", "https://bean-there.test/", "presented", null, null],
-      ].map(([name, clientName, demoUrl, status, phone, email]) =>
-        prisma.demoWebsite.create({
-          data: {
-            name: `${name} ${suffix}`,
-            clientName: clientName as string,
-            demoUrl: demoUrl as string,
-            status: status as "draft" | "active" | "archived" | "presented",
-            phone: phone as string | null,
-            email: email as string | null,
-            createdById: admin.id,
-          },
-          select: { id: true },
-        }),
-      ),
+    const columns = await prisma.$queryRawUnsafe<{ column_name: string }[]>(
+      "select column_name from information_schema.columns where table_name = 'demo_websites'",
     );
-    createdIds.push(...fixtures.map((created) => created.id));
-
-    const mine = `q=${encodeURIComponent(suffix)}`;
-
-    const searched = await get(`${API}?${mine}&pageSize=100`, adminCookie);
+    const columnNames = columns.map((row) => row.column_name).sort();
+    const forbidden = ["name", "client_name", "phone", "email", "address", "status", "notes", "owner"];
     check(
-      "a search over the fixture's suffix finds exactly its five records",
-      metaOf(searched).total === 5,
-      `total ${metaOf(searched).total}`,
+      "demo_websites holds no copy of any lead field",
+      forbidden.every((column) => !columnNames.includes(column)),
+      columnNames.join(", "),
     );
+    check("demo_websites has a lead_id column", columnNames.includes("lead_id"));
 
-    const byClient = await get(`${API}?q=${encodeURIComponent("Iron Works")}&pageSize=100`, adminCookie);
-    check("search matches the client name", cardsOf(byClient).some((card) => card.clientName === "Iron Works"));
-
-    const byUrl = await get(`${API}?q=${encodeURIComponent("sharp-cuts")}&pageSize=100`, adminCookie);
-    check("search matches the demo URL", cardsOf(byUrl).some((card) => card.demoUrl.includes("sharp-cuts")));
-
-    const byPhone = await get(`${API}?q=01617654321&pageSize=100`, adminCookie);
-    check("search matches the phone number", cardsOf(byPhone).length === 1);
-
-    const byEmail = await get(`${API}?q=${encodeURIComponent("hi@xyz-dental.test")}&pageSize=100`, adminCookie);
-    check("search matches the email address", cardsOf(byEmail).length === 1);
-
-    const caseInsensitive = await get(`${API}?q=${encodeURIComponent("IRON WORKS")}&pageSize=100`, adminCookie);
-    check("search is case-insensitive", cardsOf(caseInsensitive).some((card) => card.clientName === "Iron Works"));
-
-    // Not "does it escape quotes" — Prisma binds every value — but "is the term
-    // treated as text". If it were interpolated, `' OR 1=1--` would match rows
-    // it has no business matching, or the request would fail.
-    for (const injection of ["' OR 1=1--", "'; DROP TABLE demo_websites; --", "%' OR name LIKE '%"]) {
-      const attempt = await get(`${API}?q=${encodeURIComponent(injection)}&pageSize=100`, adminCookie);
-      check(
-        `an injection-shaped search (${injection.slice(0, 20)}) matches nothing and does not error`,
-        attempt.status === 200 && metaOf(attempt).total === 0,
-        `status ${attempt.status} total ${metaOf(attempt).total}`,
-      );
-    }
-    check(
-      "and the table is still there afterwards",
-      (await prisma.demoWebsite.count({ where: { id: { in: createdIds } } })) === createdIds.length,
+    const fk = await prisma.$queryRawUnsafe<{ count: number }[]>(
+      `select count(*)::int as count from information_schema.table_constraints tc
+       join information_schema.key_column_usage kcu on tc.constraint_name = kcu.constraint_name
+       where tc.table_name = 'demo_websites' and tc.constraint_type = 'FOREIGN KEY' and kcu.column_name = 'lead_id'`,
     );
+    check("lead_id is a foreign key to leads", Number(fk[0]?.count ?? 0) > 0);
 
-    const drafts = await get(`${API}?${mine}&status=draft&pageSize=100`, adminCookie);
-    check(
-      "the status filter narrows to one",
-      metaOf(drafts).total === 1 && cardsOf(drafts)[0]?.status === "draft",
-      `total ${metaOf(drafts).total}`,
+    const unique = await prisma.$queryRawUnsafe<{ count: number }[]>(
+      "select count(*)::int as count from pg_indexes where tablename = 'demo_websites' and indexdef like '%UNIQUE%lead_id%'",
     );
+    check("…and it is UNIQUE, so a lead has at most one demo row", Number(unique[0]?.count ?? 0) > 0);
 
-    const bogusStatus = await get(`${API}?${mine}&status=not_a_status&pageSize=100`, adminCookie);
     check(
-      "an unknown status is ignored rather than 400",
-      bogusStatus.status === 200 && metaOf(bogusStatus).total === 5,
-      `status ${bogusStatus.status} total ${metaOf(bogusStatus).total}`,
-    );
-
-    const counts = searched.body.statusCounts as Record<string, number> | undefined;
-    check(
-      "status counts are present and non-negative for every status",
-      counts !== undefined &&
-        ["draft", "active", "presented", "archived"].every(
-          (key) => typeof counts[key] === "number" && counts[key]! >= 0,
-        ),
-      JSON.stringify(counts),
-    );
-
-    const nameAsc = await get(`${API}?${mine}&sort=name&dir=asc&pageSize=100`, adminCookie);
-    const namesAsc = cardsOf(nameAsc).map((card) => card.name);
-    check(
-      "sorting by name ascending really is ascending",
-      namesAsc.every((name, index) => index === 0 || namesAsc[index - 1]!.localeCompare(name) <= 0),
-      namesAsc.join(" | "),
-    );
-
-    const nameDesc = await get(`${API}?${mine}&sort=name&dir=desc&pageSize=100`, adminCookie);
-    check(
-      "and descending is its reverse",
-      cardsOf(nameDesc).map((card) => card.name).join("|") === [...namesAsc].reverse().join("|"),
-    );
-
-    const bogusSort = await get(`${API}?${mine}&sort=passwordHash&dir=DROP&pageSize=100`, adminCookie);
-    check(
-      "an unknown sort key falls back to the default rather than reaching SQL",
-      bogusSort.status === 200 && metaOf(bogusSort).total === 5,
-      `status ${bogusSort.status}`,
-    );
-
-    const pageOne = await get(`${API}?${mine}&pageSize=10&page=1`, adminCookie);
-    check("the pager reports the right size", metaOf(pageOne).pageSize === 10, `pageSize ${metaOf(pageOne).pageSize}`);
-
-    const smallPages = await get(`${API}?${mine}&sort=name&dir=asc&pageSize=10&page=1`, adminCookie);
-    check("page 1 of 10 holds all five", cardsOf(smallPages).length === 5);
-
-    const hugePageSize = await get(`${API}?${mine}&pageSize=100000`, adminCookie);
-    check(
-      "?pageSize=100000 is not a way to ask for the whole table",
-      (DEMO_PAGE_SIZES as readonly number[]).includes(metaOf(hugePageSize).pageSize),
-      `pageSize ${metaOf(hugePageSize).pageSize}`,
-    );
-
-    const farPage = await get(`${API}?${mine}&page=9999&pageSize=10`, adminCookie);
-    check(
-      "a page past the end is clamped rather than empty-with-a-lie",
-      metaOf(farPage).page === metaOf(farPage).totalPages,
-      `page ${metaOf(farPage).page} of ${metaOf(farPage).totalPages}`,
-    );
-
-    // Two pages of two, walked and compared to the single-page read.
-    const walkA = await get(`${API}?${mine}&sort=name&dir=asc&pageSize=10&page=1`, adminCookie);
-    const walked = cardsOf(walkA).map((card) => card.id);
-    check(
-      "walking the pages yields each record exactly once",
-      new Set(walked).size === walked.length && walked.length === 5,
-      `${walked.length} rows, ${new Set(walked).size} distinct`,
-    );
-
-    // =======================================================================
-    section("Deleting — administrators only, and the image goes with it");
-    // =======================================================================
-    const doomed = fixtures[0]!;
-    await upload(`${API}/${doomed.id}/image`, adminCookie, png);
-    const doomedKey = (
-      await prisma.demoWebsite.findUnique({ where: { id: doomed.id }, select: { imageStorageKey: true } })
-    )?.imageStorageKey ?? null;
-    check("the record to be deleted has an image on disk", doomedKey !== null && (await fileExists(doomedKey)));
-
-    for (const [label, cookie] of [
-      ["an agent with the module", bothCookie],
-      ["an agent without it", leadsCookie],
-    ] as const) {
-      const refused = await send("DELETE", `${API}/${doomed.id}`, cookie);
-      check(`${label} cannot DELETE a demo website`, refused.status === 403, `status ${refused.status}`);
-    }
-    check(
-      "and the record survived those attempts",
-      (await prisma.demoWebsite.count({ where: { id: doomed.id } })) === 1,
-    );
-
-    const deleted = await send("DELETE", `${API}/${doomed.id}`, adminCookie);
-    check("an administrator can delete one", deleted.status === 200, `status ${deleted.status}`);
-    check("the row is gone", (await prisma.demoWebsite.count({ where: { id: doomed.id } })) === 0);
-    check(
-      "and its image file is gone with it — no orphan",
-      doomedKey !== null && !(await fileExists(doomedKey)) && deleted.body.imageOrphaned === false,
-    );
-
-    const deleteAgain = await send("DELETE", `${API}/${doomed.id}`, adminCookie);
-    check("a second delete is 404 rather than an error", deleteAgain.status === 404, `status ${deleteAgain.status}`);
-
-    // =======================================================================
-    section("Cross-site requests");
-    // =======================================================================
-    const crossSite = await fetch(`${BASE_URL}${API}`, {
-      method: "POST",
-      headers: {
-        cookie: adminCookie,
-        origin: "https://evil.example",
-        "sec-fetch-site": "cross-site",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ name: "From another origin", demoUrl: "https://evil.example" }),
-      redirect: "manual",
-    }).then(readReply);
-    check(
-      "a cross-site POST with a valid admin cookie is refused",
-      crossSite.status === 403,
-      `status ${crossSite.status}`,
+      "using Demo Websites created no leads",
+      (await prisma.lead.count()) === before.leads,
+      `${before.leads} -> ${await prisma.lead.count()}`,
     );
     check(
-      "and nothing was created by it",
-      (await prisma.demoWebsite.count({ where: { name: "From another origin" } })) === 0,
+      "…and exactly one demo row, for the one lead that was given demo data",
+      (await prisma.demoWebsite.count()) === before.demoRows + 1,
+    );
+    check(
+      "no duplicate lead was created for the demo view",
+      (await prisma.lead.count({ where: { name: { contains: suffix } } })) === 2,
     );
 
-    // =======================================================================
-    section("Module access is server-side, and changes take effect at once");
-    // =======================================================================
-    await prisma.user.update({
-      where: { id: both.id },
-      data: { canAccessDemoWebsites: false },
+    // Cascade: deleting a lead takes its demo metadata with it.
+    const doomed = await prisma.lead.create({
+      data: { name: `Cascade Test ${suffix}`, address: "", phone: "0300000000", status: "not_called", notes: "" },
+      select: { id: true },
     });
-    const afterRevoke = await get(API, bothCookie);
+    await send("PATCH", `/api/leads/${doomed.id}/demo`, adminCookie, { demoUrl: "https://cascade.test" });
     check(
-      "removing the module refuses the very next request, with no sign-out",
-      afterRevoke.status === 403,
-      `status ${afterRevoke.status}`,
+      "a demo row exists for the doomed lead",
+      (await prisma.demoWebsite.count({ where: { leadId: doomed.id } })) === 1,
     );
-    const afterRevokeImage = await get(`${API}/${record.id}`, bothCookie);
-    check("including the detail endpoint", afterRevokeImage.status === 403, `status ${afterRevokeImage.status}`);
+    await prisma.lead.delete({ where: { id: doomed.id } });
+    check(
+      "deleting the lead cascades its demo row away",
+      (await prisma.demoWebsite.count({ where: { leadId: doomed.id } })) === 0,
+    );
+
+    // =======================================================================
+    section("Audio stays in the Leads view and nowhere else");
+    // =======================================================================
+    check(
+      "an agent with New Leads can read call recordings",
+      (await get("/api/recordings", leadsCookie)).status === 200,
+    );
+    check(
+      "an agent with Demo Websites only is refused the recordings endpoint",
+      (await get("/api/recordings", demoCookie)).status === 403,
+    );
+    check(
+      "…and the recording endpoint for a specific lead",
+      (await get(`/api/meetings/${subject.id}/recording`, demoCookie)).status === 403,
+    );
+    check("recordings are unchanged throughout", (await prisma.meetingRecording.count()) === before.recordings);
+
+    // =======================================================================
+    section("The pages, and what the server decided to send");
+    // =======================================================================
+    const adminDemoPage = await getPage("/demo-websites", adminCookie);
+    check("an administrator gets the Demo Websites page", adminDemoPage.status === 200, `status ${adminDemoPage.status}`);
+    // Real rows rather than a skeleton or an empty state. Not asserted against
+    // a fixture name: the page renders page one of the whole pool in insertion
+    // order, and leads created seconds ago are at the far end of it.
+    check(
+      "…rendered with real lead rows, server-side",
+      adminDemoPage.html.includes("row-open-link") && !adminDemoPage.html.includes("No leads here"),
+    );
+    check(
+      "…and the demo columns",
+      adminDemoPage.html.includes("Demo image") && adminDemoPage.html.includes("Demo link"),
+    );
+    check(
+      "…and no audio column or audio file input anywhere in the markup",
+      !adminDemoPage.html.includes(">Audio<") && !adminDemoPage.html.includes("audio/*"),
+    );
+
+    const adminWorklist = await getPage("/", adminCookie);
+    check("the worklist still draws its Audio column", adminWorklist.html.includes(">Audio<"), `status ${adminWorklist.status}`);
+    check("…and not the demo columns", !adminWorklist.html.includes("Demo image"));
+
+    const demoOnlyPage = await getPage("/demo-websites", demoCookie);
+    check("an agent with the module gets the page", demoOnlyPage.status === 200 && demoOnlyPage.html.includes("Demo link"));
+
+    const refusedPage = await getPage("/demo-websites", leadsCookie);
+    check("an agent without it gets Access denied", refusedPage.html.includes("Access denied"));
+    check("…and no lead reaches their markup", !refusedPage.html.includes(`Renamed Restaurant ${suffix}`));
+
+    const worklistRefused = await getPage("/", demoCookie);
+    check(
+      "a demo-only agent is not shown the worklist",
+      worklistRefused.html.includes("Access denied") ||
+        worklistRefused.html.includes('content="1;url=/demo-websites"') ||
+        worklistRefused.status === 307,
+      `status ${worklistRefused.status}`,
+    );
+
+    check("the nav draws Demo Websites for an agent who has it", demoOnlyPage.html.includes("/demo-websites"));
+    check("and not for an agent who does not", !refusedPage.html.includes('href="/demo-websites"'));
+
+    // =======================================================================
+    section("Permission changes take effect server-side, at once");
+    // =======================================================================
+    await prisma.user.update({ where: { id: both.id }, data: { canAccessDemoWebsites: false } });
+    check(
+      "revoking Demo Websites refuses the very next request, with no sign-out",
+      (await get(demoList, bothCookie)).status === 403,
+    );
+    check(
+      "…including the demo write endpoints",
+      (await send("PATCH", demoApi, bothCookie, { demoUrl: "https://x.test" })).status === 403,
+    );
+    check("…while New Leads still works for them", (await get(leadList, bothCookie)).status === 200);
 
     await prisma.user.update({ where: { id: both.id }, data: { canAccessDemoWebsites: true } });
-    const afterRestore = await get(API, bothCookie);
-    check("and granting it back restores access just as quickly", afterRestore.status === 200, `status ${afterRestore.status}`);
+    check("granting it back restores access just as quickly", (await get(demoList, bothCookie)).status === 200);
 
-    // The Leads side of the same switch.
-    const leadsForDemoOnly = await get("/api/leads", demoCookie);
-    check(
-      "an agent without the Leads module is refused by the leads API",
-      leadsForDemoOnly.status === 403,
-      `status ${leadsForDemoOnly.status}`,
-    );
-    const leadsForLeadsAgent = await get("/api/leads", leadsCookie);
-    check(
-      "an agent with the Leads module still reads leads exactly as before",
-      leadsForLeadsAgent.status === 200,
-      `status ${leadsForLeadsAgent.status}`,
-    );
-    const recordingsForDemoOnly = await get("/api/recordings", demoCookie);
-    check(
-      "and call recordings, which belong to Leads, are refused for them too",
-      recordingsForDemoOnly.status === 403,
-      `status ${recordingsForDemoOnly.status}`,
-    );
-    check(
-      "removing Leads did not affect their Demo Websites access",
-      (await get(API, demoCookie)).status === 200,
-    );
-
-    // An administrator is never subject to the columns, whatever they say.
     await prisma.user.update({
       where: { id: admin.id },
       data: { canAccessLeads: false, canAccessDemoWebsites: false },
     });
-    const adminDespiteFlags = await get(API, adminCookie);
     check(
-      "an administrator keeps both modules even with both columns false",
-      adminDespiteFlags.status === 200 && (await get("/api/leads", adminCookie)).status === 200,
-      `status ${adminDespiteFlags.status}`,
+      "an administrator keeps both sections even with both columns false",
+      (await get(demoList, adminCookie)).status === 200 && (await get(leadList, adminCookie)).status === 200,
     );
     await prisma.user.update({
       where: { id: admin.id },
@@ -1126,281 +978,145 @@ async function main(): Promise<void> {
     });
 
     // =======================================================================
-    section("Nobody can grant themselves a module");
+    section("Nobody can grant themselves a section");
     // =======================================================================
-    const selfGrant = await send("PATCH", `/api/users/${demoOnly.id}`, demoCookie, {
-      canAccessLeads: true,
-    });
     check(
       "an agent PATCHing their own user row is refused outright",
-      selfGrant.status === 403,
-      `status ${selfGrant.status}`,
+      (await send("PATCH", `/api/users/${demoOnly.id}`, demoCookie, { canAccessLeads: true })).status === 403,
     );
     check(
-      "and gained nothing",
+      "…and gained nothing",
       (await prisma.user.findUnique({ where: { id: demoOnly.id }, select: { canAccessLeads: true } }))
         ?.canAccessLeads === false,
     );
 
-    const adminSelfEdit = await send("PATCH", `/api/users/${admin.id}`, adminCookie, {
+    const selfEdit = await send("PATCH", `/api/users/${admin.id}`, adminCookie, {
       canAccessDemoWebsites: false,
     });
     check(
-      "an administrator cannot edit their own module access either",
-      adminSelfEdit.status === 400 && adminSelfEdit.body.error === "self_edit_refused",
-      `status ${adminSelfEdit.status}`,
+      "an administrator cannot edit their own lead access",
+      selfEdit.status === 400 && selfEdit.body.error === "self_edit_refused",
+      `status ${selfEdit.status}`,
     );
 
-    const grantByAdmin = await send("PATCH", `/api/users/${leadsOnly.id}`, adminCookie, {
+    // The admin panel's Save sends both flags in one PATCH, which is its whole
+    // point: an account moves between valid states in a single write, never
+    // through "neither section" on the way.
+    const bothAtOnce = await send("PATCH", `/api/users/${leadsOnly.id}`, adminCookie, {
+      canAccessLeads: false,
       canAccessDemoWebsites: true,
     });
-    check("an administrator can grant a module to somebody else", grantByAdmin.status === 200, `status ${grantByAdmin.status}`);
+    check("an administrator can swap an agent's sections in one save", bothAtOnce.status === 200, `status ${bothAtOnce.status}`);
+    const swapped = await prisma.user.findUnique({
+      where: { id: leadsOnly.id },
+      select: { canAccessLeads: true, canAccessDemoWebsites: true },
+    });
     check(
-      "and the agent can read demo websites on their next request",
-      (await get(API, leadsCookie)).status === 200,
+      "…and both flags moved together",
+      swapped?.canAccessLeads === false && swapped?.canAccessDemoWebsites === true,
+      JSON.stringify(swapped),
     );
-    await send("PATCH", `/api/users/${leadsOnly.id}`, adminCookie, { canAccessDemoWebsites: false });
-    check("revoking it again works the same way", (await get(API, leadsCookie)).status === 403);
+    check("the agent now reads the demo section", (await get(demoList, leadsCookie)).status === 200);
+    check("…and is refused the worklist", (await get(leadList, leadsCookie)).status === 403);
 
     const coerced = await send("PATCH", `/api/users/${leadsOnly.id}`, adminCookie, {
-      canAccessDemoWebsites: "true",
+      canAccessLeads: "true",
     });
     check(
       'a string "true" is not a grant',
-      (await prisma.user.findUnique({ where: { id: leadsOnly.id }, select: { canAccessDemoWebsites: true } }))
-        ?.canAccessDemoWebsites === false,
+      (await prisma.user.findUnique({ where: { id: leadsOnly.id }, select: { canAccessLeads: true } }))
+        ?.canAccessLeads === false,
       `status ${coerced.status}`,
     );
 
     // =======================================================================
-    section("The pages, and what the navigation draws");
+    section("Cross-site, and the shared filter vocabulary");
     // =======================================================================
-    // Server-rendered HTML, checked for markers rather than screenshotted. What
-    // is being asserted is not "does it look right" — that is a human's job —
-    // but that the *server* decided what to send: an agent's markup must not
-    // contain a link, a control or a record they may not have.
+    const crossSite = await readReply(
+      await fetch(`${BASE_URL}${demoApi}`, {
+        method: "PATCH",
+        headers: {
+          cookie: adminCookie,
+          origin: "https://evil.example",
+          "sec-fetch-site": "cross-site",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ demoUrl: "https://evil.example" }),
+        redirect: "manual",
+      }),
+    );
+    check("a cross-site demo write with a valid admin cookie is refused", crossSite.status === 403, `status ${crossSite.status}`);
 
-    const adminScreen = await getPage("/demo-websites", adminCookie);
+    // The demo view uses the lead filters unchanged — same parser, same query.
+    const statusFiltered = await get(`${demoCalled}&status=no_answer`, adminCookie);
     check(
-      "an administrator gets the Demo Websites screen",
-      adminScreen.status === 200 && adminScreen.html.includes("Demo Websites"),
-      `status ${adminScreen.status}`,
-    );
-    check(
-      "…with the admin controls on it",
-      adminScreen.html.includes("Add Demo Website"),
-    );
-
-    const agentScreen = await getPage("/demo-websites", bothCookie);
-    check(
-      "an agent with the module gets the screen too",
-      agentScreen.status === 200 && agentScreen.html.includes("Demo Websites"),
-      `status ${agentScreen.status}`,
-    );
-    check(
-      "…and is told it is read-only",
-      agentScreen.html.includes("read-only for your account"),
-    );
-    check(
-      "…with no Add control in the markup at all",
-      !agentScreen.html.includes("Add Demo Website"),
+      "the lead status filter works in the demo section",
+      leadsOf(statusFiltered).length === 1 && leadsOf(statusFiltered)[0]?.id === subject.id,
+      `${leadsOf(statusFiltered).length} rows`,
     );
 
-    const refusedScreen = await getPage("/demo-websites", leadsCookie);
-    check(
-      "an agent without the module gets Access denied",
-      refusedScreen.html.includes("Access denied"),
-      `status ${refusedScreen.status}`,
+    const searched = await get(
+      `/api/leads?section=demo&pageSize=100&q=${encodeURIComponent("Demo Test Dental")}`,
+      adminCookie,
     );
-    check(
-      "…and no demo website reaches their markup",
-      // The fixture's *name*, not the run suffix: the suffix is also in the
-      // agent's own display name, which the top bar prints on every screen
-      // including this one, so matching on it would fail for the wrong reason.
-      !refusedScreen.html.includes("Example Restaurant Demo") &&
-        !refusedScreen.html.includes("example-restaurant-demo.test"),
-    );
+    check("the lead search works in the demo section", leadsOf(searched).some((lead) => lead.id === other.id));
 
-    check(
-      "the nav draws Demo Websites for an agent who has it",
-      agentScreen.html.includes("/demo-websites"),
-    );
-    check(
-      "and not for an agent who does not",
-      !refusedScreen.html.includes('href="/demo-websites"'),
-    );
+    for (const injection of ["' OR 1=1--", "'; DROP TABLE demo_websites; --"]) {
+      const attempt = await get(
+        `/api/leads?section=demo&pageSize=100&q=${encodeURIComponent(injection)}`,
+        adminCookie,
+      );
+      check(
+        `an injection-shaped search (${injection.slice(0, 18)}) matches nothing and does not error`,
+        attempt.status === 200 && leadsOf(attempt).length === 0,
+        `status ${attempt.status}`,
+      );
+    }
+    check("…and both tables are still there", (await prisma.lead.count()) === before.leads);
 
-    const demoOnlyMeetings = await getPage("/meetings", demoCookie);
+    const hugePage = await get("/api/leads?section=demo&pageSize=100000", adminCookie);
     check(
-      "an agent without the Leads module is refused the meetings screen",
-      demoOnlyMeetings.html.includes("Access denied"),
-      `status ${demoOnlyMeetings.status}`,
-    );
-
-    /*
-     * `/` is the worklist, and this agent may not open it — so they must be sent
-     * onwards rather than refused.
-     *
-     * Next answers this as a meta refresh rather than a 3xx, because the portal
-     * layout has already begun streaming by the time the page runs its guard.
-     * That is the *backstop*, not the path anybody normally takes: the sign-in
-     * routes send this account straight to `/demo-websites`
-     * (`landingRedirectFor`) and the brand mark in the rail points there too, so
-     * reaching `/` at all means somebody typed it. Both forms are accepted here
-     * because both are correct answers to "do not show them the worklist".
-     */
-    const demoOnlyHome = await getPage("/", demoCookie);
-    const redirected =
-      demoOnlyHome.status === 307 ||
-      demoOnlyHome.status === 302 ||
-      demoOnlyHome.html.includes('http-equiv="refresh" content="1;url=/demo-websites"');
-    check(
-      "and is sent to Demo Websites rather than shown the worklist",
-      redirected,
-      `status ${demoOnlyHome.status}`,
-    );
-    check(
-      "…and no lead reaches their markup on the way",
-      !demoOnlyHome.html.includes("Rows per page"),
-    );
-
-    /*
-     * The decision the sign-in routes make, checked directly.
-     *
-     * Not by posting to `/api/auth/login`: an agent's sign-in issues a one-time
-     * code by email, so driving it here would send real mail to a fake address
-     * and then need a code no test can read. This is the one function both
-     * routes call, imported dynamically because it pulls in `lib/prisma`, which
-     * reads `DATABASE_URL` at module load — after `loadEnv` has run, which a
-     * top-level import would not be.
-     */
-    const { landingRedirectFor } = await import("../lib/moduleAccess");
-
-    check(
-      "signing in sends a Demo-Websites-only account there, not to the worklist",
-      (await landingRedirectFor(demoOnly.id, "/")) === "/demo-websites",
-      await landingRedirectFor(demoOnly.id, "/"),
-    );
-    check(
-      "an agent with Leads still lands on the worklist",
-      (await landingRedirectFor(leadsOnly.id, "/")) === "/",
-      await landingRedirectFor(leadsOnly.id, "/"),
-    );
-    check(
-      "an administrator always lands on the worklist",
-      (await landingRedirectFor(admin.id, "/")) === "/",
-      await landingRedirectFor(admin.id, "/"),
-    );
-    check(
-      "and a destination the caller actually asked for is never overridden",
-      (await landingRedirectFor(demoOnly.id, "/meetings")) === "/meetings",
-    );
-
-    const leadsAgentHome = await getPage("/", leadsCookie);
-    check(
-      "an agent with the Leads module still lands on the worklist",
-      leadsAgentHome.status === 200,
-      `status ${leadsAgentHome.status}`,
+      "?pageSize=100000 is not a way to ask for the whole table in the demo view",
+      (hugePage.body.pageSize as number) <= 100,
+      `pageSize ${String(hugePage.body.pageSize)}`,
     );
 
     // =======================================================================
-    section("Demo Websites and Leads are separate");
+    section("Existing data was not disturbed");
     // =======================================================================
-    const after = {
-      leads: await prisma.lead.count(),
-      recordings: await prisma.meetingRecording.count(),
-      activity: await prisma.leadActivity.count(),
-      meetings: await prisma.lead.count({ where: { NOT: { meetingTime: null } } }),
-      leadIds: (
-        await prisma.lead.findMany({ select: { id: true }, orderBy: { id: "asc" }, take: 200 })
-      ).map((row) => row.id),
-      updatedAt: (
-        await prisma.lead.findMany({ select: { updatedAt: true }, orderBy: { updatedAt: "desc" }, take: 1 })
-      )[0]?.updatedAt ?? null,
-    };
-
-    check("creating demo websites created no leads", after.leads === before.leads, `${before.leads} -> ${after.leads}`);
-    check("no lead id changed", after.leadIds.join(",") === before.leadIds.join(","));
+    check("no lead was created or destroyed", (await prisma.lead.count()) === before.leads);
+    check("recordings are unchanged", (await prisma.meetingRecording.count()) === before.recordings);
     check(
-      "no lead row was touched",
-      String(after.updatedAt) === String(before.updatedAt),
-      `${String(before.updatedAt)} -> ${String(after.updatedAt)}`,
-    );
-    check("recordings are unchanged", after.recordings === before.recordings);
-    check("lead activity is unchanged", after.activity === before.activity);
-    check("meetings are unchanged", after.meetings === before.meetings);
-
-    check(
-      "no demo website carries a lead id, and no lead carries a demo id",
-      (await prisma.demoWebsite.count({ where: { id: { in: before.leadIds } } })) === 0,
-    );
-
-    const leadPage = await get("/api/leads?pageSize=100", adminCookie);
-    check(
-      "the leads endpoint returns no demo websites",
-      !leadPage.raw.includes(suffix),
-      "a fixture name appeared in the lead payload",
-    );
-
-    const demoPage = await get(`${API}?pageSize=100`, adminCookie);
-    check(
-      "the demo websites endpoint returns no leads",
-      before.leadIds.length === 0 ||
-        !cardsOf(demoPage).some((card) => before.leadIds.includes(card.id)),
-    );
-
-    check(
-      "and there is no recording relation on a demo website to upload audio to",
-      (await get(`${API}/${record.id}/recording`, adminCookie)).status === 404,
+      "the other fixture lead was never given demo metadata by anything here",
+      (await prisma.demoWebsite.count({ where: { leadId: other.id } })) === 0,
     );
   } finally {
     // ---------------------------------------------------------------------
-    // Teardown. Runs after a failure too — a test that leaves users, records
+    // Teardown. Runs after a failure too — a test that leaves users, leads
     // and image files behind is a test nobody runs twice.
     // ---------------------------------------------------------------------
-    const ids = [admin.id, both.id, demoOnly.id, leadsOnly.id];
+    const userIds = [admin.id, both.id, demoOnly.id, leadsOnly.id];
 
     const leftovers = await prisma.demoWebsite.findMany({
-      where: { OR: [{ id: { in: createdIds } }, { name: { contains: suffix } }] },
-      select: { id: true, imageStorageKey: true },
+      where: { leadId: { in: [subject.id, other.id] } },
+      select: { imageStorageKey: true },
     });
-
     for (const leftover of leftovers) {
       if (leftover.imageStorageKey) {
         await rm(path.resolve(demoImageRoot(), leftover.imageStorageKey), { force: true }).catch(() => {});
       }
     }
 
-    await prisma.demoWebsite
-      .deleteMany({ where: { id: { in: leftovers.map((row) => row.id) } } })
-      .catch(() => {});
-    await prisma.session.deleteMany({ where: { userId: { in: ids } } }).catch(() => {});
-    await prisma.user.deleteMany({ where: { id: { in: ids } } }).catch(() => {});
+    // The demo rows and the lead activity go with the leads (both cascade).
+    await prisma.lead.deleteMany({ where: { name: { contains: suffix } } }).catch(() => {});
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } }).catch(() => {});
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } }).catch(() => {});
 
     await prisma.$disconnect();
   }
 
   console.log(`\n${passed} passed, ${failed} failed\n`);
   if (failed > 0) process.exitCode = 1;
-}
-
-/** A page, as markup — for the checks about what the server decided to send. */
-async function getPage(url: string, cookie: string): Promise<{ status: number; html: string }> {
-  const response = await fetch(`${BASE_URL}${url}`, {
-    headers: { cookie },
-    redirect: "manual",
-  });
-  return { status: response.status, html: await response.text() };
-}
-
-/** Whether a storage key still has bytes behind it. */
-async function fileExists(key: string): Promise<boolean> {
-  const { stat } = await import("node:fs/promises");
-  try {
-    return (await stat(path.resolve(demoImageRoot(), key))).isFile();
-  } catch {
-    return false;
-  }
 }
 
 main().catch(async (error) => {

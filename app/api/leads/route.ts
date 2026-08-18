@@ -1,4 +1,5 @@
 import { apiModule } from "@/lib/authz";
+import { demoSummariesFor } from "@/lib/demoWebsites";
 import { leadCategories, leadStats, leadWorkCounts, listLeadsPage } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
@@ -36,6 +37,10 @@ import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
  *               likewise unfiltered — these are the tab badges
  *   categories  only when `?categories=1`, because the list changes with an
  *               import and not with a keystroke
+ *   demos       only when `?section=demo` — the demo image and link belonging
+ *               to the rows on this page, keyed by lead id and **sparse**: a
+ *               lead with neither is simply absent from the map. No lead field
+ *               is duplicated in there; see `lib/demoWebsites.ts`.
  *
  * `?rows=0` asks for the counts alone and skips the page entirely. That is what
  * the worklist sends after an inline edit: the headline strip and the tab
@@ -67,14 +72,29 @@ import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
  */
 
 export async function GET(request: Request): Promise<Response> {
-  const auth = await apiModule("leads");
-  if (auth instanceof Response) return auth;
-
   const url = new URL(request.url);
   // Every value is validated against a closed set here, before it reaches a
   // query — including `pageSize`, so this cannot be talked into returning the
-  // whole table by asking nicely.
+  // whole table by asking nicely. `section` is validated the same way and is
+  // the one parameter that also picks the guard, immediately below.
   const query = parseLeadSearchParams(url.searchParams, todayIso());
+  const demoSection = query.section === "demo";
+
+  /*
+   * The guard, chosen by the section.
+   *
+   * Both sections read the same leads, so the question is not "which rows" but
+   * "which screen is this person entitled to" — and the two are granted
+   * separately. `?section=demo` demands the Demo Websites module; anything else
+   * demands New Leads. An agent with one and not the other is refused the
+   * section they were not given, whichever they ask for.
+   *
+   * Naming a section in a query string asks a question, it does not answer one:
+   * the module is read from the `users` row in Postgres on this request, so the
+   * parameter can only ever narrow what a caller is allowed, never widen it.
+   */
+  const auth = await apiModule(demoSection ? "demoWebsites" : "leads");
+  if (auth instanceof Response) return auth;
   const wantCategories = url.searchParams.get("categories") === "1";
   const wantRows = url.searchParams.get("rows") !== "0";
 
@@ -112,6 +132,26 @@ export async function GET(request: Request): Promise<Response> {
       wantCategories ? leadCategories() : Promise.resolve(null),
     ]);
 
+    /*
+     * The demo half, for the rows this page actually contains.
+     *
+     * Sequential rather than concurrent with the query above, and it has to be:
+     * it is keyed by the ids that query just chose. Bounded by the page — at
+     * most 100 primary-key lookups on a unique column — so it costs the same
+     * whether the portal holds twenty leads or twenty thousand.
+     *
+     * Sparse on purpose. A lead with no demo row has no entry here, and the
+     * screen draws it with an empty image cell and an empty link. That is what
+     * makes every existing lead appear in the Demo Websites view without
+     * anything having been backfilled.
+     *
+     * Only read for the demo section: the worklist has no use for it, and
+     * fetching it there would be a query per page load for a column nobody
+     * draws.
+     */
+    const demos =
+      demoSection && page ? await demoSummariesFor(page.leads.map((lead) => lead.id)) : null;
+
     return Response.json(
       {
         ...(page
@@ -126,6 +166,7 @@ export async function GET(request: Request): Promise<Response> {
           : {}),
         stats,
         workCounts,
+        ...(demos ? { demos } : {}),
         ...(categories ? { categories } : {}),
         source: "postgres",
       },

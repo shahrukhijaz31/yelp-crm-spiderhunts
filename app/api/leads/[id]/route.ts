@@ -1,4 +1,5 @@
-import { apiModule } from "@/lib/authz";
+import { apiAnyModule, LEAD_POOL_MODULES } from "@/lib/authz";
+import { demoSummaryFor } from "@/lib/demoWebsites";
 import {
   getLeadDetail,
   LeadEditError,
@@ -28,9 +29,15 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  // The Leads module, resolved from the `users` row — see `GET /api/leads` for
-  // why the guard changed and why it changes nothing for existing accounts.
-  const auth = await apiModule("leads");
+  /*
+   * Either module.
+   *
+   * One lead opened from the worklist and the same lead opened from Demo
+   * Websites are the same record and the same request — the demo view is a
+   * second way of looking at the pool, not a second pool — so an agent granted
+   * either section may read it. An account with neither is still refused.
+   */
+  const auth = await apiAnyModule(LEAD_POOL_MODULES);
   if (auth instanceof Response) return auth;
 
   const { id } = await params;
@@ -47,10 +54,26 @@ export async function GET(
       );
     }
 
-    const recording = await getRecordingSummaryFor(id, auth);
+    /*
+     * Both halves of the lead, so the workspace can be opened from either view
+     * with one request.
+     *
+     * The recording is filtered by `getRecordingSummaryFor` against the row —
+     * an agent is only told about their own. The demo metadata is not filtered
+     * by person, because it belongs to the lead rather than to whoever uploaded
+     * it; what gates it is the module, checked above, and the screen simply
+     * does not draw the demo panel outside the demo view.
+     *
+     * `demo` is null for a lead nobody has added an image or a link to, which
+     * is almost all of them.
+     */
+    const [recording, demo] = await Promise.all([
+      getRecordingSummaryFor(id, auth),
+      demoSummaryFor(id),
+    ]);
 
     return Response.json(
-      { detail, recording },
+      { detail, recording, demo },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -87,7 +110,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiModule("leads", request);
+  const auth = await apiAnyModule(LEAD_POOL_MODULES, request);
   if (auth instanceof Response) return auth;
 
   const { id } = await params;

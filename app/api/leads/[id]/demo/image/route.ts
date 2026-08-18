@@ -1,19 +1,20 @@
-import { apiAdmin, apiModule } from "@/lib/authz";
-import { DEMO_IMAGE_TYPES, isDemoImageType, MAX_DEMO_IMAGE_BYTES } from "@/lib/demoImageRules";
+import { apiModule } from "@/lib/authz";
+import { DemoImageError, DEMO_IMAGE_TYPES, isDemoImageType, MAX_DEMO_IMAGE_BYTES } from "@/lib/demoImageRules";
 import { demoImageSize, demoImageStream } from "@/lib/demoImageStorage";
-import {
-  demoWebsiteObject,
-  isDemoRefusal,
-  removeDemoImage,
-  saveDemoImage,
-} from "@/lib/demoWebsites";
+import { demoImageObject, removeDemoImageFor, saveDemoImageFor } from "@/lib/demoWebsites";
 
 /**
- * The image attached to one demo website.
+ * The demo image on one lead.
  *
- *   GET     the bytes — administrators, and agents with the Demo Websites module
- *   POST    upload or replace — ADMIN only
- *   DELETE  remove — ADMIN only
+ *   GET     the bytes
+ *   POST    upload or replace
+ *   DELETE  remove
+ *
+ * All three behind the Demo Websites module, which is the whole permission
+ * story: an agent granted it may see and set the demo image on any lead in the
+ * pool, and an agent without it may do neither on any lead. There is no
+ * per-lead ownership in this application to check against, so there is nothing
+ * a changed id in the URL can reach that the module did not already grant.
  *
  * ---------------------------------------------------------------------------
  * The read, and why it is a route rather than a file
@@ -22,35 +23,36 @@ import {
  * authenticated, module-checked request every time. There is no public URL, no
  * signed link and no static directory: the storage root is not under `public/`,
  * nginx has no location for it, and no other code path opens a file under it
- * for reading. The `<img src>` in the list and the detail view points straight
+ * for reading. The `<img src>` in the table and the workspace points straight
  * here and the browser issues an ordinary same-origin GET carrying the session
  * cookie.
  *
- * An agent without the module cannot reach an image by guessing its URL,
- * because the URL contains a demo website id and not a filename, and because
- * the guard runs before the id is looked at.
+ * An agent without the module cannot reach an image by guessing a URL, because
+ * the URL names a *lead* and not a file, and because the guard runs before the
+ * id is looked at. An agent *with* the module changing the id gets a different
+ * lead's image — which is correct, and is the same thing they get by scrolling
+ * the list.
  *
  * The order of operations, which is the whole security story:
  *
- *   1. the guard        — session token → session row → user row → role and
- *                         module flags, read from Postgres on this request. 401
- *                         signed out, 403 without the module, before anything
- *                         else runs.
- *   2. the row          — `findUnique` on the id. A `null` is a 404, and it is
- *                         the same 404 for an id that was never real as for one
- *                         that has been deleted: probing ids reveals nothing.
- *   3. the key          — read *off the row*, server-side. The caller does not
- *                         supply it and cannot influence it. There is no
- *                         parameter here that names a file.
- *   4. the root check   — `resolveKey` inside the storage module re-resolves
- *                         the key against the demo image root and refuses
- *                         anything that escapes it, on this read as on every
- *                         other.
- *   5. the bytes        — streamed, never buffered.
+ *   1. the guard      — session token → session row → user row → role and
+ *                       module flags, read from Postgres on this request. 401
+ *                       signed out, 403 without the module, before anything
+ *                       else runs.
+ *   2. the row        — `findUnique` on the lead id. Absent is a 404, and it is
+ *                       the same 404 for a lead that never existed as for one
+ *                       with no image: probing ids reveals nothing.
+ *   3. the key        — read *off the row*, server-side. The caller does not
+ *                       supply it and cannot influence it. There is no
+ *                       parameter here that names a file.
+ *   4. the root check — `resolveKey` inside the storage module re-resolves the
+ *                       key against the demo image root and refuses anything
+ *                       that escapes it, on this read as on every other.
+ *   5. the bytes      — streamed, never buffered.
  *
  * Points 3 and 4 together are what make `../` traversal and "a file outside
  * DEMO_IMAGES_DIR" unreachable rather than merely defended: the only
- * caller-supplied value is a database primary key, and the only path is one the
+ * caller-supplied value is a lead's primary key, and the only path is one the
  * server generated and re-verified.
  *
  * ---------------------------------------------------------------------------
@@ -67,32 +69,26 @@ import {
  *                           upload: the type sent is derived from the file's
  *                           own header, and this stops a browser having a
  *                           better idea and rendering it as something else.
- *   Cache-Control           `private, no-store`, the same as every other
- *                           authenticated response here. A short browser cache
- *                           was tried and removed: `proxy.ts` stamps
- *                           `no-store, no-cache, must-revalidate` over every
- *                           response it lets through, so a `max-age` on this
- *                           route was a header that never reached anybody and
- *                           a comment that described behaviour the application
- *                           did not have. One rule, written where it is
- *                           enforced.
+ *   Cache-Control           `private, no-store`, like every other authenticated
+ *                           response here — and what `proxy.ts` stamps over
+ *                           everything it lets through in any case.
  */
 
 const noStore = { "Cache-Control": "no-store" } as const;
 
 export async function GET(
   _request: Request,
-  context: RouteContext<"/api/demo-websites/[id]/image">,
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const auth = await apiModule("demoWebsites");
   if (auth instanceof Response) return auth;
 
-  const { id } = await context.params;
+  const { id } = await params;
 
-  const row = await demoWebsiteObject(id);
+  const row = await demoImageObject(id);
   if (!row || !row.imageStorageKey || !row.imageFormat) {
     return Response.json(
-      { error: "not_found", message: "That demo website has no image." },
+      { error: "not_found", message: "That lead has no demo image." },
       { status: 404, headers: noStore },
     );
   }
@@ -101,7 +97,7 @@ export async function GET(
   // not one this application can serve is a bug or a tampered row, and either
   // way the answer is a refusal instead of a `Content-Type` chosen by the data.
   if (!isDemoImageType(row.imageFormat)) {
-    console.error(`Demo website ${id} has an unservable image format: ${row.imageFormat}`);
+    console.error(`Lead ${id} has an unservable demo image format: ${row.imageFormat}`);
     return Response.json(
       {
         error: "unsupported_format",
@@ -122,7 +118,7 @@ export async function GET(
   // exist" is a different thing to see than "no such image".
   const size = await demoImageSize(row.imageStorageKey);
   if (size === null) {
-    console.error(`Demo website ${id} is missing its image object on disk`);
+    console.error(`Lead ${id} is missing its demo image object on disk`);
     return Response.json(
       {
         error: "object_missing",
@@ -138,7 +134,7 @@ export async function GET(
       headers: {
         "Content-Type": row.imageFormat,
         "Content-Length": String(size),
-        "Content-Disposition": `inline; filename="demo-${row.id}.${served.extension}"`,
+        "Content-Disposition": `inline; filename="demo-${row.leadId}.${served.extension}"`,
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store",
       },
@@ -146,7 +142,7 @@ export async function GET(
   } catch (error) {
     // `resolveKey` throwing lands here, as does a file that disappeared between
     // the `stat` above and this open.
-    console.error(`Streaming the image for demo website ${id} failed:`, error);
+    console.error(`Streaming the demo image for lead ${id} failed:`, error);
     return Response.json(
       { error: "server_error", message: "That image could not be read." },
       { status: 500, headers: noStore },
@@ -155,20 +151,24 @@ export async function GET(
 }
 
 /**
- * POST — upload or replace the image. ADMIN only.
+ * POST — upload or replace the demo image.
  *
- * An agent with the Demo Websites module is refused here even though they may
- * read the very image this writes. That is the module's read-only rule, and it
- * lives in this guard rather than in the panel not drawing an upload control.
+ * Open to anyone with the Demo Websites module, agents included: attaching the
+ * image of a demo is the job the module exists for, in the same way uploading a
+ * call recording is the job an agent does on the worklist.
+ *
+ * Only the bytes cross. `file.name` and `file.type` are read by nobody: the
+ * stored format is sniffed from the file's own header, and the storage key is
+ * generated by the server.
  */
 export async function POST(
   request: Request,
-  context: RouteContext<"/api/demo-websites/[id]/image">,
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiAdmin(request);
+  const auth = await apiModule("demoWebsites", request);
   if (auth instanceof Response) return auth;
 
-  const { id } = await context.params;
+  const { id } = await params;
 
   // Refuse an oversized body before it is buffered. The header is a claim and
   // the real check is on the bytes, but believing it costs nothing and means a
@@ -214,30 +214,28 @@ export async function POST(
   }
 
   try {
-    // Only the bytes cross. `file.name` and `file.type` are read by nobody:
-    // the stored format is sniffed from the file's own header and the storage
-    // key is generated by the server.
-    const demoWebsite = await saveDemoImage({
-      demoWebsiteId: id,
+    const demo = await saveDemoImageFor({
+      leadId: id,
       bytes: new Uint8Array(await file.arrayBuffer()),
+      actorId: auth.id,
     });
 
-    if (!demoWebsite) {
+    if (!demo) {
       return Response.json(
-        { error: "not_found", message: "No such demo website." },
+        { error: "not_found", message: "No such lead." },
         { status: 404, headers: noStore },
       );
     }
 
-    return Response.json({ demoWebsite }, { status: 201, headers: noStore });
+    return Response.json({ demo }, { status: 201, headers: noStore });
   } catch (error) {
-    if (isDemoRefusal(error)) {
+    if (error instanceof DemoImageError) {
       return Response.json(
         { error: error.code, message: error.message },
         { status: error.status, headers: noStore },
       );
     }
-    console.error(`POST /api/demo-websites/${id}/image failed:`, error);
+    console.error(`POST /api/leads/${id}/demo/image failed:`, error);
     return Response.json(
       { error: "server_error", message: "That image could not be saved." },
       { status: 500, headers: noStore },
@@ -245,47 +243,48 @@ export async function POST(
   }
 }
 
-/** DELETE — remove the image and clear the row's six image columns. ADMIN only. */
+/** DELETE — remove the demo image and clear the row's image columns. */
 export async function DELETE(
   request: Request,
-  context: RouteContext<"/api/demo-websites/[id]/image">,
+  { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const auth = await apiAdmin(request);
+  const auth = await apiModule("demoWebsites", request);
   if (auth instanceof Response) return auth;
 
-  const { id } = await context.params;
+  const { id } = await params;
 
   try {
-    const result = await removeDemoImage(id);
+    const result = await removeDemoImageFor(id, auth.id);
     if (!result) {
+      // The lead itself is gone or was never real. Checked rather than inferred
+      // from `removeDemoImageFor` returning nothing to do, so "no such lead" and
+      // "no image on this lead" stay different answers.
       return Response.json(
-        { error: "not_found", message: "No such demo website." },
+        { error: "not_found", message: "No such lead." },
         { status: 404, headers: noStore },
       );
     }
 
     if (result.imageOrphaned) {
-      console.warn(
-        `demo-website.image.delete admin=${auth.id} demo=${id} left an orphaned file`,
-      );
+      console.warn(`demo.image.delete user=${auth.id} lead=${id} left an orphaned file`);
     }
 
     return Response.json(
       {
         removed: result.removed,
         imageOrphaned: result.imageOrphaned,
-        demoWebsite: result.card,
+        demo: result.summary,
         ...(result.imageOrphaned
           ? {
               message:
-                "The image was removed from the demo website, but its file could not be deleted from storage. Tell an administrator so it can be swept.",
+                "The image was removed from the lead, but its file could not be deleted from storage. Tell an administrator so it can be swept.",
             }
           : {}),
       },
       { headers: noStore },
     );
   } catch (error) {
-    console.error(`DELETE /api/demo-websites/${id}/image failed:`, error);
+    console.error(`DELETE /api/leads/${id}/demo/image failed:`, error);
     return Response.json(
       { error: "server_error", message: "That image could not be removed." },
       { status: 500, headers: noStore },

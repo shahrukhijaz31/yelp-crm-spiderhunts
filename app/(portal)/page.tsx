@@ -60,6 +60,10 @@ export default async function Home(props: PageProps<"/">) {
   const today = todayIso();
 
   const result = await listLeadsPage({
+    // The worklist, as opposed to Demo Websites — which is this same query and
+    // this same component with the other section (`/demo-websites`). Named
+    // rather than defaulted so the two pages read as the pair they are.
+    section: "leads",
     // The queue the screen opens on — New, the leads nobody has called. Not
     // read from the URL for the same reason the tab and the filters are not:
     // `Worklist` owns it from the first interaction onwards, and it is seeded

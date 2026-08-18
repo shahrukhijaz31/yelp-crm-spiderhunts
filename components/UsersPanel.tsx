@@ -1,12 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
 
 import ResetPasswordDialog from "./ResetPasswordDialog";
 import type { Role } from "@/lib/access";
-import { MODULE_LABELS, PORTAL_MODULES, type PortalModule } from "@/lib/modules";
+import { MODULE_HINTS, MODULE_LABELS, PORTAL_MODULES, type PortalModule } from "@/lib/modules";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password";
 
 /**
@@ -132,10 +132,11 @@ export default function UsersPanel({
       <header>
         <h1 className="page-title">Users</h1>
         <p className="mt-3 page-intro">
-          Everyone who can sign in to this workspace. Module access decides
-          which of the two workspaces — Leads and Demo Websites — an agent is
-          shown; administrators get everything, including this page. Disabling
-          an account ends its sessions immediately.
+          Everyone who can sign in to this workspace. Lead access decides which
+          sections of the lead list an agent is shown — New Leads, Demo
+          Websites, or both; it is the same leads either way. Administrators get
+          everything, including this page. Disabling an account ends its
+          sessions immediately.
         </p>
         {/* Said once, at the top, rather than repeated on every row: it is a
             property of the whole page. */}
@@ -222,7 +223,7 @@ export default function UsersPanel({
                 </select>
               </label>
 
-              {/* Module access.
+              {/* Lead access.
                   Two checkboxes rather than a multi-select, because the answer
                   is two independent yes/nos and a list box would make them look
                   like alternatives. Beside the role control because they are the
@@ -243,17 +244,7 @@ export default function UsersPanel({
                 user={user}
                 disabled={busy}
                 isSelf={isSelf}
-                onToggle={(module, next) =>
-                  void patchUser(
-                    user.id,
-                    module === "leads"
-                      ? { canAccessLeads: next }
-                      : { canAccessDemoWebsites: next },
-                    next
-                      ? `${user.name} can now open ${MODULE_LABELS[module]}.`
-                      : `${user.name} can no longer open ${MODULE_LABELS[module]}.`,
-                  )
-                }
+                onSave={(edits, describe) => patchUser(user.id, edits, describe)}
               />
 
               <button
@@ -452,58 +443,118 @@ export default function UsersPanel({
 }
 
 /**
- * One account's two module switches.
+ * One account's lead access: which of the two sections they may open.
  *
- * Nothing here is a permission. Every tick is a `PATCH /api/users/:id` behind
- * `apiAdmin()`, which re-reads the caller's role from Postgres and refuses a
- * self-edit of these two fields; and every module gate in the portal resolves
- * the flags from the `users` row on the request that needs them, so unticking a
- * box takes effect on that agent's very next click without anybody being signed
- * out.
+ * ---------------------------------------------------------------------------
+ * Ticking does not save. Save saves.
+ * ---------------------------------------------------------------------------
+ * The boxes stage a change and a Save button commits it, which is deliberately
+ * unlike the Role dropdown and the Disable button beside them. Those are one
+ * decision each; this is two related ones, and an administrator moving somebody
+ * from "New Leads only" to "Demo Websites only" has to untick one and tick the
+ * other. Saving on each tick would put that account through an intermediate
+ * state — briefly both, or briefly neither — and, because the flags are read
+ * from the `users` row on the agent's very next request, the agent would
+ * actually *be* in it. Half a second of "no sections at all" is a refusal
+ * screen for somebody mid-call.
+ *
+ * Staging also makes the change reviewable before it lands, which is the thing
+ * a checkbox pair is bad at otherwise: the row says what it will become, and
+ * Cancel puts it back.
+ *
+ * One request, not two: both flags travel in the same PATCH, so the account
+ * moves from one valid state to the other in a single write.
+ *
+ * ---------------------------------------------------------------------------
+ * Nothing here is a permission
+ * ---------------------------------------------------------------------------
+ * Save is a `PATCH /api/users/:id` behind `apiAdmin()`, which re-reads the
+ * caller's role from Postgres and refuses a self-edit of these two fields; and
+ * every module gate in the portal resolves the flags from the `users` row on
+ * the request that needs them. Unticking a box and saving takes effect on that
+ * agent's very next click without anybody being signed out.
  */
 function ModuleAccess({
   user,
   disabled,
   isSelf,
-  onToggle,
+  onSave,
 }: {
   user: UserRow;
   disabled: boolean;
   isSelf: boolean;
-  onToggle: (module: PortalModule, next: boolean) => void;
+  onSave: (edits: Record<string, boolean>, describe: string) => Promise<void>;
 }) {
   const isAdmin = user.role === "ADMIN";
 
+  const saved = useMemo<Record<PortalModule, boolean>>(
+    () => ({ leads: user.canAccessLeads, demoWebsites: user.canAccessDemoWebsites }),
+    [user.canAccessLeads, user.canAccessDemoWebsites],
+  );
+
+  const [draft, setDraft] = useState(saved);
+
+  /*
+   * The saved values changing underneath — another administrator, or this
+   * row's own save landing and `router.refresh()` re-rendering it — resets the
+   * draft. Done during render rather than in an effect so the boxes never paint
+   * one frame of a value that is no longer true.
+   */
+  const [lastSaved, setLastSaved] = useState(saved);
+  if (lastSaved.leads !== saved.leads || lastSaved.demoWebsites !== saved.demoWebsites) {
+    setLastSaved(saved);
+    setDraft(saved);
+  }
+
+  const dirty =
+    draft.leads !== saved.leads || draft.demoWebsites !== saved.demoWebsites;
+
+  // Locked for an administrator, who has both modules whatever the row says,
+  // and on your own row, where the API refuses the edit anyway.
+  const locked = isAdmin || isSelf;
+
+  async function save() {
+    const granted = PORTAL_MODULES.filter((module) => draft[module]).map(
+      (module) => MODULE_LABELS[module],
+    );
+
+    await onSave(
+      { canAccessLeads: draft.leads, canAccessDemoWebsites: draft.demoWebsites },
+      granted.length === 0
+        ? `${user.name} can no longer open either section.`
+        : `${user.name} can now open ${humanJoin(granted)}.`,
+    );
+  }
+
   return (
-    <fieldset className="flex min-w-[13rem] flex-col gap-1">
-      <legend className="field-label">Module access</legend>
+    <fieldset className="flex min-w-[15rem] flex-col gap-1.5">
+      <legend className="field-label">Lead access</legend>
+
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         {PORTAL_MODULES.map((module) => {
-          const granted = isAdmin
-            ? true
-            : module === "leads"
-              ? user.canAccessLeads
-              : user.canAccessDemoWebsites;
+          const checked = isAdmin ? true : draft[module];
 
           return (
             <label
               key={module}
               title={
                 isAdmin
-                  ? "Administrators always have every module"
+                  ? "Administrators always have both sections"
                   : isSelf
-                    ? "You cannot change your own module access"
-                    : `${granted ? "Remove" : "Grant"} ${MODULE_LABELS[module]} for ${user.name}`
+                    ? "You cannot change your own lead access"
+                    : MODULE_HINTS[module]
               }
               className={`flex items-center gap-1.5 text-caption ${
-                isAdmin || isSelf ? "text-fg-4" : "cursor-pointer text-fg-2"
+                locked ? "text-fg-4" : "cursor-pointer text-fg-2"
               }`}
             >
               <input
                 type="checkbox"
-                checked={granted}
-                disabled={isAdmin || isSelf || disabled}
-                onChange={(event) => onToggle(module, event.target.checked)}
+                checked={checked}
+                disabled={locked || disabled}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, [module]: event.target.checked }))
+                }
                 className="h-3.5 w-3.5 accent-[var(--c-accent)]"
               />
               {MODULE_LABELS[module]}
@@ -511,8 +562,37 @@ function ModuleAccess({
           );
         })}
       </div>
+
+      {/* Only once there is something to save. A Save button that is permanently
+          present and permanently disabled is chrome on every row of the list. */}
+      {dirty && !locked && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void save()}
+            className="ui-btn ui-btn-primary h-7 px-2.5 text-caption"
+          >
+            {disabled ? "Saving…" : "Save access"}
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setDraft(saved)}
+            className="ui-btn ui-btn-ghost h-7 px-2 text-caption"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </fieldset>
   );
+}
+
+/** `["New Leads", "Demo Websites"]` -> `New Leads and Demo Websites`. */
+function humanJoin(items: string[]): string {
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 function NewUserForm({
@@ -585,7 +665,7 @@ function NewUserForm({
           so the administrator creating the account can see what they are
           agreeing to, and change it before the person first signs in. */}
       <fieldset className="flex flex-col gap-2">
-        <legend className="field-label">Module access</legend>
+        <legend className="field-label">Lead access</legend>
         <div className="flex flex-wrap gap-x-5 gap-y-2">
           {PORTAL_MODULES.map((module) => (
             <label key={module} className="flex items-center gap-2 text-ui text-fg-2">
@@ -600,7 +680,8 @@ function NewUserForm({
           ))}
         </div>
         <p className="text-meta text-fg-4">
-          Ignored for an administrator, who always has both.
+          Which sections this person may open. Ignored for an administrator, who
+          always has both.
         </p>
       </fieldset>
 

@@ -206,14 +206,39 @@ export async function apiModule(
   module: PortalModule,
   request?: Request,
 ): Promise<SessionUser | Response> {
+  return apiAnyModule([module], request);
+}
+
+/**
+ * Guard for a route reachable through **either** of the portal's two views.
+ *
+ * One lead, opened from the worklist or from Demo Websites, is the same lead
+ * and the same endpoint. `GET /api/leads/:id` and the inline edit behind
+ * `PATCH /api/leads/:id` are therefore granted by *either* module rather than
+ * by the Leads one alone: an agent who has been given Demo Websites is working
+ * the same pool through a second view, and refusing them the record they can
+ * plainly see would be a permission that contradicts the screen.
+ *
+ * It is deliberately not "any signed-in user". An account with neither module —
+ * a new starter an administrator has not finished setting up — is still refused
+ * here, so the failure mode of an unconfigured account is no access rather than
+ * full access.
+ */
+export async function apiAnyModule(
+  modules: readonly PortalModule[],
+  request?: Request,
+): Promise<SessionUser | Response> {
   const user = await getSessionUser();
   if (!user) return unauthorizedJson();
 
   const access = await moduleAccessFor(user);
-  if (!hasModule(access, module)) return forbiddenJson();
+  if (!modules.some((module) => hasModule(access, module))) return forbiddenJson();
 
   const crossSite = request ? csrfRefusal(request) : null;
   if (crossSite) return crossSite;
 
   return user;
 }
+
+/** Both views of the lead pool. Reads that either section legitimately makes. */
+export const LEAD_POOL_MODULES = ["leads", "demoWebsites"] as const;

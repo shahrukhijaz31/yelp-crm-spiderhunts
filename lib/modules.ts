@@ -39,8 +39,18 @@ export type PortalModule = (typeof PORTAL_MODULES)[number];
 
 /** What an administrator ticks in the user list. Copy lives here, not in the DB. */
 export const MODULE_LABELS: Record<PortalModule, string> = {
-  leads: "Leads",
+  // "New Leads" rather than "Leads", which is what the admin panel calls it and
+  // what an administrator granting it is thinking of: the call list an agent
+  // works down. It also gates Meetings and the lead APIs behind it, because
+  // those are the same workspace — see the note on `landingPathFor`.
+  leads: "New Leads",
   demoWebsites: "Demo Websites",
+};
+
+/** One line each, for the admin panel's checkboxes. */
+export const MODULE_HINTS: Record<PortalModule, string> = {
+  leads: "The call list, the lead workspace and Meetings.",
+  demoWebsites: "The same leads, with a demo image and a demo link on each.",
 };
 
 /**

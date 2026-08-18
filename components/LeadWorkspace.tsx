@@ -28,12 +28,15 @@ import {
 
 import BookMeetingDialog from "./BookMeetingDialog";
 import CallRecordingPanel from "./CallRecordingPanel";
+import DemoWebsitePanel from "./DemoWebsitePanel";
 import LeadActivity from "./LeadActivity";
 import StatusPicker from "./StatusPicker";
 import { StatusChip } from "./StatusSelect";
 import { callbackState, displayWebsite, websiteHref } from "@/lib/leadUtils";
 import { formatMeetingDay, formatMeetingTime, isMeetingLead } from "@/lib/meetings";
 import type { LeadDetail } from "@/lib/leadDb";
+import type { DemoSummary } from "@/lib/demoWebsiteRules";
+import type { LeadSection } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import { CALL_STATUS_LABELS, type Lead, type LeadEditableFields } from "@/lib/types";
 import { whatsappLink } from "@/lib/whatsapp";
@@ -152,13 +155,33 @@ export type LeadWorkspaceNav =
 export default function LeadWorkspace({
   detail,
   initialRecording,
+  initialDemo = null,
+  section = "leads",
   serverToday,
   nav,
   onSaved,
+  onDemoSaved,
   onDirtyChange,
 }: {
   detail: LeadDetail;
   initialRecording: RecordingSummary | null;
+  /** The demo image and link, or null for a lead that has neither yet. */
+  initialDemo?: DemoSummary | null;
+  /**
+   * Which view this lead was opened from.
+   *
+   * **One block in this screen changes, and nothing else.** Every field above
+   * it — the name, the phone, the address, the owner, the status, the callback,
+   * the meeting, the notes — is the same lead read from the same row, so an
+   * agent opening a lead from Demo Websites sees exactly what they would have
+   * seen opening it from the worklist, with the current values.
+   *
+   * What differs is the last block: the Leads section draws the call recording,
+   * and the Demo Websites section draws the image and the link **instead**. The
+   * two are never both rendered, so there is no audio control anywhere in the
+   * demo view.
+   */
+  section?: LeadSection;
   serverToday: string;
   nav: LeadWorkspaceNav;
   /**
@@ -167,6 +190,8 @@ export default function LeadWorkspace({
    * top of it — without re-running the query that produced the list.
    */
   onSaved?: (lead: Lead) => void;
+  /** A demo image or link saved here, for the row behind the window. */
+  onDemoSaved?: (leadId: string, demo: DemoSummary) => void;
   /**
    * Whether there is uncommitted work on screen. The overlay needs it because
    * *it* owns Escape and the backdrop, and neither may throw away a note the
@@ -183,6 +208,7 @@ export default function LeadWorkspace({
   // server normalised is the value on screen.
   const [lead, setLead] = useState<Lead>(detail.lead);
   const [recording, setRecording] = useState<RecordingSummary | null>(initialRecording);
+  const [demo, setDemo] = useState<DemoSummary | null>(initialDemo);
 
   /** Pending edits. `null` means clean. */
   const [draft, setDraft] = useState<Partial<LeadEditableFields> | null>(null);
@@ -725,18 +751,35 @@ export default function LeadWorkspace({
             </section>
           </div>
 
-          {/* --- recording --- */}
+          {/* --- recording, or the demo website ---
+              Mutually exclusive, and that is the one structural difference
+              between the two views of a lead. The worklist attaches audio to a
+              call; Demo Websites attaches a picture and a link to a demo. */}
           <div className="ws-block-wrap">
-            <CallRecordingPanel
-              leadId={lead.id}
-              leadName={lead.name}
-              recording={recording}
-              // Judged on the saved lead: the upload posts now, and the
-              // server reads the row, not the draft.
-              eligible={isMeetingLead(lead)}
-              onSaved={setRecording}
-              onDeleted={() => setRecording(null)}
-            />
+            {section === "demo" ? (
+              <DemoWebsitePanel
+                leadId={lead.id}
+                leadName={lead.name}
+                demo={demo}
+                onChanged={(next) => {
+                  setDemo(next);
+                  // The row behind the window follows, without a re-read: the
+                  // response *is* the saved summary.
+                  if (next) onDemoSaved?.(lead.id, next);
+                }}
+              />
+            ) : (
+              <CallRecordingPanel
+                leadId={lead.id}
+                leadName={lead.name}
+                recording={recording}
+                // Judged on the saved lead: the upload posts now, and the
+                // server reads the row, not the draft.
+                eligible={isMeetingLead(lead)}
+                onSaved={setRecording}
+                onDeleted={() => setRecording(null)}
+              />
+            )}
           </div>
         </motion.section>
 
@@ -756,7 +799,10 @@ export default function LeadWorkspace({
             updatedAt={detail.updatedAt}
             firstCalledAt={detail.firstCalledAt}
             sourceBatch={detail.sourceBatch}
-            recording={recording}
+            // The activity trail names the recording when there is one. The
+            // demo view deliberately has nothing audio-shaped on screen, so it
+            // is not mentioned there either.
+            recording={section === "demo" ? null : recording}
           />
         </motion.aside>
       </div>

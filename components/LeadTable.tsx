@@ -3,7 +3,9 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown, SearchX } from "lucide-react";
 
 import LeadRow from "./LeadRow";
-import type { LeadSort, LeadSortKey } from "@/lib/leadQuery";
+import type { DemoSummaryMap } from "@/lib/demoWebsiteRules";
+import type { LeadSection, LeadSort, LeadSortKey } from "@/lib/leadQuery";
+import type { DemoSummary } from "@/lib/demoWebsiteRules";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
 
@@ -30,12 +32,14 @@ import type { Lead } from "@/lib/types";
  * exporting lives entirely in the Export view — this screen is for working the
  * call list.
  */
-const COLUMNS: Array<{
+interface Column {
   label: string;
   width: string;
   /** Present on the four scraped columns a header click can order by. */
   sortKey?: LeadSortKey;
-}> = [
+}
+
+const COLUMNS: Column[] = [
   // Widest of the columns, and frozen against horizontal scroll: the business
   // name is what an agent is scanning for *and* the link into the lead's
   // workspace, so it gets both the room for a longer name before truncation
@@ -60,6 +64,40 @@ const COLUMNS: Array<{
 ];
 
 /**
+ * The same table, in Demo mode.
+ *
+ * **The same columns**, in the same order, at the same widths where they fit —
+ * this is the worklist looking at the same leads, and an agent who moves
+ * between the two views should not have to re-learn where the phone number is.
+ *
+ * One column is swapped and one is added. Audio goes, because the demo view has
+ * no audio: a demo is presented with a picture and a link, and a recording
+ * control here would be the one thing this view is specified not to have. In
+ * its place go Demo image and Demo link, which are the only two facts this view
+ * knows that the worklist does not.
+ *
+ * The nine columns are paid for out of the eight, a point or two each, rather
+ * than by widening the table: the worklist already scrolls sideways below
+ * 1180px and adding to that would push the business name off a laptop.
+ */
+const DEMO_COLUMNS: Column[] = [
+  { label: "Business", width: "21%", sortKey: "name" },
+  { label: "Phone", width: "12%", sortKey: "phone" },
+  { label: "Address", width: "15%", sortKey: "address" },
+  { label: "Category", width: "9%", sortKey: "category" },
+  { label: "Website", width: "11%" },
+  { label: "Status", width: "10%" },
+  // Narrow: a 28px control and a 36px thumbnail, the same footprint the Audio
+  // column had, because it is the same kind of thing — one action beside the
+  // row rather than a feature of the list.
+  { label: "Demo image", width: "7%" },
+  // Wider than the image cell: it holds a hostname, and one that truncates to
+  // three characters would be a column that says nothing.
+  { label: "Demo link", width: "9%" },
+  { label: "Booked", width: "6%" },
+];
+
+/**
  * One page of the list, rendered in full — no virtualisation.
  *
  * Nothing here narrows or slices: `leads` is exactly what gets drawn. Which
@@ -70,6 +108,7 @@ const COLUMNS: Array<{
 export default function LeadTable({
   leads,
   today,
+  section = "leads",
   sort,
   onSort,
   hrefFor,
@@ -77,9 +116,17 @@ export default function LeadTable({
   datasetKey,
   recordings,
   onRecordingSaved,
+  demos,
+  onDemoSaved,
 }: {
   leads: Lead[];
   today: string;
+  /**
+   * Which view is drawing. Decides the last three columns and nothing else —
+   * the rows, the ordering and the pager are identical, because they are the
+   * same leads answered by the same query.
+   */
+  section?: LeadSection;
   sort: LeadSort;
   onSort: (key: LeadSortKey) => void;
   /**
@@ -107,7 +154,20 @@ export default function LeadTable({
   recordings: Record<string, RecordingSummary>;
   /** A quick upload that landed. Updates one entry in the map above. */
   onRecordingSaved: (recording: RecordingSummary) => void;
+  /**
+   * Demo image and link for the rows on this page, keyed by lead id.
+   *
+   * **Sparse.** A lead with neither is simply absent, and is drawn with an
+   * empty image cell and "Add link" — which is how every lead that predates
+   * this feature appears, with nothing having been backfilled. Only populated
+   * in the demo section; the worklist passes nothing and draws neither column.
+   */
+  demos?: DemoSummaryMap;
+  /** A demo image or link that was just saved from a row. */
+  onDemoSaved?: (leadId: string, demo: DemoSummary) => void;
 }) {
+  const demo = section === "demo";
+  const columns = demo ? DEMO_COLUMNS : COLUMNS;
   return (
     // No panel of its own: the table is the body of the workspace surface,
     // between the toolbar strip above it and the pager strip below. Only the
@@ -118,13 +178,13 @@ export default function LeadTable({
           28px control between the same 12px gutters every other cell uses. */}
       <table className="lead-table lead-table-frozen w-full min-w-[1180px] table-fixed border-collapse">
         <colgroup>
-          {COLUMNS.map((column) => (
+          {columns.map((column) => (
             <col key={column.label} style={{ width: column.width }} />
           ))}
         </colgroup>
         <thead>
           <tr>
-            {COLUMNS.map((column, index) => {
+            {columns.map((column, index) => {
               const active = column.sortKey !== undefined && sort.key === column.sortKey;
               return (
               <th
@@ -196,15 +256,18 @@ export default function LeadTable({
               key={lead.id}
               lead={lead}
               today={today}
+              section={section}
               href={hrefFor(lead, index)}
               onOpen={() => onOpen(index)}
               recording={recordings[lead.id] ?? null}
               onRecordingSaved={onRecordingSaved}
+              demo={demos?.[lead.id] ?? null}
+              onDemoSaved={onDemoSaved}
             />
           ))}
           {leads.length === 0 && (
             <tr>
-              <td colSpan={COLUMNS.length} className="px-5 py-20 text-center">
+              <td colSpan={columns.length} className="px-5 py-20 text-center">
                 {/* An empty table is the one place this app has room for a
                     figure. It is drawn from the same hairline and fg-4 the
                     rest of the chrome uses, so it reads as the table's own

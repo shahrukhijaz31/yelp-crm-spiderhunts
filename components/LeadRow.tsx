@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowUpRight, Star } from "lucide-react";
 
+import { DemoImageCell, DemoLinkCell } from "./DemoCells";
 import RowRecordingButton from "./RowRecordingButton";
 import { StatusChip } from "./StatusSelect";
 import WhatsAppLink from "./WhatsAppLink";
@@ -13,6 +14,8 @@ import {
   websiteHref,
 } from "@/lib/leadUtils";
 import { formatMeetingTime, isMeetingLead } from "@/lib/meetings";
+import type { DemoSummary } from "@/lib/demoWebsiteRules";
+import type { LeadSection } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
 
@@ -62,13 +65,28 @@ import type { Lead } from "@/lib/types";
 export default function LeadRow({
   lead,
   today,
+  section = "leads",
   href,
   onOpen,
   recording,
   onRecordingSaved,
+  demo = null,
+  onDemoSaved,
 }: {
   lead: Lead;
   today: string;
+  /**
+   * Which view is drawing this row.
+   *
+   * The only thing it changes is the one cell between Status and Booked: the
+   * worklist puts the quick audio upload there, and the demo view puts the
+   * image and the link there instead. Every other cell is identical, because
+   * every other cell is the same lead.
+   *
+   * **In demo mode this row draws no audio control of any kind** — not a
+   * disabled one, not a hidden one. `RowRecordingButton` is not rendered.
+   */
+  section?: LeadSection;
   /** The lead's workspace, carrying the list it was opened from. */
   href: string;
   /** Open the lead over this list, without leaving it. */
@@ -81,6 +99,13 @@ export default function LeadRow({
   recording: RecordingSummary | null;
   /** A finished quick upload, written back into this row alone. */
   onRecordingSaved: (recording: RecordingSummary) => void;
+  /**
+   * This lead's demo image and link, when it has either. Null is the usual
+   * case and is not an absence of data — it is a lead nobody has added a demo
+   * to yet, which the cells draw as "upload" and "add link".
+   */
+  demo?: DemoSummary | null;
+  onDemoSaved?: (leadId: string, demo: DemoSummary) => void;
 }) {
   const state = callbackState(lead, today);
 
@@ -218,21 +243,48 @@ export default function LeadRow({
           smallest thing in it: a 28px glyph that opens a file picker and posts
           to the same endpoint the workspace does. Nothing else about the row
           became editable — this is a shortcut for an agent who already knows
-          which file belongs to which call. See `RowRecordingButton` for why an
-          ineligible lead shows nothing at all. */}
+          which file belongs to which call.
+
+          Which action that is depends on the view, and they are mutually
+          exclusive: the worklist offers the call recording (see
+          `RowRecordingButton` for why an ineligible lead shows nothing at all),
+          and the demo view offers the image and the link. **The demo view draws
+          no audio control**, which is the one hard difference between the two
+          tables. */}
       {/* `relative` so a failed upload's message can be floated out of a cell
           only wide enough for the control itself. */}
-      <td className="relative px-3 py-2">
-        <RowRecordingButton
-          leadId={lead.id}
-          leadName={lead.name}
-          recording={recording}
-          // Judged on the *saved* lead, the same way the workspace judges it:
-          // the upload posts immediately and the server reads the row.
-          eligible={isMeetingLead(lead)}
-          onSaved={onRecordingSaved}
-        />
-      </td>
+      {section === "demo" ? (
+        <>
+          <td className="relative px-3 py-2">
+            <DemoImageCell
+              leadId={lead.id}
+              leadName={lead.name}
+              demo={demo}
+              onSaved={(leadId, saved) => onDemoSaved?.(leadId, saved)}
+            />
+          </td>
+          <td className="relative min-w-0 px-3 py-2">
+            <DemoLinkCell
+              leadId={lead.id}
+              leadName={lead.name}
+              demo={demo}
+              onSaved={(leadId, saved) => onDemoSaved?.(leadId, saved)}
+            />
+          </td>
+        </>
+      ) : (
+        <td className="relative px-3 py-2">
+          <RowRecordingButton
+            leadId={lead.id}
+            leadName={lead.name}
+            recording={recording}
+            // Judged on the *saved* lead, the same way the workspace judges it:
+            // the upload posts immediately and the server reads the row.
+            eligible={isMeetingLead(lead)}
+            onSaved={onRecordingSaved}
+          />
+        </td>
+      )}
 
       <td className="whitespace-nowrap px-3 py-2">
         {/*

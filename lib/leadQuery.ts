@@ -35,6 +35,29 @@ import {
  * `?pageSize=100000` is not a way to ask for the whole table back.
  */
 
+/**
+ * Which of the two views is asking.
+ *
+ * The worklist and Demo Websites are the *same query over the same leads* —
+ * same filters, same search, same sort, same pager — differing only in what the
+ * screen draws beside each row and which module grants access to it. So this is
+ * a parameter of the lead query rather than a second query: `section=demo` asks
+ * the same endpoint for the same page and adds the demo metadata for those rows
+ * to the response.
+ *
+ * It is also the one value in this file that is a *permission* input as well as
+ * a display one. `GET /api/leads` picks its guard from it — `leads` for the
+ * worklist, `demoWebsites` for the demo view — so an agent granted one module
+ * and not the other is refused the section they may not have. Which is safe
+ * precisely because it is checked server-side against the `users` row: naming a
+ * section in a query string asks a question, it does not answer one.
+ */
+export const LEAD_SECTIONS = ["leads", "demo"] as const;
+
+export type LeadSection = (typeof LEAD_SECTIONS)[number];
+
+export const DEFAULT_LEAD_SECTION: LeadSection = "leads";
+
 /** The page sizes the selector offers. Nothing else is accepted. */
 export const PAGE_SIZES = [10, 20, 50, 100] as const;
 
@@ -88,6 +111,12 @@ export const DEFAULT_SORT: LeadSort = { key: "default", direction: "asc" };
 /** Everything needed to answer "give me the rows for this screen". */
 export interface LeadPageQuery {
   /**
+   * Which view is asking. Does not change *which* leads match — the filters do
+   * that, and they are identical in both — only what travels back beside them
+   * and which module the endpoint demands.
+   */
+  section: LeadSection;
+  /**
    * Which queue: never-called leads, or ones already worked. The outermost
    * narrowing, applied before the view and the filters — see `lib/workState.ts`.
    */
@@ -136,6 +165,11 @@ export interface LeadPageMeta {
 export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   const params = new URLSearchParams();
   const { view, filters } = query;
+
+  // Omitted for the worklist, like every other default here — so the ordinary
+  // lead query is byte-for-byte the string it has always been, and the screen
+  // that was handed its first page still recognises it and skips the fetch.
+  if (query.section !== DEFAULT_LEAD_SECTION) params.set("section", query.section);
 
   // Omitted when it is the default, like every other param here — and the
   // default is New, so the queue an agent lands on asks for nothing extra.
@@ -236,6 +270,7 @@ export function parseLeadSearchParams(
   const today = params.get("today");
 
   return {
+    section: readOneOf(params.get("section"), LEAD_SECTIONS, DEFAULT_LEAD_SECTION),
     workState: readOneOf(params.get("work"), LEAD_WORK_STATES, DEFAULT_WORK_STATE),
     view: readOneOf(params.get("view"), WORKLIST_VIEWS, "all"),
     filters,

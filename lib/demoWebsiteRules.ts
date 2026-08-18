@@ -1,16 +1,23 @@
 /**
- * What counts as a demo website: the statuses, the field limits, the URL rule,
- * and the shape one takes on its way to the browser.
+ * The rules for the two fields Demo Websites adds to a lead: the link and the
+ * image's shape on the wire.
  *
  * The same split `lib/recordingRules.ts` and `lib/screenshotRules.ts` keep from
  * the modules that use them, and for the same reason — nothing here touches the
- * database, the filesystem or `next/headers`, so the form in the browser and
- * the handler on the server can enforce one set of rules instead of two that
- * drift. Every function is pure: values in, a normalised value or a typed error
- * out.
+ * database, the filesystem or `next/headers`, so the cell in the browser and
+ * the handler on the server enforce one set of rules instead of two that drift.
  *
- * The image rules live next door in `lib/demoImageRules.ts`, which is the same
- * idea again for bytes.
+ * ---------------------------------------------------------------------------
+ * What is deliberately *not* here
+ * ---------------------------------------------------------------------------
+ * Statuses, page sizes, sort keys, search parsing, filters. Demo Websites is
+ * the worklist looked at through a second view, so all of those already exist
+ * in `lib/leadQuery.ts` and are used unchanged. An earlier version of this file
+ * had its own copies of every one of them; they were a parallel implementation
+ * of the lead list, and deleting them is most of what the correction was.
+ *
+ * A demo has no status of its own either. The status the demo screen shows is
+ * the lead's `CallStatus`, read from `leads` on the request that draws it.
  */
 
 /** An expected refusal, carrying the status the route should answer with. */
@@ -24,69 +31,15 @@ export class DemoWebsiteError extends Error {
   }
 }
 
-// --- status ------------------------------------------------------------------
-
 /**
- * The four states, in the order the filter offers them.
+ * The longest a demo link may be.
  *
- * Mirrors the `DemoWebsiteStatus` enum in `schema.prisma` exactly, including
- * the order — a Postgres enum's declaration order is its sort order, so the two
- * lists have to agree or a later `prisma migrate diff` sees a change that is
- * not one. That is the same contract `CALL_STATUSES` keeps with `CallStatus`.
+ * Not a security boundary — Prisma parameterises the value, so a long string is
+ * a long string and not a query — it is what stops one row from being a
+ * megabyte of pasted text that then has to be rendered in a table cell on every
+ * page load.
  */
-export const DEMO_WEBSITE_STATUSES = ["draft", "active", "presented", "archived"] as const;
-
-export type DemoWebsiteStatus = (typeof DEMO_WEBSITE_STATUSES)[number];
-
-/** Human copy, kept out of the database so changing a word is not a migration. */
-export const DEMO_WEBSITE_STATUS_LABELS: Record<DemoWebsiteStatus, string> = {
-  draft: "Draft",
-  active: "Active",
-  presented: "Presented",
-  archived: "Archived",
-};
-
-/**
- * The chip colour per status, as the token names the rest of the portal uses.
- *
- * Only `active` gets the success tone — it is the state that means "ready to
- * put in front of a client", and it is the one an agent scans a list for.
- * Archived is deliberately the quietest thing on the screen.
- */
-export const DEMO_WEBSITE_STATUS_TONES: Record<DemoWebsiteStatus, string> = {
-  draft: "st-steel",
-  active: "success",
-  presented: "accent",
-  archived: "st-steel",
-};
-
-export function isDemoWebsiteStatus(value: unknown): value is DemoWebsiteStatus {
-  return (
-    typeof value === "string" && (DEMO_WEBSITE_STATUSES as readonly string[]).includes(value)
-  );
-}
-
-/** New rows default to Active: most demos are added because they are ready. */
-export const DEFAULT_DEMO_WEBSITE_STATUS: DemoWebsiteStatus = "active";
-
-// --- field limits ------------------------------------------------------------
-
-/**
- * Caps, in characters.
- *
- * These are not security boundaries — Prisma parameterises every value, so a
- * long string is a long string and not a query — they are what stops one row
- * from being a megabyte of pasted text that then has to be rendered in a table
- * cell on every page load. The search cap is the one that matters most and is
- * the same 200 the worklist uses, for the reason `lib/leadQuery.ts` gives.
- */
-export const MAX_NAME_LENGTH = 160;
-export const MAX_CLIENT_LENGTH = 160;
 export const MAX_URL_LENGTH = 2048;
-export const MAX_PHONE_LENGTH = 40;
-export const MAX_EMAIL_LENGTH = 254;
-export const MAX_NOTES_LENGTH = 4000;
-export const MAX_SEARCH_LENGTH = 200;
 
 // --- the demo link -----------------------------------------------------------
 
@@ -94,8 +47,8 @@ export const MAX_SEARCH_LENGTH = 200;
  * The only two protocols a demo link may use.
  *
  * A stored URL is rendered as an `<a href>` and clicked by a human, which is
- * exactly the shape of the oldest stored-XSS trick there is: `javascript:` in
- * a field somebody assumed was a website. `data:` is the same attack wearing a
+ * exactly the shape of the oldest stored-XSS trick there is: `javascript:` in a
+ * field somebody assumed was a website. `data:` is the same attack wearing a
  * different hat, and `file:` points a reader at their own disk. The check is a
  * whitelist rather than a blacklist because a blacklist is a list of the
  * schemes somebody happened to think of.
@@ -107,7 +60,7 @@ const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
  *
  * Run **server-side**, before the value is stored, and again by nothing: what
  * is in the column is what was validated, so the renderer does not have to
- * re-decide whether a link is safe every time it draws one. (The form runs the
+ * re-decide whether a link is safe every time it draws one. (The cell runs the
  * same function in the browser, to say "that is not a web address" before a
  * round trip. That copy is a convenience and is not what protects anything.)
  *
@@ -116,16 +69,23 @@ const ALLOWED_PROTOCOLS = new Set(["http:", "https:"]);
  *   - anything not http/https, per {@link ALLOWED_PROTOCOLS};
  *   - a URL carrying credentials (`https://user:pass@host`), which is a
  *     phishing shape and has no business in a demo link;
- *   - a hostname that is missing or is a bare dot;
+ *   - a hostname that is missing, a bare dot, or has no dot in it at all;
+ *   - anything beginning `//`, which is a protocol-relative URL: a browser
+ *     reads `//evil.com` as an absolute address on whatever scheme the current
+ *     page is using. It is refused rather than repaired even though repairing
+ *     it would be easy, because "looks relative, resolves absolute" is the
+ *     shape that gets past a reviewer — and an administrator who meant
+ *     `example.com` can simply type that;
  *   - anything over {@link MAX_URL_LENGTH};
  *   - control characters, which can smuggle a line break into anything that
  *     later writes the value into a header or a log line.
  *
  * A bare `example.com` is *accepted* and normalised to `https://example.com/`.
  * That is a deliberate kindness rather than a hole: the value is parsed as a
- * URL either way, and the alternative is refusing the thing an administrator
- * will type nine times out of ten. Nothing is guessed about a value that
- * already carries a scheme — `javascript:alert(1)` is refused, not rewritten.
+ * URL either way, and the alternative is refusing the thing an agent will type
+ * nine times out of ten. Nothing is guessed about a value that already carries
+ * a scheme — `javascript:alert(1)` is refused, not rewritten — and nothing is
+ * guessed about one that begins with a slash either.
  *
  * **This is not a redirector.** The portal never issues a `Location:` to a
  * stored demo link and never fetches one server-side; it renders an anchor with
@@ -153,12 +113,15 @@ export function normaliseDemoUrl(raw: unknown): string {
     );
   }
 
-  // A scheme-relative `//example.com` is a URL to a browser but has no protocol
-  // of its own, so it is treated as the schemeless case rather than parsed —
-  // otherwise it would inherit whatever base a future caller happened to pass.
-  const candidate = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value)
-    ? value
-    : `https://${value.replace(/^\/+/, "")}`;
+  if (value.startsWith("//")) {
+    throw new DemoWebsiteError(
+      "invalid_url",
+      "Demo links must start with http:// or https://.",
+      400,
+    );
+  }
+
+  const candidate = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value) ? value : `https://${value}`;
 
   let url: URL;
   try {
@@ -207,6 +170,20 @@ export function normaliseDemoUrl(raw: unknown): string {
   return href;
 }
 
+/**
+ * The same rule, as a question rather than an assertion.
+ *
+ * For the cell, which wants to grey out a Save button rather than throw.
+ */
+export function isValidDemoUrl(raw: string): boolean {
+  try {
+    normaliseDemoUrl(raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** CR, LF, NUL and friends — the same rule `safeCallbackUrl` applies. */
 function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -225,67 +202,10 @@ export function demoUrlHost(href: string): string {
   }
 }
 
-// --- the rest of the fields --------------------------------------------------
-
-function text(raw: unknown, limit: number): string {
-  return typeof raw === "string" ? raw.trim().slice(0, limit) : "";
-}
-
-/**
- * A phone number, or null.
- *
- * Not validated as a phone number, on purpose. This portal already holds leads
- * from several countries in whatever shape the scraper found them, and a
- * regular expression that decides what a phone number looks like is a
- * regular expression that refuses somebody's real number. Length-capped and
- * stripped of control characters, and that is all.
- */
-export function normalisePhone(raw: unknown): string | null {
-  const value = text(raw, MAX_PHONE_LENGTH).replace(/[ -]/g, "");
-  return value === "" ? null : value;
-}
-
-/** An email address, or null. The same shallow check `createUser` uses. */
-export function normaliseEmail(raw: unknown): string | null {
-  const value = text(raw, MAX_EMAIL_LENGTH).toLowerCase();
-  if (value === "") return null;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-    throw new DemoWebsiteError("invalid_email", "Enter a valid email address.", 400);
-  }
-  return value;
-}
-
-export function normaliseName(raw: unknown): string {
-  const value = text(raw, MAX_NAME_LENGTH);
-  if (value.length < 2) {
-    throw new DemoWebsiteError("invalid_name", "Give the demo website a name.", 400);
-  }
-  return value;
-}
-
-export function normaliseClientName(raw: unknown): string {
-  return text(raw, MAX_CLIENT_LENGTH);
-}
-
-export function normaliseNotes(raw: unknown): string {
-  return text(raw, MAX_NOTES_LENGTH);
-}
-
-export function normaliseStatus(raw: unknown): DemoWebsiteStatus {
-  if (!isDemoWebsiteStatus(raw)) {
-    throw new DemoWebsiteError(
-      "invalid_status",
-      `Status must be one of: ${DEMO_WEBSITE_STATUSES.join(", ")}.`,
-      400,
-    );
-  }
-  return raw;
-}
-
-// --- what a row looks like on the wire ---------------------------------------
+// --- what the browser is told ------------------------------------------------
 
 /** The image, as the browser sees it: a size and a shape, never a path. */
-export interface DemoWebsiteImageMeta {
+export interface DemoImageMeta {
   width: number;
   height: number;
   fileSize: number;
@@ -294,188 +214,27 @@ export interface DemoWebsiteImageMeta {
 }
 
 /**
- * One demo website, serialised.
+ * One lead's demo metadata.
  *
- * Deliberately **no storage key and no filesystem detail of any kind**. The
- * image is reached by `GET /api/demo-websites/:id/image`, which reads the key
- * off the row server-side; nothing in this payload names a file, so there is
- * nothing in the browser's memory for a bug or a screenshot to leak.
+ * Deliberately **only** the two demo fields and nothing about the lead. The
+ * name, the phone, the status and the notes travel in the `Lead` beside this,
+ * read from `leads` on the same request — see the note on the `DemoWebsite`
+ * model in `schema.prisma` for why they must never be copied in here.
+ *
+ * Also deliberately **no storage key and no filesystem detail of any kind**.
+ * The image is reached by `GET /api/leads/:id/demo/image`, which reads the key
+ * off the row server-side; nothing in this payload names a file.
+ *
+ * A lead with no demo row has no `DemoSummary` at all — the map simply has no
+ * entry for it — which is what "the lead still appears, with both cells empty"
+ * looks like on the wire.
  */
-export interface DemoWebsiteCard {
-  id: string;
-  name: string;
-  clientName: string;
-  demoUrl: string;
-  phone: string | null;
-  email: string | null;
-  status: DemoWebsiteStatus;
-  notes: string;
-  image: DemoWebsiteImageMeta | null;
-  createdAt: string;
+export interface DemoSummary {
+  leadId: string;
+  demoUrl: string | null;
+  image: DemoImageMeta | null;
   updatedAt: string;
 }
 
-// --- the list query ----------------------------------------------------------
-
-/** The page sizes the selector offers. Nothing else is accepted. */
-export const DEMO_PAGE_SIZES = [10, 20, 50, 100] as const;
-
-export type DemoPageSize = (typeof DEMO_PAGE_SIZES)[number];
-
-export const DEFAULT_DEMO_PAGE_SIZE: DemoPageSize = 20;
-
-/**
- * The columns a header click can sort by.
- *
- * A closed set, not a column name passed through from the browser: this value
- * ends up choosing an `orderBy`, and the mapping from key to column is held in
- * `lib/demoWebsites.ts` rather than being built from the string. Nothing
- * outside this list can reach a query.
- */
-export const DEMO_SORT_KEYS = ["created", "updated", "name", "client", "status"] as const;
-
-export type DemoSortKey = (typeof DEMO_SORT_KEYS)[number];
-
-export const DEMO_SORT_DIRECTIONS = ["asc", "desc"] as const;
-
-export type DemoSortDirection = (typeof DEMO_SORT_DIRECTIONS)[number];
-
-/** Newest first: the list is a working set, and the newest demo is the news. */
-export const DEFAULT_DEMO_SORT: { key: DemoSortKey; direction: DemoSortDirection } = {
-  key: "created",
-  direction: "desc",
-};
-
-export interface DemoWebsiteQuery {
-  /** Free text over name, client, URL, phone and email. Length-capped. */
-  search: string;
-  /** `null` is "any status" — the absence of a filter, not a fifth status. */
-  status: DemoWebsiteStatus | null;
-  sort: { key: DemoSortKey; direction: DemoSortDirection };
-  page: number;
-  pageSize: DemoPageSize;
-}
-
-export interface DemoWebsiteListMeta {
-  page: number;
-  pageSize: number;
-  /** Rows matching the search and the status filter, not the size of the table. */
-  total: number;
-  totalPages: number;
-}
-
-export interface DemoWebsitePayload {
-  demoWebsites: DemoWebsiteCard[];
-  meta: DemoWebsiteListMeta;
-  /** Counts per status across the whole table, unfiltered — the filter badges. */
-  statusCounts: Record<DemoWebsiteStatus, number>;
-}
-
-export function defaultDemoWebsiteQuery(): DemoWebsiteQuery {
-  return {
-    search: "",
-    status: null,
-    sort: { ...DEFAULT_DEMO_SORT },
-    page: 1,
-    pageSize: DEFAULT_DEMO_PAGE_SIZE,
-  };
-}
-
-/**
- * A query string as a validated {@link DemoWebsiteQuery}.
- *
- * Treats its input as hostile, exactly as `parseLeadSearchParams` does: every
- * value is checked against the closed set the UI offers, and anything else is
- * replaced with the default rather than passed along. `?pageSize=100000` is a
- * request for twenty rows.
- *
- * Nothing parsed here is ever consulted to decide *whether* the caller may see
- * anything — that decision was made by `apiModule()` before this runs — so
- * every one of these is safe as an arbitrary string, and a stale bookmark is
- * clamped rather than 400'd.
- */
-export function parseDemoWebsiteParams(params: URLSearchParams): DemoWebsiteQuery {
-  const status = params.get("status");
-
-  return {
-    search: (params.get("q") ?? "").trim().slice(0, MAX_SEARCH_LENGTH),
-    status: isDemoWebsiteStatus(status) ? status : null,
-    sort: {
-      key: readOneOf(params.get("sort"), DEMO_SORT_KEYS, DEFAULT_DEMO_SORT.key),
-      direction: readOneOf(
-        params.get("dir"),
-        DEMO_SORT_DIRECTIONS,
-        DEFAULT_DEMO_SORT.direction,
-      ),
-    },
-    page: readDemoPage(params.get("page")),
-    pageSize: readDemoPageSize(params.get("pageSize")),
-  };
-}
-
-/** The query as a `URLSearchParams`. Defaults omitted, so the first ask is short. */
-export function buildDemoWebsiteParams(query: DemoWebsiteQuery): URLSearchParams {
-  const params = new URLSearchParams();
-
-  if (query.search.trim() !== "") params.set("q", query.search.trim().slice(0, MAX_SEARCH_LENGTH));
-  if (query.status) params.set("status", query.status);
-  if (query.sort.key !== DEFAULT_DEMO_SORT.key || query.sort.direction !== DEFAULT_DEMO_SORT.direction) {
-    params.set("sort", query.sort.key);
-    params.set("dir", query.sort.direction);
-  }
-  params.set("page", String(query.page));
-  params.set("pageSize", String(query.pageSize));
-
-  return params;
-}
-
-export function readDemoPage(value: string | null | undefined): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 1;
-  return Math.max(1, Math.floor(parsed));
-}
-
-export function readDemoPageSize(value: string | null | undefined): DemoPageSize {
-  const parsed = Number(value);
-  return (DEMO_PAGE_SIZES as readonly number[]).includes(parsed)
-    ? (parsed as DemoPageSize)
-    : DEFAULT_DEMO_PAGE_SIZE;
-}
-
-function readOneOf<T extends string>(
-  value: string | null,
-  allowed: readonly T[],
-  fallback: T,
-): T {
-  return allowed.includes(value as T) ? (value as T) : fallback;
-}
-
-// --- display -----------------------------------------------------------------
-
-/**
- * `2026-08-18T14:02:11Z` -> `18 Aug 2026, 14:02`.
- *
- * `en-GB` explicitly rather than the reader's locale, matching
- * `describeLastLogin` in the user list: the portal is one workspace with one
- * date order, and a table where two administrators read the same column
- * differently is a table that causes an argument.
- */
-export function formatDemoDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-/** The same instant, short, for a table cell: `18 Aug 2026`. */
-export function formatDemoDay(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
+/** Demo metadata for a page of leads, keyed by lead id. Sparse by design. */
+export type DemoSummaryMap = Record<string, DemoSummary>;
