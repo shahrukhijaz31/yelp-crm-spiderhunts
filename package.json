@@ -27,7 +27,9 @@
     "test:work-session-liveness": "tsx scripts/test-work-session-liveness.ts",
     "test:demo-websites": "tsx scripts/test-demo-websites.ts",
     "test:security-offline": "tsx scripts/test-security-offline.ts",
-    "test:security-live": "tsx scripts/test-security-live.ts"
+    "test:security-live": "tsx scripts/test-security-live.ts",
+    "test:capture-health": "tsx scripts/test-capture-health.ts",
+    "test:capture-health-live": "tsx scripts/test-capture-health-live.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

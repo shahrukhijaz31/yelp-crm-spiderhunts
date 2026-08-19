@@ -651,6 +651,23 @@ model MonitorDevice {
   /// Last authenticated request from this device. Not a heartbeat for the work
   /// session — that stays entirely the portal's business.
   lastSeenAt DateTime @default(now()) @map("last_seen_at")
+
+  /// What this workstation last said about its own screenshot subsystem, and
+  /// when the server recorded it.
+  ///
+  /// **A diagnostic, never an authorization or a decision.** A tampered Monitor
+  /// will report `ok` forever, so nothing may branch on this — the control is the
+  /// *absence* of screenshot rows, which a client cannot forge. This exists so an
+  /// administrator can tell a blocked capture directory (`write-failed`) from a
+  /// workstation that was legitimately locked all afternoon, because an alert
+  /// that cannot distinguish those is an alert people stop reading. See
+  /// `lib/captureHealthRules.ts`.
+  ///
+  /// Stamped with the server's clock, like every other instant a workstation
+  /// causes to be written: a doctored system time must not be able to make a
+  /// stale reason look current.
+  captureHealth   String?   @map("capture_health")
+  captureHealthAt DateTime? @map("capture_health_at")
   createdAt  DateTime @default(now()) @map("created_at")
 
   /// When this workstation last had a screenshot **accepted**, and the whole of

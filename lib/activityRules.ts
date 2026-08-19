@@ -350,6 +350,42 @@ export interface EmployeeTimeRow {
   lastActivityAt: string | null;
   /** The open shift's start, or null. */
   currentSessionStartedAt: string | null;
+  /**
+   * Whether screenshots are actually arriving for the open shift, or null when
+   * there is no open shift to judge.
+   *
+   * A third fact alongside `online` and `working`, and here for the same reason
+   * they are both here: an administrator asks a different question. Online means
+   * the portal says they are on the clock; working means input has been observed;
+   * this means the workstation is demonstrably still photographing the screen.
+   * Those can disagree, and the case where they do — clocked on, active, and no
+   * screenshot for hours — is the one worth seeing, because it used to be
+   * invisible. See `lib/captureHealthRules.ts`.
+   */
+  screenshotHealth: EmployeeScreenshotHealth | null;
+}
+
+/**
+ * The screenshot verdict as the dashboard receives it.
+ *
+ * Flattened out of `CaptureHealthVerdict` rather than re-exported, so this file
+ * stays the single description of the dashboard's payload and the rules module
+ * stays free of presentation concerns.
+ */
+export interface EmployeeScreenshotHealth {
+  state: "ok" | "warning" | "unhealthy" | "not-monitored";
+  /** Minutes since the last screenshot arrived, or since the shift began. */
+  gapMinutes: number;
+  /** How many captures the server's cadence implies are missing. */
+  missedIntervals: number;
+  /** What the workstation said, when recent enough to be about now. A label only. */
+  reason: string | null;
+  /** True when the reason explains the gap without implying interference. */
+  benign: boolean;
+  /** The workstation claims capture is healthy and nothing has arrived. */
+  contradicted: boolean;
+  /** One line an administrator can act on. */
+  summary: string;
 }
 
 /** The figures above the employee table. Every one is counted, never estimated. */

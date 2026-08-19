@@ -136,7 +136,7 @@ export { HEARTBEAT_SECONDS };
  * still checks in once a minute, so this window is the *tolerance for silence*
  * and never the resolution at which presence is measured.
  */
-const STALE_MS = 30 * 60 * 1000;
+export const STALE_MS = 30 * 60 * 1000;
 
 /*
  * Prisma stores `DateTime` as `timestamp(3)` — no timezone — holding UTC. Two

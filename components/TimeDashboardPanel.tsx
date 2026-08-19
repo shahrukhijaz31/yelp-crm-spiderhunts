@@ -156,11 +156,12 @@ export default function TimeDashboardPanel({
         </div>
 
         <div className="w-full overflow-x-auto">
-          <table className="w-full min-w-[920px]">
+          <table className="w-full min-w-[1040px]">
             <thead>
               <tr className="border-b border-line">
                 <th scope="col" className="eyebrow px-5 py-2 text-left">Employee</th>
                 <th scope="col" className="eyebrow px-3 py-2 text-left">State</th>
+                <th scope="col" className="eyebrow px-3 py-2 text-left">Screenshots</th>
                 <Head>Today</Head>
                 <Head>This week</Head>
                 <Head>Activity</Head>
@@ -174,7 +175,7 @@ export default function TimeDashboardPanel({
               ))}
               {employees.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-8 text-center text-ui text-fg-3">
+                  <td colSpan={8} className="px-5 py-8 text-center text-ui text-fg-3">
                     No accounts to report on.
                   </td>
                 </tr>
@@ -219,6 +220,10 @@ function EmployeeRow({ employee, asOf }: { employee: EmployeeTimeRow; asOf: stri
 
       <td className="px-3 py-3">
         <StateBadge employee={employee} />
+      </td>
+
+      <td className="px-3 py-3">
+        <ScreenshotHealthBadge health={employee.screenshotHealth} />
       </td>
 
       <Cell>{formatDuration(employee.todaySeconds)}</Cell>
@@ -272,6 +277,70 @@ function StateBadge({ employee }: { employee: EmployeeTimeRow }) {
     <span className="flex items-center gap-2 text-cell text-fg-2">
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
       {employee.activityPercentage === null ? "Online, no data" : "Inactive"}
+    </span>
+  );
+}
+
+/**
+ * Whether screenshots are actually arriving, for an agent who is on the clock.
+ *
+ * ---------------------------------------------------------------------------
+ * Why this column exists
+ * ---------------------------------------------------------------------------
+ * Screenshot capture could be switched off silently by the person being
+ * monitored — a deny ACE on the capture directory makes the write fail before
+ * anything is uploaded, while activity, app-usage and the heartbeat all carry on.
+ * The shift looked perfectly healthy. This is the column that stops that being
+ * invisible.
+ *
+ * The state comes from the *gap* between screenshots the server actually holds
+ * and the cadence the server set, so a tampered workstation cannot talk its way
+ * out of it. The reason underneath comes from the workstation and is a label
+ * only — which is why `contradicted`, where the workstation insists it is fine
+ * and nothing has arrived, gets the loudest treatment on this table.
+ *
+ * The full sentence is on the `title`, so the column stays narrow enough to scan
+ * while the detail is one hover away.
+ */
+function ScreenshotHealthBadge({ health }: { health: EmployeeTimeRow["screenshotHealth"] }) {
+  // Nobody on the clock, so there is nothing to judge. Deliberately not "OK".
+  if (!health) return <span className="text-cell text-fg-4">—</span>;
+
+  if (health.state === "not-monitored") {
+    return (
+      <span className="flex items-center gap-2 text-cell text-fg-4" title={health.summary}>
+        <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-fg-4" />
+        No monitor
+      </span>
+    );
+  }
+
+  if (health.state === "ok") {
+    return (
+      <span className="flex items-center gap-2 text-cell text-fg-2" title={health.summary}>
+        <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
+        Capturing
+      </span>
+    );
+  }
+
+  const critical = health.state === "unhealthy";
+
+  return (
+    <span
+      className={`flex items-center gap-2 text-cell ${critical ? "text-danger" : "text-warning"}`}
+      title={health.summary}
+    >
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${critical ? "bg-danger" : "bg-warning"}`}
+      />
+      <span className="font-medium">{critical ? "Not capturing" : "Behind"}</span>
+      <span className="text-meta text-fg-3">
+        {health.contradicted
+          ? "reports healthy — investigate"
+          : (health.reason ?? `${health.missedIntervals} missed`)}
+      </span>
     </span>
   );
 }

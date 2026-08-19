@@ -1,7 +1,10 @@
 import type { Role } from "./access";
 import { activityPolicy, inactivityThresholdSeconds } from "./activityPolicy";
+import { openSessionCaptureHealth } from "./captureHealth";
+import { describeCaptureHealth } from "./captureHealthRules";
 import type {
   ActivityIntervalCard,
+  EmployeeScreenshotHealth,
   EmployeeTimeRow,
   TeamTimePayload,
   TimeAdjustmentCard,
@@ -478,7 +481,8 @@ export async function teamTimeTracking(
   const now = new Date();
   const policy = activityPolicy();
 
-  const [users, todayIntervals, todayTracked, weekTracked, openSessions] = await Promise.all([
+  const [users, todayIntervals, todayTracked, weekTracked, openSessions, captureHealth] =
+    await Promise.all([
     prisma.user.findMany({
       select: { id: true, name: true, username: true, role: true, isActive: true },
       orderBy: [{ name: "asc" }],
@@ -491,6 +495,13 @@ export async function teamTimeTracking(
       select: { userId: true, startedAt: true },
       orderBy: { startedAt: "asc" },
     }),
+    /*
+     * Screenshot health for the open shifts. Issued alongside the others rather
+     * than after them, so the dashboard costs the same number of round trips it
+     * did before, and it returns an empty map rather than throwing — a missing
+     * badge must not be able to take the page down.
+     */
+    openSessionCaptureHealth(now),
   ]);
 
   // The one-open-session invariant means at most one per user; taking the
@@ -500,6 +511,28 @@ export async function teamTimeTracking(
   for (const row of openSessions) {
     if (!open.has(row.userId)) open.set(row.userId, row.startedAt);
   }
+
+  /**
+   * The verdict for one person, or null when they have no open shift.
+   *
+   * Null rather than a synthetic "ok": there is nothing to judge when nobody is
+   * on the clock, and inventing a healthy answer for an agent who is simply off
+   * duty would make the dashboard's most important column meaningless.
+   */
+  const screenshotHealthFor = (userId: string): EmployeeScreenshotHealth | null => {
+    const verdict = captureHealth.get(userId);
+    if (!verdict) return null;
+
+    return {
+      state: verdict.state,
+      gapMinutes: verdict.gapMinutes,
+      missedIntervals: verdict.missedIntervals,
+      reason: verdict.reason,
+      benign: verdict.benign,
+      contradicted: verdict.contradicted,
+      summary: describeCaptureHealth(verdict),
+    };
+  };
 
   const employees: EmployeeTimeRow[] = users.map((user) => {
     const totals = todayIntervals.get(user.id) ?? ZERO_INTERVALS;
@@ -523,6 +556,7 @@ export async function teamTimeTracking(
       activityPercentage: totals.activityPercentage,
       lastActivityAt: totals.lastActivityAt,
       currentSessionStartedAt: startedAt?.toISOString() ?? null,
+      screenshotHealth: screenshotHealthFor(user.id),
     };
   });
 
