@@ -139,6 +139,24 @@ const PUBLIC_PATHS = new Set<string>([
    */
   "/api/monitor/app-usage",
   /*
+   * The capture-health report. Identical in kind to the three write endpoints
+   * above and exempt for the identical reason: `monitorDevice()` inside the
+   * handler resolves the bearer token against `monitor_devices` and re-reads
+   * role and `isActive` from Postgres on every call, so "public" means exempt
+   * from the cookie check and nothing else.
+   *
+   * What it can write is one column pair on the device that authenticated —
+   * there is no field in the body naming a device, a user or a shift, so a
+   * workstation cannot file a report against anybody else's. The instant is the
+   * server's clock.
+   *
+   * It is a *diagnostic* and never a decision: nothing branches on the value,
+   * because a tampered Monitor would report `ok` forever. The control is the
+   * absence of screenshot rows, which no client can forge. See
+   * `lib/captureHealthRules.ts`.
+   */
+  "/api/monitor/capture-health",
+  /*
    * The screenshot retention sweep, called by the box's own cron
    * (`deploy/leadportal-screenshot-retention`). Same shape as the ingest route:
    * not a browser, no session cookie, its own bearer token checked inside the
