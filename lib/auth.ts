@@ -66,8 +66,14 @@ export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   password_change_required:
     "Your password was reset. Use “Forgot your password?” below and enter the reset code your administrator gave you.",
   too_many_attempts: "Too many sign-in attempts. Try again in a few minutes.",
+  // Deliberately does not say "contact your administrator". Since the ADMIN OTP
+  // bypass was removed, an administrator can meet this message too — and telling
+  // them to contact themselves is the point at which error copy stops helping.
+  // It names the thing that is actually broken instead, which is the same advice
+  // for both roles: someone has to fix mail delivery on the server. Only a
+  // caller who has already supplied a correct password ever reads it.
   email_failed:
-    "We could not send your verification code. Try again in a moment, or contact your administrator.",
+    "We could not send your verification code. Try again in a moment — if it keeps failing, the portal's email delivery needs fixing on the server.",
   network: "Could not reach the server. Check your connection and try again.",
   server: "Something went wrong on our end. Try again in a moment.",
 };

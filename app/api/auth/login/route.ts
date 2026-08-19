@@ -212,7 +212,8 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json(
       {
         error: "email_failed",
-        message: "Verification codes cannot be sent right now. Contact your administrator.",
+        message:
+          "Verification codes cannot be sent, so nobody can sign in until the portal's email delivery is fixed on the server.",
       },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
