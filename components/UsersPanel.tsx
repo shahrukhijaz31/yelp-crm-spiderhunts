@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { KeyRound, Trash2 } from "lucide-react";
 
+import PasswordField from "./PasswordField";
 import ResetPasswordDialog from "./ResetPasswordDialog";
 import type { Role } from "@/lib/access";
 import { MODULE_HINTS, MODULE_LABELS, PORTAL_MODULES, type PortalModule } from "@/lib/modules";
@@ -299,41 +300,20 @@ export default function UsersPanel({
               </button>
 
               {settingPasswordId === user.id && (
-                <form
-                  className="flex w-full items-end gap-2 border-t border-line pt-3"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    const value = new FormData(event.currentTarget).get("password");
+                <SetPasswordForm
+                  userName={user.name}
+                  busy={busy}
+                  onSubmit={(password) => {
                     void patchUser(
                       user.id,
-                      { password: String(value ?? "") },
+                      { password },
                       // Their sessions end with the change, so whoever is using
                       // the old password is signed out rather than left on a
                       // page that will start refusing them.
                       `${user.name}'s password has been changed. They have been signed out.`,
                     ).then(() => setSettingPasswordId(null));
                   }}
-                >
-                  <label className="flex flex-1 flex-col gap-1.5">
-                    <span className="field-label">
-                      New password for {user.name} ({PASSWORD_MIN_LENGTH}+ characters)
-                    </span>
-                    <input
-                      name="password"
-                      type="password"
-                      autoComplete="new-password"
-                      required
-                      className="ui-field"
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="ui-btn ui-btn-primary"
-                  >
-                    Set
-                  </button>
-                </form>
+                />
               )}
 
               {/* Delete. Last in the row and the only ghost-to-danger control
@@ -595,6 +575,58 @@ function humanJoin(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+/**
+ * "Set password", opened under one row at a time.
+ *
+ * A component rather than markup inline in the row loop, and the reason is the
+ * password itself. `PasswordField` is controlled, so the value has to live in
+ * React state — and state held by `UsersPanel` would outlive this form, so
+ * closing it under one person and opening it under the next would show the
+ * first one's half-typed password in the second one's box. Here it is owned by
+ * a component that only exists while the form is open, so closing it is what
+ * destroys the value; there is nothing left to leak into the next row.
+ */
+function SetPasswordForm({
+  userName,
+  busy,
+  onSubmit,
+}: {
+  userName: string;
+  busy: boolean;
+  /** The password to set. The caller owns the request and the closing. */
+  onSubmit: (password: string) => void;
+}) {
+  const [password, setPassword] = useState("");
+
+  return (
+    <form
+      className="flex w-full items-end gap-2 border-t border-line pt-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit(password);
+      }}
+    >
+      {/* The field carries the flex-grow rather than `PasswordField` itself,
+          which has no opinion about the row it sits in. */}
+      <div className="flex-1">
+        <PasswordField
+          label={`New password for ${userName} (${PASSWORD_MIN_LENGTH}+ characters)`}
+          value={password}
+          onChange={setPassword}
+          autoComplete="new-password"
+          disabled={busy}
+          placeholder=""
+          required
+          compact
+        />
+      </div>
+      <button type="submit" disabled={busy} className="ui-btn ui-btn-primary">
+        Set
+      </button>
+    </form>
+  );
+}
+
 function NewUserForm({
   onDone,
   onError,
@@ -603,6 +635,16 @@ function NewUserForm({
   onError: (message: string) => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  /*
+   * The one field on this form React holds rather than reads back on submit.
+   *
+   * `PasswordField` is controlled — it has to be, since the reveal toggle swaps
+   * the input's `type` and an uncontrolled value would not survive that — so the
+   * password comes from state while everything else still comes from `FormData`.
+   * It is never defaulted and never read anywhere else; the form unmounts on
+   * success, which is what clears it.
+   */
+  const [password, setPassword] = useState("");
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -617,7 +659,7 @@ function NewUserForm({
           name: form.get("name"),
           username: form.get("username"),
           email: form.get("email"),
-          password: form.get("password"),
+          password,
           role: form.get("role"),
           canAccessLeads: form.get("leads") === "on",
           canAccessDemoWebsites: form.get("demoWebsites") === "on",
@@ -685,12 +727,20 @@ function NewUserForm({
         </p>
       </fieldset>
 
-      <Field
+      {/* The same input, and the same reveal toggle, as every other password
+          box in the app. Both boxes on this screen were plain `type="password"`
+          until now, which was backwards: this is the one screen where the
+          typist is not the person who will use the password, so being able to
+          read back what you just typed matters more here than anywhere. */}
+      <PasswordField
         label={`Password (${PASSWORD_MIN_LENGTH}+ characters)`}
-        name="password"
-        type="password"
+        value={password}
+        onChange={setPassword}
         autoComplete="new-password"
+        disabled={submitting}
+        placeholder=""
         required
+        compact
       />
 
       <button

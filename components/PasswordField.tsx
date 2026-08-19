@@ -31,6 +31,8 @@ export default function PasswordField({
   error,
   hint,
   placeholder = "••••••••",
+  required,
+  compact,
 }: {
   label: string;
   value: string;
@@ -41,6 +43,23 @@ export default function PasswordField({
   error?: string;
   hint?: string;
   placeholder?: string;
+  /**
+   * Native validation, for the forms that submit rather than validate as they
+   * type. The password dialogs check their own rules and have no use for it;
+   * "New user" wants the browser to refuse an empty submit before the request
+   * is made.
+   */
+  required?: boolean;
+  /**
+   * Sit at `.ui-field`'s own 2.25rem instead of the roomier 2.5rem.
+   *
+   * The password dialogs are a column of password inputs and nothing else, so
+   * the taller field is right there. In a form of ordinary `.ui-field` rows —
+   * name, username, email, role — a 4px-taller password box is the one control
+   * that does not line up, which is exactly the sort of thing this component
+   * exists to stop.
+   */
+  compact?: boolean;
 }) {
   const id = useId();
   const [revealed, setRevealed] = useState(false);
@@ -65,12 +84,13 @@ export default function PasswordField({
           // just opened, which is where the caret already belongs.
           autoFocus={autoFocus}
           disabled={disabled}
+          required={required}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
           placeholder={placeholder}
           // Right padding clears the reveal button, so a long password scrolls
           // under the label rather than behind the icon.
-          className="ui-field h-10 w-full pr-11"
+          className={`ui-field w-full pr-11 ${compact ? "" : "h-10"}`}
         />
 
         <button
@@ -80,7 +100,9 @@ export default function PasswordField({
           aria-pressed={revealed}
           aria-controls={id}
           title={revealed ? "Hide password" : "Show password"}
-          className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-fg-3 transition-all duration-150 hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg active:scale-90 disabled:cursor-not-allowed disabled:opacity-55"
+          className={`absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center justify-center rounded-md text-fg-3 transition-all duration-150 hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg active:scale-90 disabled:cursor-not-allowed disabled:opacity-55 ${
+            compact ? "h-7 w-7" : "h-8 w-8"
+          }`}
         >
           {revealed ? (
             <EyeOff className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
