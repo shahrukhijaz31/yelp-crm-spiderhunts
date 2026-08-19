@@ -21,11 +21,12 @@ import { findUserForLogin } from "@/lib/userDb";
  * the two ends can carry — no cookies, so the challenge token comes back in the
  * body — and one rule that is *stricter*, not looser:
  *
- * **There is no bypass here.** The web route lets an ADMIN finish on the
- * password alone (a documented, deliberately removable block). This route
- * refuses administrators outright and requires the emailed code from every
- * account it does admit. A workstation that will later be capturing screenshots
- * is exactly where the second factor should not be optional.
+ * **There is no bypass here, and there is no longer one on the web route
+ * either.** This route has always refused administrators outright and demanded
+ * the emailed code from every account it admits; the web route used to let an
+ * ADMIN finish on the password alone, and no longer does. The stricter rule
+ * that remains is the *role* one: a workstation that will be capturing
+ * screenshots admits agents only, whoever asks.
  *
  * **A correct password produces no authority.** Its entire output is a
  * challenge token: 32 random bytes that name nobody, grant nothing, and are

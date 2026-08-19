@@ -10,11 +10,11 @@ import { reconcileStaleWorkSessions } from "@/lib/workSessions";
  * POST /api/auth/otp/verify — redeem the emailed code for a real session.
  *
  * This is the route that turns an anonymous request into an identified one for
- * every account that goes through the OTP step — which today is every AGENT.
- * (Administrators currently finish at the login route itself; see the bypass
- * block there.) Both paths call the same `completeSignIn`, so the session a
- * user ends up with is identical either way, and identical to the one they had
- * before the OTP step existed.
+ * every account, of every role, without exception. Administrators used to
+ * finish at the login route on the password alone; that bypass is gone, so this
+ * is now the *only* place in the web app where a session is minted. The session
+ * a user ends up with is identical to the one they had before the OTP step
+ * existed — what changed is that nothing else can produce it.
  *
  * Roles in particular are untouched: nothing here reads or writes `role`, and
  * the session carries an opaque token, so an agent gets an agent session and an

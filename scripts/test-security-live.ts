@@ -3,7 +3,9 @@ import { createHash, randomBytes } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { config as loadEnv } from "dotenv";
 
+import { completeSignIn } from "../lib/completeSignIn";
 import { PrismaClient } from "../lib/generated/prisma/client";
+import { clientIp } from "../lib/loginThrottle";
 import { hashPassword } from "../lib/password";
 
 /**
@@ -177,8 +179,18 @@ async function lp01(): Promise<void> {
 
   const admin = await createUser("ADMIN", "ip");
 
-  // Administrators finish their sign-in on the password alone (the documented
-  // bypass in the login route), so this one request mints a real session.
+  /*
+   * This used to sign the administrator in with one request, because that role
+   * finished on the password alone. It does not any more — the bypass was
+   * removed and every role now redeems an emailed code — so the check is in two
+   * halves, and the first half is a stronger property than the one it replaces.
+   *
+   * A test cannot read the mailbox and the code is stored as a scrypt hash, so
+   * the session-minting half is exercised against `completeSignIn` directly,
+   * fed by the same `clientIp` the verify route feeds it. That is the whole of
+   * what LP-01 was ever about: the address written to `sessions.ip_address` is
+   * derived by the server from a trusted hop count, never copied from a header.
+   */
   const login = await call("/api/auth/login", {
     method: "POST",
     headers: {
@@ -192,28 +204,54 @@ async function lp01(): Promise<void> {
 
   if (login.status !== 200) {
     skip(
-      "the spoofed address is not recorded on the session",
+      "a correct administrator password mints no session",
       `login answered ${login.status} (an earlier run may still have the IP window shut)`,
     );
   } else {
-    const session = await prisma.session.findFirst({
-      where: { userId: admin.id },
-      orderBy: { createdAt: "desc" },
-      select: { ipAddress: true },
-    });
+    const body = (await login.json().catch(() => null)) as { otpRequired?: unknown } | null;
     check(
-      "the spoofed address is not recorded on the session",
-      session !== null && session.ipAddress !== SPOOFED_IP,
-      `ip_address=${session?.ipAddress ?? "no session row"}`,
+      "a correct administrator password mints no session",
+      (await prisma.session.count({ where: { userId: admin.id } })) === 0,
+      `otpRequired=${String(body?.otpRequired)}`,
     );
-    // In development `TRUSTED_PROXY_HOPS` defaults to 0, so the honest answer is
-    // "no proxy said, therefore unknown" rather than anything the caller wrote.
     check(
-      "…it is the shared bucket, since this server has no proxy in front of it",
-      session?.ipAddress === "unknown",
-      `ip_address=${session?.ipAddress}`,
+      "…it demands the emailed code, like every other role",
+      body?.otpRequired === true,
+      `otpRequired=${String(body?.otpRequired)}`,
     );
   }
+
+  // The address the server would record, derived from the same spoofed headers
+  // by the same function the verify route uses.
+  const spoofed = new Request(`${BASE_URL}/api/auth/otp/verify`, {
+    method: "POST",
+    headers: {
+      "x-forwarded-for": `${SPOOFED_IP}, 10.9.9.9`,
+      "x-real-ip": SPOOFED_IP,
+    },
+  });
+  await completeSignIn(admin.id, {
+    userAgent: "security-live-test",
+    ipAddress: clientIp(spoofed),
+  });
+
+  const session = await prisma.session.findFirst({
+    where: { userId: admin.id },
+    orderBy: { createdAt: "desc" },
+    select: { ipAddress: true },
+  });
+  check(
+    "the spoofed address is not recorded on the session",
+    session !== null && session.ipAddress !== SPOOFED_IP,
+    `ip_address=${session?.ipAddress ?? "no session row"}`,
+  );
+  // In development `TRUSTED_PROXY_HOPS` defaults to 0, so the honest answer is
+  // "no proxy said, therefore unknown" rather than anything the caller wrote.
+  check(
+    "…it is the shared bucket, since this server has no proxy in front of it",
+    session?.ipAddress === "unknown",
+    `ip_address=${session?.ipAddress}`,
+  );
 
   section("LP-01  a spoofed X-Forwarded-For does not reset the IP throttle");
 

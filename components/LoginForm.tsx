@@ -168,8 +168,11 @@ export default function LoginForm({
         setChecked(false);
 
         if (!result.otpRequired) {
-          // Administrators, who skip the second factor — a session already
-          // exists, so this is the same navigation the form did before OTP.
+          // No account takes this branch any more — the administrator bypass it
+          // was written for is gone, and every role now redeems a code. It is
+          // kept rather than deleted because it is the only correct thing to do
+          // with a server that says a session already exists, and a form that
+          // dropped the case would strand that user on the login screen.
           //
           // `replace`, not `push`: the login page should not be a Back
           // destination once you are through it. `refresh` as well, because the
@@ -180,7 +183,7 @@ export default function LoginForm({
           return;
         }
 
-        // Agents: the password was right, and that is all it was. No session
+        // Every role: the password was right, and that is all it was. No session
         // exists yet; a code is in the post and the screen moves to the boxes.
         setChallenge(result.challenge);
         return;

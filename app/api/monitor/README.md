@@ -200,8 +200,8 @@ one of them. `npm run screenshots:retention` runs the same code by hand.
 
 - **AGENT only.** `checkMonitorEligibility` refuses administrators, at sign-in
   and again on every authenticated request, because a role can change in
-  between. The web app's ADMIN OTP bypass has no counterpart here: every Monitor
-  sign-in requires the emailed code.
+  between. Every Monitor sign-in requires the emailed code — as, since the
+  administrator bypass was removed, does every web sign-in.
 - **No path to a token except through the code.** `issueDeviceTokens` is reached
   only from `/auth/verify`, and only after `verifyLoginOtpForChallenge` has
   returned a user id.

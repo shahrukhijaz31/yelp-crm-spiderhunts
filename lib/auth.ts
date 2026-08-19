@@ -32,12 +32,15 @@ export type AuthErrorCode =
   | "server";
 
 export type SignInResult =
-  /** The password was right and a code is in the post. Agents take this path. */
+  /** The password was right and a code is in the post. Every role takes this path. */
   | { ok: true; otpRequired: true; redirectTo: string; challenge: PendingChallenge }
   /**
    * The password was right and that was the whole sign-in — a session already
-   * exists. Today only administrators reach this, via the bypass block in
-   * `app/api/auth/login/route.ts`.
+   * exists. **No account reaches this any more.** It described the administrator
+   * bypass in `app/api/auth/login/route.ts`, which has been removed; the variant
+   * is kept because it costs nothing and because a client that stops handling it
+   * would be a client that breaks silently if the server ever answers this way
+   * again.
    *
    * The two are told apart by `otpRequired` rather than by the presence of
    * `challenge`, so the branch is on a field that is always there. A client

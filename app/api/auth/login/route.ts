@@ -1,7 +1,5 @@
 import { safeCallbackUrl } from "@/lib/access";
-import { landingRedirectFor } from "@/lib/moduleAccess";
-import { completeSignIn } from "@/lib/completeSignIn";
-import { issueLoginOtp, pruneExpiredLoginOtps } from "@/lib/loginOtp";
+import { issueLoginOtp } from "@/lib/loginOtp";
 import {
   checkLoginAllowed,
   clearLoginFailures,
@@ -10,25 +8,29 @@ import {
 } from "@/lib/loginThrottle";
 import { isMailConfigured } from "@/lib/mail";
 import { hashPassword, verifyPassword } from "@/lib/password";
-import { pruneExpiredSessions } from "@/lib/session";
 import { findUserForLogin } from "@/lib/userDb";
-import { reconcileStaleWorkSessions } from "@/lib/workSessions";
 
 /**
- * POST /api/auth/login — check a username and password, then either email a
- * code or (for administrators) finish the sign-in.
+ * POST /api/auth/login — check a username and password, then email a code.
  *
- * **An AGENT is not signed in by this route.** Their path ends at
- * `issueLoginOtp`, and the session is minted by `POST /api/auth/otp/verify`
- * once the emailed code comes back.
+ * **Nobody is signed in by this route.** Every path ends at `issueLoginOtp`,
+ * and the session is minted by `POST /api/auth/otp/verify` once the emailed
+ * code comes back.
  *
- * **An ADMIN currently is**, via the clearly-marked bypass block below — the
- * second factor is switched off for that role at the client's request, and the
- * block is written so that switching it back on means deleting the block and
- * nothing else.
+ * That now includes administrators. The role used to finish here on the
+ * password alone, through a marked bypass block; the second factor was switched
+ * back on for every role at the client's request, and the block is gone rather
+ * than commented out — one path, no role test, nothing to re-enable by
+ * accident. `landingRedirectFor` moved with it to the verify route, which is
+ * where every sign-in now ends.
  *
- * Everything before that fork is untouched, because everything before it was
- * already right:
+ * **The cost of that, stated plainly: no mail, no sign-in, for anyone.** The
+ * account that used to be able to get in and repair the mail settings was the
+ * administrator, and it cannot any more. See the `isMailConfigured` guard
+ * below, which is now the whole front door.
+ *
+ * Everything before the code is issued is untouched, because it was already
+ * right:
  *
  *   - Wrong username and wrong password are the same answer, `invalid`, with
  *     the same timing. A login form that answers faster for accounts that do
@@ -40,7 +42,7 @@ import { reconcileStaleWorkSessions } from "@/lib/workSessions";
  *     password check, so a clear answer reaches only someone who already knew
  *     the password.
  *
- * What the split buys, on the agent path, is that a correct password produces
+ * What the split buys is that a correct password produces
  * no authority at all. The pending state it leaves behind is a row in
  * `login_otps` and a browser-session cookie that names nobody
  * (`lib/loginOtp.ts`); no guard in the app reads either, so there is no version
@@ -189,72 +191,21 @@ export async function POST(request: Request): Promise<Response> {
    */
   clearLoginFailures(username);
 
-  /* ======================================================================= *
-   * ADMIN OTP BYPASS — administrators sign in on the password alone.
-   *
-   * Turned off for admins at the client's request, and written as one
-   * self-contained block so it can be switched back on by deleting it (or
-   * commenting it out) and nothing else. Everything the second factor needs is
-   * still here and still working: the table, the routes, the email, the screen.
-   * Only this early return stands between an ADMIN and the OTP step, and the
-   * AGENT path below is untouched.
-   *
-   * TO REQUIRE OTP FOR ADMINISTRATORS AGAIN: comment out or delete this whole
-   * block, from the `if` to the closing brace. Nothing else changes — the OTP
-   * path below already handles every role, and the client already handles a
-   * response with `otpRequired: true` for any account.
-   *
-   * Note what this deliberately does NOT do: it does not weaken anything for
-   * agents, and it does not give an administrator a *different* session. Both
-   * roles land in `completeSignIn`, so an admin session is minted, clocked and
-   * expired exactly as it has always been — the only difference is how many
-   * factors were checked on the way in.
-   * ======================================================================= */
-  if (user.role === "ADMIN") {
-    try {
-      await completeSignIn(user.id, {
-        userAgent: request.headers.get("user-agent"),
-        ipAddress: ip,
-      });
-    } catch (error) {
-      console.error("POST /api/auth/login: could not create session:", error);
-      return Response.json(
-        {
-          error: "database_unavailable",
-          message: "Signed in, but the session could not be saved. Try again.",
-        },
-        { status: 503, headers: { "Cache-Control": "no-store" } },
-      );
-    }
-
-    // The same opportunistic housekeeping the OTP route runs, because for an
-    // administrator this *is* the end of the sign-in.
-    void pruneExpiredSessions();
-    void reconcileStaleWorkSessions();
-    void pruneExpiredLoginOtps();
-
-    // `otpRequired: false` is stated rather than left to be inferred from a
-    // missing `challenge`: the client branches on this one field, so the two
-    // outcomes of this route are told apart by a value that is always present.
-    return Response.json(
-      // Where an account with no requested destination actually belongs. For an
-      // administrator that is always the worklist; the call is made anyway so
-      // both sign-in routes answer this question in one place, and so a future
-      // module cannot be added to one path and forgotten on the other. See
-      // `landingRedirectFor`.
-      { ok: true, otpRequired: false, redirectTo: await landingRedirectFor(user.id, redirectTo) },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  }
-  /* ===================== end ADMIN OTP BYPASS ============================ */
-
   /*
-   * Checked here rather than at the top of the route, and only on the path that
-   * actually needs to send something: without SMTP no code can be sent, and
-   * this route must never fall back to issuing a session on the password alone.
-   * It fails closed for the accounts that require a code — and leaves an
-   * administrator able to sign in and fix the mail settings, which is the one
-   * account you want working when mail is down.
+   * Checked here rather than at the top of the route, and only once there is
+   * something to send: without SMTP no code can be sent, and this route must
+   * never fall back to issuing a session on the password alone.
+   *
+   * It now fails closed for **every** account, administrators included. That is
+   * the deliberate consequence of requiring a second factor of the role that
+   * used to be exempt, and it is worth being explicit about: while SMTP is
+   * broken, nobody can sign in to this portal at all, and the way back in is
+   * server access — fix the mail settings, or mint a session row by hand — not
+   * a login form. The alternative is an administrator password that is a single
+   * factor forever, which is the thing this change was asked to remove.
+   *
+   * Checked after the password, not before, so a caller who does not already
+   * hold a valid password learns nothing about the mail configuration.
    */
   if (!isMailConfigured()) {
     console.error("POST /api/auth/login: SMTP is not configured; sign-in refused.");
