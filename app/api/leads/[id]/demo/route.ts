@@ -1,19 +1,21 @@
 import { apiModule } from "@/lib/authz";
 import { DemoWebsiteError } from "@/lib/demoWebsiteRules";
-import { demoSummaryFor, setDemoLink } from "@/lib/demoWebsites";
+import { demoSummaryFor, setDemoFields, type DemoFieldPatch } from "@/lib/demoWebsites";
 
 /**
- * The demo link on one lead.
+ * The demo fields on one lead: the two links and the comments.
  *
- *   GET    the lead's demo metadata — the link and the image's shape
- *   PATCH  set or clear the link
+ *   GET    the lead's demo metadata — the links, the comments, the image's shape
+ *   PATCH  set or clear any of them
  *
  * ---------------------------------------------------------------------------
  * Why this is a route of its own rather than part of `PATCH /api/leads/:id`
  * ---------------------------------------------------------------------------
  * Because it is granted differently. The lead's own fields — status, notes,
- * callback — are editable by anyone with either module, and the demo link is
- * editable only with the Demo Websites module. Folding it into the lead PATCH
+ * callback — are editable by anyone with either module, and the demo fields are
+ * editable only with the Demo Websites module. That is also why the demo
+ * comments live here and not beside `leads.notes`: they are about the demo, and
+ * they are written under the demo permission. Folding it into the lead PATCH
  * would mean one handler holding two permission rules and picking between them
  * by inspecting which keys the body happened to contain, which is exactly the
  * shape of check that gets a case wrong later.
@@ -27,7 +29,7 @@ import { demoSummaryFor, setDemoLink } from "@/lib/demoWebsites";
  * What it cannot touch
  * ---------------------------------------------------------------------------
  * Any lead field. There is no `name`, `phone`, `status`, `notes` or `owner` in
- * this handler, in `setDemoLink`, or in the table it writes — the demo view
+ * this handler, in `setDemoFields`, or in the table it writes — the demo view
  * reads all of those from `leads` on every request, so there is nothing here to
  * fall out of step. A body carrying them sets nothing, because nothing reads
  * them.
@@ -74,15 +76,24 @@ export async function GET(
 }
 
 /**
- * PATCH — set or clear the demo link.
+ * PATCH — set or clear any of the demo fields.
  *
- * `{ "demoUrl": "https://…" }` sets it, `{ "demoUrl": null }` clears it. The
- * URL is validated server-side by `normaliseDemoUrl`: http and https only,
- * rejecting `javascript:`, `data:`, `file:`, embedded credentials and anything
- * with no domain. The cell runs the same check before submitting, which saves a
- * round trip and protects nothing — this is the one that decides what is
- * stored.
+ * `{ "demoUrl": "https://…" }` sets link 1, `{ "demoUrl2": null }` clears link
+ * 2, `{ "demoComments": "…" }` sets the comments. **Only the keys present are
+ * written**, so saving one field never blanks another, and a key present with
+ * `null` is a deliberate clear.
+ *
+ * The URLs are validated server-side by `normaliseDemoUrl`: http and https
+ * only, rejecting `javascript:`, `data:`, `file:`, embedded credentials and
+ * anything with no domain. The comments go through `normaliseDemoComments`,
+ * which caps the length and treats empty text as no text. The client runs the
+ * same checks before submitting, which saves a round trip and protects nothing
+ * — these are the ones that decide what is stored.
  */
+
+/** The keys a body may carry. Anything else in it is read by nobody. */
+const WRITABLE_FIELDS = ["demoUrl", "demoUrl2", "demoComments"] as const;
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -103,7 +114,16 @@ export async function PATCH(
   }
 
   const payload = (body ?? {}) as Record<string, unknown>;
-  if (!("demoUrl" in payload)) {
+
+  // Copied key by key from a fixed list rather than spread wholesale: the patch
+  // that reaches the database can only ever contain these three names, whatever
+  // else the body happened to hold.
+  const patch: DemoFieldPatch = {};
+  for (const field of WRITABLE_FIELDS) {
+    if (field in payload) patch[field] = payload[field];
+  }
+
+  if (Object.keys(patch).length === 0) {
     return Response.json(
       { error: "no_changes", message: "Nothing to change." },
       { status: 400, headers: noStore },
@@ -113,7 +133,7 @@ export async function PATCH(
   try {
     // `auth.id` — the user the session row resolved to, never anything the body
     // claimed. There is no author field in the request.
-    const demo = await setDemoLink(id, payload.demoUrl, auth.id);
+    const demo = await setDemoFields(id, patch, auth.id);
     if (!demo) return notFound();
 
     return Response.json({ demo }, { headers: noStore });
@@ -126,7 +146,7 @@ export async function PATCH(
     }
     console.error(`PATCH /api/leads/${id}/demo failed:`, error);
     return Response.json(
-      { error: "server_error", message: "The demo link was not saved." },
+      { error: "server_error", message: "The demo details were not saved." },
       { status: 500, headers: noStore },
     );
   }

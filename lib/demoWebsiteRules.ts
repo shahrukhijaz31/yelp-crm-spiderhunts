@@ -193,6 +193,53 @@ function hasControlCharacter(value: string): boolean {
   return false;
 }
 
+// --- the demo comments -------------------------------------------------------
+
+/**
+ * The longest the demo comments may be.
+ *
+ * The same kind of limit {@link MAX_URL_LENGTH} is and for the same reason —
+ * not a security boundary, but the thing that stops one row from being a
+ * megabyte of pasted text. Generous, because this is a notes field and being
+ * cut off mid-sentence while describing a demo is the worse failure.
+ */
+export const MAX_COMMENTS_LENGTH = 4000;
+
+/**
+ * Validate and normalise the demo comments.
+ *
+ * `null` and a string that is empty once trimmed both mean "there are no
+ * comments", and both are stored as NULL — so the column has one empty value
+ * rather than two, and "has comments" is `IS NOT NULL` everywhere.
+ *
+ * Unlike a URL this is never parsed, never resolved and never rendered as
+ * anything but text: React escapes it on the way out, so there is nothing to
+ * strip here. Only the two things that are genuinely not text are refused —
+ * a non-string, and anything over the limit. NUL is dropped rather than
+ * refused, because it is the one character Postgres will not accept in a text
+ * value and a person who pasted one did not type it.
+ */
+export function normaliseDemoComments(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+
+  if (typeof raw !== "string") {
+    throw new DemoWebsiteError("invalid_comments", "The demo comments must be text.", 400);
+  }
+
+  const value = raw.replace(/ /g, "").trim();
+  if (value === "") return null;
+
+  if (value.length > MAX_COMMENTS_LENGTH) {
+    throw new DemoWebsiteError(
+      "invalid_comments",
+      `Those demo comments are too long (limit ${MAX_COMMENTS_LENGTH} characters).`,
+      400,
+    );
+  }
+
+  return value;
+}
+
 /** `https://example-demo.com/menu` -> `example-demo.com` for a table cell. */
 export function demoUrlHost(href: string): string {
   try {
@@ -216,7 +263,8 @@ export interface DemoImageMeta {
 /**
  * One lead's demo metadata.
  *
- * Deliberately **only** the two demo fields and nothing about the lead. The
+ * Deliberately **only** the demo's own fields — the two links, the comments
+ * and the image's shape — and nothing about the lead. The
  * name, the phone, the status and the notes travel in the `Lead` beside this,
  * read from `leads` on the same request — see the note on the `DemoWebsite`
  * model in `schema.prisma` for why they must never be copied in here.
@@ -231,10 +279,31 @@ export interface DemoImageMeta {
  */
 export interface DemoSummary {
   leadId: string;
+  /** Demo link 1. Independent of {@link DemoSummary.demoUrl2}. */
   demoUrl: string | null;
+  /** Demo link 2. A lead may have this one and not the first. */
+  demoUrl2: string | null;
+  /** Free text about the demo. Never the lead's call notes — a different
+   *  column in a different table behind a different permission. */
+  demoComments: string | null;
   image: DemoImageMeta | null;
   updatedAt: string;
 }
+
+/**
+ * Which demo link a control is editing.
+ *
+ * The two are the same field twice over — same validator, same endpoint, same
+ * cell component — so they are told apart by this rather than by two copies of
+ * the code that differ only in a property name.
+ */
+export type DemoLinkField = "demoUrl" | "demoUrl2";
+
+/** What each link is called on screen. One place, so the two never disagree. */
+export const DEMO_LINK_LABELS: Record<DemoLinkField, string> = {
+  demoUrl: "Demo link 1",
+  demoUrl2: "Demo link 2",
+};
 
 /** Demo metadata for a page of leads, keyed by lead id. Sparse by design. */
 export type DemoSummaryMap = Record<string, DemoSummary>;

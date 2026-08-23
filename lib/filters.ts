@@ -28,6 +28,42 @@ export const CALLBACK_RANGE_LABELS: Record<CallbackRange, string> = {
   custom: "Custom date range",
 };
 
+/**
+ * The demo filter, and the only filter in this file that is **not** a property
+ * of the lead.
+ *
+ * Every other filter here reads a column on `leads`. This one asks whether the
+ * lead has a row in `demo_websites` and what is on it, which is a join — so it
+ * is evaluated in SQL only (`leadFilterSql`) and `matchesFilters` below cannot
+ * answer it. That is not a gap: the demo view is server-paged, and the one
+ * caller of `matchesFilters` (`LeadsProvider`, for Export and Meetings) never
+ * sets this.
+ *
+ * Five states rather than a checkbox, because "has a demo" and "has no demo"
+ * are both things an agent actually looks for — the first to find something to
+ * present, the second to find the next site to build.
+ */
+export const DEMO_FILTERS = ["all", "any", "none", "image", "link"] as const;
+
+export type DemoFilter = (typeof DEMO_FILTERS)[number];
+
+export const DEMO_FILTER_LABELS: Record<DemoFilter, string> = {
+  all: "All leads",
+  any: "Has a demo",
+  none: "No demo yet",
+  image: "Has an image",
+  link: "Has a link",
+};
+
+/** One line each, for the tooltip on a filter that is otherwise two words. */
+export const DEMO_FILTER_HINTS: Record<DemoFilter, string> = {
+  all: "Every lead, with or without demo content.",
+  any: "Leads with a demo image, a demo link, or both.",
+  none: "Leads nothing has been built for yet.",
+  image: "Leads with a demo image uploaded.",
+  link: "Leads with a demo link saved.",
+};
+
 export interface LeadFilters {
   /** Free text over name, address, phone, notes and owner. */
   query: string;
@@ -41,6 +77,13 @@ export interface LeadFilters {
   /** Inclusive ISO bounds, only read when `callback` is `custom`. */
   callbackFrom: string | null;
   callbackTo: string | null;
+  /**
+   * Demo content. Only ever set by the Demo Websites view — the worklist does
+   * not offer it and `parseLeadSearchParams` will not read it outside that
+   * section, so a hand-edited worklist URL cannot arrive carrying a filter that
+   * screen has no control to clear.
+   */
+  demo: DemoFilter;
 }
 
 export const EMPTY_FILTERS: LeadFilters = {
@@ -52,6 +95,7 @@ export const EMPTY_FILTERS: LeadFilters = {
   callback: "all",
   callbackFrom: null,
   callbackTo: null,
+  demo: "all",
 };
 
 /** Selectable rating steps, matching the half-star values Yelp reports. */
@@ -161,6 +205,16 @@ function toIso(date: Date): string {
   ].join("-");
 }
 
+/**
+ * Does this lead match?
+ *
+ * **`filters.demo` is deliberately not evaluated here.** It asks about a row in
+ * another table, and a `Lead` does not carry one — see the note on
+ * {@link DEMO_FILTERS}. The only caller is `LeadsProvider`, which serves Export
+ * and Meetings and never sets it; the Demo Websites view is server-paged and
+ * gets the clause from `leadFilterSql`. Answering "true" for a filter this
+ * function cannot see would be a silent lie, so it is stated instead.
+ */
 export function matchesFilters(
   lead: Lead,
   filters: LeadFilters,
@@ -246,6 +300,14 @@ export function describeActiveFilters(filters: LeadFilters): FilterChip[] {
       id: "rating",
       label,
       next: { ...filters, ratingMin: null, ratingMax: null },
+    });
+  }
+
+  if (filters.demo !== "all") {
+    chips.push({
+      id: "demo",
+      label: DEMO_FILTER_LABELS[filters.demo],
+      next: { ...filters, demo: "all" },
     });
   }
 

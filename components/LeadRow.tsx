@@ -248,7 +248,7 @@ export default function LeadRow({
           Which action that is depends on the view, and they are mutually
           exclusive: the worklist offers the call recording (see
           `RowRecordingButton` for why an ineligible lead shows nothing at all),
-          and the demo view offers the image and the link. **The demo view draws
+          and the demo view offers the image and the two links. **The demo view draws
           no audio control**, which is the one hard difference between the two
           tables. */}
       {/* `relative` so a failed upload's message can be floated out of a cell
@@ -268,6 +268,18 @@ export default function LeadRow({
               leadId={lead.id}
               leadName={lead.name}
               demo={demo}
+              field="demoUrl"
+              onSaved={(leadId, saved) => onDemoSaved?.(leadId, saved)}
+            />
+          </td>
+          {/* The second link, and the same cell component: the two are the same
+              field twice over, and the server treats them identically. */}
+          <td className="relative min-w-0 px-3 py-2">
+            <DemoLinkCell
+              leadId={lead.id}
+              leadName={lead.name}
+              demo={demo}
+              field="demoUrl2"
               onSaved={(leadId, saved) => onDemoSaved?.(leadId, saved)}
             />
           </td>

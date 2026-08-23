@@ -1315,7 +1315,25 @@ model DemoWebsite {
   /// https only, no credentials, no `javascript:` — by `normaliseDemoUrl` in
   /// `lib/demoWebsiteRules.ts`. Nullable: a lead may have an image and no link,
   /// or a link and no image, and a row exists as soon as either is set.
+  /// The first of the two demo links. Both are validated the same way, both
+  /// are optional and independent — a lead may have the second and not the
+  /// first — and neither means anything to the other.
   demoUrl String? @map("demo_url")
+
+  /// The second demo link. A separate column rather than an array because the
+  /// two are labelled, not ordered: the screen says "Demo link 1" and "Demo
+  /// link 2", an agent fills in whichever they have, and a query that asks
+  /// "does this lead have a link" ORs two nullable columns rather than
+  /// unnesting an array.
+  demoUrl2 String? @map("demo_url_2")
+
+  /// Free text about the demo, written by whoever built or presented it. The
+  /// demo view's counterpart to the lead's call notes, and deliberately *not*
+  /// stored on `leads`: it is about the demo, it is editable only with the
+  /// Demo Websites module, and it is saved by the same PATCH as the links
+  /// rather than by the workspace's Save bar. Length-capped in
+  /// `lib/demoWebsiteRules.ts` for the same reason the URL is.
+  demoComments String? @map("demo_comments")
 
   /// The demo image, or six nulls. See the note above on why it is not a table.
   imageStorageKey String?   @unique @map("image_storage_key")

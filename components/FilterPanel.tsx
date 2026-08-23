@@ -4,9 +4,13 @@ import { useState } from "react";
 
 import {
   CALLBACK_RANGE_LABELS,
+  DEMO_FILTERS,
+  DEMO_FILTER_HINTS,
+  DEMO_FILTER_LABELS,
   RATING_STEPS,
   type CallbackRange,
   type CategoryOption,
+  type DemoFilter,
   type LeadFilters,
 } from "@/lib/filters";
 import type { LeadStats } from "@/lib/leadUtils";
@@ -30,17 +34,44 @@ const CALLBACK_ORDER: CallbackRange[] = [
 /** The shared control chassis from `globals.css`; see `.ui-field`. */
 const CONTROL = "ui-field";
 
-/** The four filter groups, side by side so nothing is hidden behind a step. */
+/** How many leads each demo option would show. Absent outside the demo view. */
+export interface DemoCounts {
+  any: number;
+  image: number;
+  link: number;
+}
+
+/**
+ * The filter groups, side by side so nothing is hidden behind a step.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the lists are one column
+ * ---------------------------------------------------------------------------
+ * They were two, and every label in them was ellipsised into uselessness:
+ * "Called - Owner not available" arrived as `Ca…`, and a filter you cannot read
+ * is a filter you cannot use. Two columns halve an already-narrow column and
+ * then spend what is left on a checkbox, a status dot and a count, leaving
+ * about seventy pixels for the words.
+ *
+ * One column costs vertical space — eight statuses is eight rows — and buys
+ * back the entire point of the control. The category list keeps its own scroll
+ * box, so its height is fixed whatever the count.
+ */
 export default function FilterPanel({
   filters,
   onChange,
   categories,
   stats,
+  section = "leads",
+  demoCounts,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
   categories: CategoryOption[];
   stats: LeadStats;
+  /** The demo band is drawn for the Demo Websites view only. */
+  section?: "leads" | "demo";
+  demoCounts?: DemoCounts;
 }) {
   const [categoryQuery, setCategoryQuery] = useState("");
 
@@ -62,8 +93,75 @@ export default function FilterPanel({
     category.name.toLowerCase().includes(categoryQuery.trim().toLowerCase()),
   );
 
+  const demoTotal = stats.total;
+
   return (
-    <div className="grid grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.15fr)_180px_230px] xl:gap-y-4">
+    <div className="flex flex-col gap-4">
+      {/*
+        * --- Demo content ------------------------------------------------
+        *
+        * A full-width band above the rest rather than a fifth column, and that
+        * is the whole design decision: in the Demo Websites view this is the
+        * filter people reach for — "what still needs building" and "what can I
+        * show today" are the two questions the screen exists to answer — and a
+        * fifth 180px column beside Rating would have buried it.
+        *
+        * Buttons rather than checkboxes because the states are exclusive, and
+        * with counts because "No demo yet · 30,412" answers the question
+        * without the click.
+        */}
+      {section === "demo" && (
+        <section aria-labelledby="filter-demo" className="panel-inset px-3.5 py-3">
+          <div className="mb-2.5 flex items-center gap-2">
+            <h3 id="filter-demo" className="eyebrow text-accent">
+              Demo content
+            </h3>
+            <span className="text-caption text-fg-4">
+              What has been built for these leads
+            </span>
+            {filters.demo !== "all" && (
+              <span className="ml-auto">
+                <Reset onClick={() => onChange({ ...filters, demo: "all" })} />
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {DEMO_FILTERS.map((option) => {
+              const active = filters.demo === option;
+              const count = demoCountFor(option, demoCounts, demoTotal);
+
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => onChange({ ...filters, demo: option })}
+                  aria-pressed={active}
+                  title={DEMO_FILTER_HINTS[option]}
+                  className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-caption transition-colors ${
+                    active
+                      ? "border-accent-line bg-accent-soft font-medium text-accent"
+                      : "border-line bg-surface text-fg-2 hover:border-line-2 hover:text-fg"
+                  }`}
+                >
+                  {DEMO_FILTER_LABELS[option]}
+                  {count !== null && (
+                    <span
+                      className={`tnum font-mono text-meta ${active ? "text-accent" : "text-fg-4"}`}
+                    >
+                      {count.toLocaleString()}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* `gap-x-6` rather than 8: two of these columns hold wrapping labels,
+          and 16px of the gutter is better spent on the words. */}
+      <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_165px_210px] xl:gap-y-4">
       {/* --- Status: multi-select ------------------------------------- */}
       <Group
         title="Status"
@@ -73,7 +171,9 @@ export default function FilterPanel({
           )
         }
       >
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        {/* One column — see the note on this component. `Called - Owner not
+            available` is the longest label in the app and it has to fit. */}
+        <div className="flex flex-col gap-y-0.5">
           {CALL_STATUSES.map((status) => (
             <Check
               key={status}
@@ -84,8 +184,13 @@ export default function FilterPanel({
                 aria-hidden="true"
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${CALL_STATUS_DOTS[status]}`}
               />
-              <span className="truncate">{CALL_STATUS_LABELS[status]}</span>
-              <span className="tnum ml-auto font-mono text-meta text-fg-3">
+              {/* Wraps rather than truncates. One column already gives these
+                  room at every width the panel is used at, but "Called - Owner
+                  not available" is long enough that a narrow window would clip
+                  it again — and a status you cannot read is a status you cannot
+                  filter by. Two lines is a cheaper price than an ellipsis. */}
+              <span className="min-w-0 flex-1 leading-snug">{CALL_STATUS_LABELS[status]}</span>
+              <span className="tnum shrink-0 font-mono text-meta text-fg-3">
                 {stats.byStatus[status]}
               </span>
             </Check>
@@ -110,19 +215,27 @@ export default function FilterPanel({
           aria-label="Find a category"
           className={`${CONTROL} mb-2 w-full placeholder:text-fg-3`}
         />
-        <div className="max-h-[148px] overflow-y-auto pr-1">
+        {/* Taller than it was: one column shows half as many rows at a time,
+            and a five-row window over a hundred categories is a scrollbar with
+            a list attached. */}
+        <div className="max-h-[232px] overflow-y-auto pr-1">
           {visibleCategories.length === 0 ? (
             <p className="py-2 text-ui text-fg-3">No matching category.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="flex flex-col gap-y-0.5">
               {visibleCategories.map((category) => (
                 <Check
                   key={category.name}
                   checked={filters.categories.includes(category.name)}
                   onChange={() => toggleCategory(category.name)}
                 >
-                  <span className="truncate">{category.name}</span>
-                  <span className="tnum ml-auto font-mono text-meta text-fg-3">
+                  {/* Still truncated — a scraped category can be arbitrarily
+                      long — but never silently: the full name is in the title,
+                      and one column means the common ones now fit outright. */}
+                  <span className="min-w-0 flex-1 truncate" title={category.name}>
+                    {category.name}
+                  </span>
+                  <span className="tnum shrink-0 font-mono text-meta text-fg-3">
                     {category.count}
                   </span>
                 </Check>
@@ -198,7 +311,9 @@ export default function FilterPanel({
                 onChange={() => onChange({ ...filters, callback: range })}
                 className="h-3.5 w-3.5 shrink-0 accent-accent"
               />
-              <span className="truncate">{CALLBACK_RANGE_LABELS[range]}</span>
+              <span className="min-w-0 flex-1 leading-snug">
+                {CALLBACK_RANGE_LABELS[range]}
+              </span>
             </label>
           ))}
         </div>
@@ -223,8 +338,37 @@ export default function FilterPanel({
           </div>
         )}
       </Group>
+      </div>
     </div>
   );
+}
+
+/**
+ * The count on one demo button, or null when there is nothing to say.
+ *
+ * "All leads" and "No demo yet" are both derived from the workspace total
+ * rather than counted separately — the aggregate counts what *has* demo
+ * content, and the complement is arithmetic. `null` when the counts have not
+ * arrived yet, so a button shows its label alone rather than a confident zero.
+ */
+function demoCountFor(
+  option: DemoFilter,
+  counts: DemoCounts | undefined,
+  total: number,
+): number | null {
+  if (!counts) return null;
+  switch (option) {
+    case "all":
+      return total;
+    case "any":
+      return counts.any;
+    case "none":
+      return Math.max(0, total - counts.any);
+    case "image":
+      return counts.image;
+    case "link":
+      return counts.link;
+  }
 }
 
 function Group({
@@ -292,7 +436,7 @@ function Check({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex min-w-0 cursor-pointer items-center gap-2.5 py-1 text-ui text-fg-2 transition-colors hover:text-fg">
+    <label className="flex min-w-0 cursor-pointer items-center gap-2 py-1 text-ui text-fg-2 transition-colors hover:text-fg">
       <input
         type="checkbox"
         checked={checked}

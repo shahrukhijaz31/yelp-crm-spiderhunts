@@ -1,7 +1,9 @@
 import {
   CALLBACK_RANGE_LABELS,
+  DEMO_FILTERS,
   EMPTY_FILTERS,
   type CallbackRange,
+  type DemoFilter,
   type LeadFilters,
 } from "./filters";
 import { CALL_STATUSES, type CallStatus } from "./types";
@@ -186,6 +188,10 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   if (filters.ratingMin !== null) params.set("ratingMin", String(filters.ratingMin));
   if (filters.ratingMax !== null) params.set("ratingMax", String(filters.ratingMax));
 
+  // Demo content. Written whatever the section — the demo view is the only
+  // thing that sets it, and a URL it produced must survive a copy-paste.
+  if (filters.demo !== "all") params.set("demo", filters.demo);
+
   if (filters.callback !== "all") params.set("callback", filters.callback);
   if (filters.callback === "custom") {
     if (filters.callbackFrom) params.set("callbackFrom", filters.callbackFrom);
@@ -251,6 +257,19 @@ export function parseLeadSearchParams(
   // category is the empty string, it is a stray separator.
   const categories = params.getAll("category").filter((value) => value.trim() !== "");
 
+  const section = readOneOf(params.get("section"), LEAD_SECTIONS, DEFAULT_LEAD_SECTION);
+
+  /*
+   * The demo filter is read only in the demo section.
+   *
+   * It is a join onto `demo_websites`, and the worklist neither offers it nor
+   * draws a chip for it — so a hand-edited `/?demo=none` would silently narrow
+   * that screen with nothing on it to say why or to clear it. Ignoring the
+   * parameter there keeps the worklist exactly the screen it was.
+   */
+  const demo: DemoFilter =
+    section === "demo" ? readOneOf(params.get("demo"), DEMO_FILTERS, "all") : "all";
+
   const callback = readOneOf(params.get("callback"), CALLBACK_RANGES, "all");
   const callbackFrom = params.get("callbackFrom");
   const callbackTo = params.get("callbackTo");
@@ -265,12 +284,13 @@ export function parseLeadSearchParams(
     callback,
     callbackFrom: isIsoDate(callbackFrom) ? callbackFrom : null,
     callbackTo: isIsoDate(callbackTo) ? callbackTo : null,
+    demo,
   };
 
   const today = params.get("today");
 
   return {
-    section: readOneOf(params.get("section"), LEAD_SECTIONS, DEFAULT_LEAD_SECTION),
+    section,
     workState: readOneOf(params.get("work"), LEAD_WORK_STATES, DEFAULT_WORK_STATE),
     view: readOneOf(params.get("view"), WORKLIST_VIEWS, "all"),
     filters,

@@ -1,16 +1,21 @@
 import { validateDemoImage } from "./demoImageRules";
 import { deleteDemoImage, newDemoImageKey, putDemoImage } from "./demoImageStorage";
-import { normaliseDemoUrl, type DemoSummary, type DemoSummaryMap } from "./demoWebsiteRules";
+import {
+  normaliseDemoComments,
+  normaliseDemoUrl,
+  type DemoSummary,
+  type DemoSummaryMap,
+} from "./demoWebsiteRules";
 import { prisma } from "./prisma";
 
 /**
- * The demo-specific half of a lead: reading it, and writing the two fields it
- * holds.
+ * The demo-specific half of a lead: reading it, and writing the fields it
+ * holds — an image, two links and the comments.
  *
  * ---------------------------------------------------------------------------
  * This module knows almost nothing
  * ---------------------------------------------------------------------------
- * It reads and writes an image and a link. It does not list leads, filter them,
+ * It reads and writes an image, two links and a comments field. It does not list leads, filter them,
  * sort them, page them or search them — all of that is `lib/leadDb.ts`, used
  * unchanged by both views, which is the entire point of the correction this
  * file is part of. The Demo Websites screen asks `listLeadsPage` for a page of
@@ -49,6 +54,8 @@ import { prisma } from "./prisma";
 const SUMMARY_FIELDS = {
   leadId: true,
   demoUrl: true,
+  demoUrl2: true,
+  demoComments: true,
   imageWidth: true,
   imageHeight: true,
   imageFileSize: true,
@@ -59,6 +66,8 @@ const SUMMARY_FIELDS = {
 interface SummaryRow {
   leadId: string;
   demoUrl: string | null;
+  demoUrl2: string | null;
+  demoComments: string | null;
   imageWidth: number | null;
   imageHeight: number | null;
   imageFileSize: number | null;
@@ -70,6 +79,8 @@ function toSummary(row: SummaryRow): DemoSummary {
   return {
     leadId: row.leadId,
     demoUrl: row.demoUrl,
+    demoUrl2: row.demoUrl2,
+    demoComments: row.demoComments,
     // The four image columns move together — an upload writes them as a set and
     // a removal clears them as a set — so one being null is enough to say there
     // is no image, and the type does not have to describe a half-uploaded state
@@ -168,36 +179,68 @@ export async function leadExists(leadId: string): Promise<boolean> {
 // --- writing -----------------------------------------------------------------
 
 /**
- * Set or clear the demo link.
+ * The demo fields a caller may write: the two links and the comments.
  *
- * `null` clears it. The row is *upserted*, because a lead has no demo row until
- * one of the two fields is first saved — so setting a link on a lead nobody has
- * touched creates the row, and setting it on one that already has an image
- * updates the row that image lives on.
+ * A **partial** patch. A key that is absent is left exactly as it was, and a
+ * key present with `null` is a deliberate clear — which is why this is an
+ * object of optional properties rather than three parameters, and why the
+ * route passes on only the keys the request body actually carried. Saving
+ * link 2 must not blank link 1.
+ */
+export interface DemoFieldPatch {
+  demoUrl?: unknown;
+  demoUrl2?: unknown;
+  demoComments?: unknown;
+}
+
+/**
+ * Set or clear any of the demo fields.
  *
- * Clearing the link does **not** delete the row when an image is still
- * attached: the image is the other half of the same record. A row left with
- * neither is harmless and is cleaned up by {@link removeDemoImageFor} when the
- * image goes.
+ * `null` clears a field. The row is *upserted*, because a lead has no demo row
+ * until one of the fields is first saved — so setting a link on a lead nobody
+ * has touched creates the row, and setting one on a lead that already has an
+ * image updates the row that image lives on.
+ *
+ * Clearing a field does **not** delete the row while anything else is still on
+ * it: the links, the comments and the image are halves of one record. A row
+ * left with nothing at all is harmless and is cleaned up by
+ * {@link removeDemoImageFor} when the image goes.
  *
  * Returns null when the lead does not exist, so the route can 404 rather than
  * creating demo metadata for a lead id somebody invented.
  */
-export async function setDemoLink(
+export async function setDemoFields(
   leadId: string,
-  rawUrl: unknown,
+  patch: DemoFieldPatch,
   actorId: string,
 ): Promise<DemoSummary | null> {
   if (!(await leadExists(leadId))) return null;
 
+  // Built key by key, so a field the caller did not mention is not written at
+  // all — `undefined` in a Prisma `update` is "leave it alone", but relying on
+  // that silently would make an accidental `demoUrl: undefined` indistinguishable
+  // from a deliberate clear. Here only what was asked for is present.
+  const data: { demoUrl?: string | null; demoUrl2?: string | null; demoComments?: string | null } =
+    {};
+
   // `null` is a deliberate clear; anything else must be a valid http(s) URL.
   // `normaliseDemoUrl` throws a `DemoWebsiteError` the route maps to a 400.
-  const demoUrl = rawUrl === null ? null : normaliseDemoUrl(rawUrl);
+  if (patch.demoUrl !== undefined) {
+    data.demoUrl = patch.demoUrl === null ? null : normaliseDemoUrl(patch.demoUrl);
+  }
+  if (patch.demoUrl2 !== undefined) {
+    data.demoUrl2 = patch.demoUrl2 === null ? null : normaliseDemoUrl(patch.demoUrl2);
+  }
+  // Empty text is the same as no text — `normaliseDemoComments` returns null for
+  // both, so the column never holds an empty string.
+  if (patch.demoComments !== undefined) {
+    data.demoComments = normaliseDemoComments(patch.demoComments);
+  }
 
   const row = await prisma.demoWebsite.upsert({
     where: { leadId },
-    create: { leadId, demoUrl, updatedById: actorId },
-    update: { demoUrl, updatedById: actorId },
+    create: { leadId, ...data, updatedById: actorId },
+    update: { ...data, updatedById: actorId },
     select: SUMMARY_FIELDS,
   });
 
@@ -302,8 +345,8 @@ export async function saveDemoImageFor(params: {
  * invisible and sweepable, while a row pointing at deleted bytes is a broken
  * image in front of a client.
  *
- * The demo row itself is deleted when nothing is left on it — no image and no
- * link — so a lead returns to having no demo metadata at all rather than
+ * The demo row itself is deleted when nothing is left on it — no image, no
+ * links and no comments — so a lead returns to having no demo metadata at all rather than
  * keeping an empty shell. That matters for exactly one reason: the demo view
  * treats "no row" and "a row with both fields empty" identically, and only one
  * of the two should be reachable.
@@ -319,7 +362,7 @@ export async function removeDemoImageFor(
 
   const existing = await prisma.demoWebsite.findUnique({
     where: { leadId },
-    select: { imageStorageKey: true, demoUrl: true },
+    select: { imageStorageKey: true, demoUrl: true, demoUrl2: true, demoComments: true },
   });
 
   if (!existing || !existing.imageStorageKey) {
@@ -328,9 +371,12 @@ export async function removeDemoImageFor(
 
   let summary: DemoSummary | null = null;
 
-  if (existing.demoUrl === null) {
-    // Nothing else on the row: the whole record goes, and the lead is back to
-    // having no demo metadata.
+  const hasOtherContent =
+    existing.demoUrl !== null || existing.demoUrl2 !== null || existing.demoComments !== null;
+
+  if (!hasOtherContent) {
+    // Nothing else on the row — no link, no second link, no comments: the whole
+    // record goes, and the lead is back to having no demo metadata.
     await prisma.demoWebsite.delete({ where: { leadId } });
   } else {
     const row = await prisma.demoWebsite.update({
@@ -361,4 +407,56 @@ export async function removeDemoImageFor(
   }
 
   return { removed: true, imageOrphaned, summary };
+}
+
+/**
+ * How many leads sit behind each option of the demo filter.
+ *
+ * The numbers beside the filter buttons, and the reason they are worth a query:
+ * "No demo yet — 30,412" is the whole point of the Demo Websites view for an
+ * agent looking for the next site to build, and a filter button with no count
+ * beside it is a button you have to press to find out whether it was worth
+ * pressing.
+ *
+ * **Unfiltered, deliberately.** These describe the whole pool, exactly as the
+ * status counts in `leadStats` do — a count that already had the current filter
+ * applied would show every option but the selected one as zero.
+ *
+ * One aggregate over `demo_websites`, which is the small table: it holds a row
+ * only for leads somebody has actually given an image or a link, so this scans
+ * hundreds of rows and not the twenty thousand leads. `none` is then arithmetic
+ * against the lead total the caller already has, rather than a second scan of
+ * `leads`.
+ */
+export interface DemoFilterCounts {
+  /** Leads with an image, a link, or both. */
+  any: number;
+  image: number;
+  link: number;
+}
+
+export async function demoFilterCounts(): Promise<DemoFilterCounts> {
+  const [row] = await prisma.$queryRaw<
+    { any_demo: number; with_image: number; with_link: number }[]
+  >`
+    SELECT
+      count(*) FILTER (
+        WHERE image_storage_key IS NOT NULL
+           OR demo_url IS NOT NULL
+           OR demo_url_2 IS NOT NULL
+      )::int AS any_demo,
+      count(*) FILTER (WHERE image_storage_key IS NOT NULL)::int AS with_image,
+      -- Either link counts. A lead with only the second one still has a demo
+      -- link, and the filter button beside this number selects it.
+      count(*) FILTER (
+        WHERE demo_url IS NOT NULL OR demo_url_2 IS NOT NULL
+      )::int AS with_link
+    FROM demo_websites
+  `;
+
+  return {
+    any: row?.any_demo ?? 0,
+    image: row?.with_image ?? 0,
+    link: row?.with_link ?? 0,
+  };
 }

@@ -9,10 +9,17 @@ import {
   DEMO_IMAGE_EXTENSIONS,
   MAX_DEMO_IMAGE_BYTES,
 } from "@/lib/demoImageRules";
-import { demoUrlHost, isValidDemoUrl, type DemoSummary } from "@/lib/demoWebsiteRules";
+import {
+  DEMO_LINK_LABELS,
+  demoUrlHost,
+  isValidDemoUrl,
+  type DemoLinkField,
+  type DemoSummary,
+} from "@/lib/demoWebsiteRules";
 
 /**
- * The two cells the Demo Websites view adds to a lead row.
+ * The three cells the Demo Websites view adds to a lead row: the image, and one
+ * for each of the two demo links.
  *
  * **A shortcut, not a second feature**, on exactly the terms
  * `RowRecordingButton` sets for audio on the worklist: everything that decides
@@ -187,26 +194,37 @@ export function DemoImageCell({
 }
 
 /**
- * The link cell: the host as an external link when set, "Add link" when not.
+ * A link cell: the host as an external link when set, "Add link" when not.
  *
- * Editing is inline — a text input that replaces the cell's contents — rather
+ * **One component, drawn twice** - once for Demo link 1 and once for Demo link
+ * 2 - told apart by `field`, which is both the property it reads off the
+ * summary and the key it sends in the PATCH. Two near-identical cells differing
+ * only in a property name is exactly the copy that drifts, and the server
+ * treats the two links identically, so the client does too.
+ *
+ * Editing is inline - a text input that replaces the cell's contents - rather
  * than a dialog, because a URL is one short value and a modal to type one is
  * three interactions where one will do. Escape cancels, Enter saves, and
- * nothing is written until one of the two.
+ * nothing is written until one of the two. The PATCH carries only this field's
+ * key, so saving one link never touches the other.
  */
 export function DemoLinkCell({
   leadId,
   leadName,
   demo,
+  field = "demoUrl",
   onSaved,
 }: {
   leadId: string;
   leadName: string;
   demo: DemoSummary | null;
+  /** Which of the two demo links this cell edits. */
+  field?: DemoLinkField;
   onSaved: (leadId: string, demo: DemoSummary) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(demo?.demoUrl ?? "");
+  const label = DEMO_LINK_LABELS[field];
+  const [value, setValue] = useState(demo?.[field] ?? "");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -214,7 +232,7 @@ export function DemoLinkCell({
   // workspace — resets what the field is seeded with. Done during render
   // rather than in an effect so the field never paints one frame of a stale
   // value; skipped while editing, or it would fight the person typing.
-  const saved = demo?.demoUrl ?? "";
+  const saved = demo?.[field] ?? "";
   const [lastSaved, setLastSaved] = useState(saved);
   if (lastSaved !== saved && !editing) {
     setLastSaved(saved);
@@ -231,7 +249,9 @@ export function DemoLinkCell({
       const response = await fetch(`/api/leads/${leadId}/demo`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ demoUrl: next }),
+        // Only this cell's own key. The other link and the comments are absent
+        // from the body, and the server leaves absent fields alone.
+        body: JSON.stringify({ [field]: next }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
         demo?: DemoSummary;
@@ -244,8 +264,8 @@ export function DemoLinkCell({
       }
 
       onSaved(leadId, payload.demo);
-      setLastSaved(payload.demo.demoUrl ?? "");
-      setValue(payload.demo.demoUrl ?? "");
+      setLastSaved(payload.demo[field] ?? "");
+      setValue(payload.demo[field] ?? "");
       setEditing(false);
       setPhase({ kind: "idle" });
     } catch {
@@ -288,7 +308,7 @@ export function DemoLinkCell({
             setEditing(false);
           }}
           placeholder="https://example-demo.com"
-          aria-label={`Demo link for ${leadName}`}
+          aria-label={`${label} for ${leadName}`}
           aria-invalid={!valid}
           autoCapitalize="none"
           spellCheck={false}
@@ -314,12 +334,14 @@ export function DemoLinkCell({
     );
   }
 
-  if (!demo?.demoUrl) {
+  const href = demo?.[field] ?? null;
+
+  if (!href) {
     return (
       <button
         type="button"
         onClick={() => setEditing(true)}
-        title={`Add a demo link for ${leadName}`}
+        title={`Add ${label.toLowerCase()} for ${leadName}`}
         className="row-inner-link inline-flex items-center gap-1 rounded text-caption text-fg-4 transition-colors hover:text-accent"
       >
         <Link2 className="h-3 w-3 shrink-0" strokeWidth={1.75} aria-hidden="true" />
@@ -341,21 +363,21 @@ export function DemoLinkCell({
        * is no `javascript:` for this anchor to run.
        */}
       <a
-        href={demo.demoUrl}
+        href={href}
         target="_blank"
         rel="noopener noreferrer"
-        title={`${demo.demoUrl} — open in a new tab`}
+        title={`${href} — open in a new tab`}
         className="group/link inline-flex min-w-0 items-center gap-1 rounded text-caption text-fg-2 transition-colors hover:text-accent"
       >
         <span className="truncate underline decoration-line-2 underline-offset-[3px] group-hover/link:decoration-accent">
-          {demoUrlHost(demo.demoUrl)}
+          {demoUrlHost(href)}
         </span>
         <ExternalLink className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover/link:opacity-100" strokeWidth={2} aria-hidden="true" />
       </a>
       <button
         type="button"
         onClick={() => setEditing(true)}
-        aria-label={`Edit the demo link for ${leadName}`}
+        aria-label={`Edit ${label.toLowerCase()} for ${leadName}`}
         title="Edit"
         className="shrink-0 rounded p-0.5 text-fg-4 opacity-0 transition-opacity hover:text-fg-2 focus-visible:opacity-100 group-hover:opacity-100"
       >

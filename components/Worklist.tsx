@@ -12,6 +12,7 @@ import {
 import { AnimatePresence } from "framer-motion";
 
 import Breakdown from "./Breakdown";
+import type { DemoCounts } from "./FilterPanel";
 import FilterToolbar from "./FilterToolbar";
 import HeadlineStrip from "./HeadlineStrip";
 import LeadOverlay from "./LeadOverlay";
@@ -127,6 +128,7 @@ export default function Worklist({
   initialMeta,
   initialCategories,
   initialDemos,
+  initialDemoCounts,
   section = "leads",
   serverToday,
 }: {
@@ -138,6 +140,8 @@ export default function Worklist({
    * and absent for the worklist, which draws no demo columns.
    */
   initialDemos?: DemoSummaryMap;
+  /** The demo filter's counts for the first paint. Demo view only. */
+  initialDemoCounts?: DemoCounts;
   /**
    * Which of the two views this is.
    *
@@ -214,6 +218,16 @@ export default function Worklist({
    * here with nothing having been backfilled.
    */
   const [demos, setDemos] = useState<DemoSummaryMap>(initialDemos ?? {});
+
+  /**
+   * How many leads sit behind each demo filter option.
+   *
+   * Workspace-wide and unfiltered, like the stats in the strip above — they are
+   * the numbers on the filter buttons, so a count that already had the filter
+   * applied would show every option but the chosen one as zero. Arrives with
+   * the page and is replaced by each response.
+   */
+  const [demoCounts, setDemoCounts] = useState<DemoCounts | undefined>(initialDemoCounts);
 
   /*
    * Which lead is open over this list, and where in the list it was.
@@ -334,6 +348,7 @@ export default function Worklist({
           stats: LeadStats;
           workCounts: LeadWorkCounts;
           demos?: DemoSummaryMap;
+          demoCounts?: DemoCounts;
         };
 
         // The server clamps a page past the end of the result set, so record
@@ -355,6 +370,7 @@ export default function Worklist({
         // and keeping entries for rows no longer on screen would grow without
         // bound as an agent pages through twenty thousand leads.
         if (data.demos) setDemos(data.demos);
+        if (data.demoCounts) setDemoCounts(data.demoCounts);
 
         // A page turned from inside the workspace: open the row the agent was
         // walking towards, at whichever end of the new page it arrived at. An
@@ -786,6 +802,8 @@ export default function Worklist({
             shown={meta.total}
             open={filtersOpen}
             onToggleOpen={() => setFiltersOpen((open) => !open)}
+            section={section}
+            demoCounts={demoCounts}
           />
         </div>
 

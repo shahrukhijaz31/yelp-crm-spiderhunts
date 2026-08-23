@@ -3,7 +3,6 @@ import { createHash, randomBytes } from "node:crypto";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { config as loadEnv } from "dotenv";
 
-import { completeSignIn } from "../lib/completeSignIn";
 import { PrismaClient } from "../lib/generated/prisma/client";
 import { clientIp } from "../lib/loginThrottle";
 import { hashPassword } from "../lib/password";
@@ -230,27 +229,46 @@ async function lp01(): Promise<void> {
       "x-real-ip": SPOOFED_IP,
     },
   });
-  await completeSignIn(admin.id, {
-    userAgent: "security-live-test",
-    ipAddress: clientIp(spoofed),
-  });
+  /*
+   * Checked against `clientIp` itself rather than against a session row, and
+   * the reason is worth stating because the previous version of this block did
+   * the latter and could never run.
+   *
+   * It called `completeSignIn`, which reaches `createSession`, which begins
+   * `await cookies()` — a `next/headers` call that only resolves inside a Next
+   * request scope. A standalone script has none, so the call threw
+   * "`cookies` was called outside a request scope" and aborted the run at this
+   * line, every time. (Before that it failed even earlier: `completeSignIn` was
+   * a static import, and it reaches `lib/prisma`, which throws at module load
+   * when `DATABASE_URL` is unset — and `loadEnv()` further down runs *after*
+   * every import in the file. Both failures printed after the summary of the
+   * checks that had already passed, which is why the suite looked green.)
+   *
+   * Neither failure was about the property under test, and minting a real
+   * session is not what proves it. `sessions.ip_address` is written by
+   * `createSession` from whatever it is handed, and the only thing that decides
+   * what it is handed is `clientIp` — the same function the verify route calls,
+   * given the same hostile headers here. So the derivation is what this asserts,
+   * directly, and it is the whole of LP-01: the address the server records comes
+   * from a trusted hop count, never from a header the caller wrote.
+   */
+  const derived = clientIp(spoofed);
 
-  const session = await prisma.session.findFirst({
-    where: { userId: admin.id },
-    orderBy: { createdAt: "desc" },
-    select: { ipAddress: true },
-  });
   check(
-    "the spoofed address is not recorded on the session",
-    session !== null && session.ipAddress !== SPOOFED_IP,
-    `ip_address=${session?.ipAddress ?? "no session row"}`,
+    "the spoofed address is not what the server would record",
+    derived !== SPOOFED_IP,
+    `clientIp=${derived}`,
   );
   // In development `TRUSTED_PROXY_HOPS` defaults to 0, so the honest answer is
   // "no proxy said, therefore unknown" rather than anything the caller wrote.
   check(
     "…it is the shared bucket, since this server has no proxy in front of it",
-    session?.ipAddress === "unknown",
-    `ip_address=${session?.ipAddress}`,
+    derived === "unknown",
+    `clientIp=${derived}`,
+  );
+  check(
+    "…and no session exists for an account that only sent a password",
+    (await prisma.session.count({ where: { userId: admin.id } })) === 0,
   );
 
   section("LP-01  a spoofed X-Forwarded-For does not reset the IP throttle");

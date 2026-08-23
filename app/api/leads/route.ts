@@ -1,5 +1,5 @@
 import { apiModule } from "@/lib/authz";
-import { demoSummariesFor } from "@/lib/demoWebsites";
+import { demoFilterCounts, demoSummariesFor } from "@/lib/demoWebsites";
 import { leadCategories, leadStats, leadWorkCounts, listLeadsPage } from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
@@ -41,6 +41,9 @@ import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
  *               to the rows on this page, keyed by lead id and **sparse**: a
  *               lead with neither is simply absent from the map. No lead field
  *               is duplicated in there; see `lib/demoWebsites.ts`.
+ *   demoCounts  only when `?section=demo` — how many leads have a demo, an
+ *               image, a link. Unfiltered, like `stats`: they are the numbers
+ *               on the filter buttons.
  *
  * `?rows=0` asks for the counts alone and skips the page entirely. That is what
  * the worklist sends after an inline edit: the headline strip and the tab
@@ -152,6 +155,16 @@ export async function GET(request: Request): Promise<Response> {
     const demos =
       demoSection && page ? await demoSummariesFor(page.leads.map((lead) => lead.id)) : null;
 
+    /*
+     * The numbers beside the demo filter buttons.
+     *
+     * Unfiltered, like `stats` and `workCounts` above and for the same reason:
+     * they describe the whole pool, so an option other than the selected one
+     * still says how many leads it would show. One aggregate over the small
+     * table — see `demoFilterCounts`.
+     */
+    const demoCounts = demoSection ? await demoFilterCounts() : null;
+
     return Response.json(
       {
         ...(page
@@ -167,6 +180,7 @@ export async function GET(request: Request): Promise<Response> {
         stats,
         workCounts,
         ...(demos ? { demos } : {}),
+        ...(demoCounts ? { demoCounts } : {}),
         ...(categories ? { categories } : {}),
         source: "postgres",
       },

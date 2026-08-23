@@ -171,6 +171,50 @@ function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
     );
   }
 
+  /*
+   * --- demo content (lib/filters.ts `DEMO_FILTERS`) ---
+   *
+   * The one clause here that leaves `leads`, and it is a semi-join rather than
+   * a JOIN on purpose: `EXISTS` stops at the first matching row and cannot
+   * duplicate a lead, which a join onto a UNIQUE column would not either — but
+   * `EXISTS` says so in the query rather than relying on the reader knowing the
+   * constraint. It is driven by `demo_websites.lead_id`, which is that unique
+   * index, so each check is one index probe.
+   *
+   * Nothing is read *out* of the subquery: this decides which leads match, and
+   * the demo image and link the screen draws come from `demoSummariesFor`,
+   * keyed by the ids this query returns. One question per query.
+   */
+  if (filters.demo !== "all") {
+    const hasRow = Prisma.sql`SELECT 1 FROM demo_websites d WHERE d.lead_id = l.id`;
+    switch (filters.demo) {
+      // Either link counts as a link, and the comments count as neither: the
+      // filter offers "has a demo", "has an image" and "has a link", and a lead
+      // whose only demo content is a note about it has none of the three.
+      case "any":
+        // A row exists only once one of the fields has been saved, but a link
+        // cleared off a row that still has an image leaves the row behind — so
+        // "has a demo" asks about the fields, not about the row.
+        clauses.push(
+          Prisma.sql`EXISTS (${hasRow} AND (d.image_storage_key IS NOT NULL OR d.demo_url IS NOT NULL OR d.demo_url_2 IS NOT NULL))`,
+        );
+        break;
+      case "none":
+        clauses.push(
+          Prisma.sql`NOT EXISTS (${hasRow} AND (d.image_storage_key IS NOT NULL OR d.demo_url IS NOT NULL OR d.demo_url_2 IS NOT NULL))`,
+        );
+        break;
+      case "image":
+        clauses.push(Prisma.sql`EXISTS (${hasRow} AND d.image_storage_key IS NOT NULL)`);
+        break;
+      case "link":
+        clauses.push(
+          Prisma.sql`EXISTS (${hasRow} AND (d.demo_url IS NOT NULL OR d.demo_url_2 IS NOT NULL))`,
+        );
+        break;
+    }
+  }
+
   // --- rating: an unrated lead cannot satisfy a bound, and NULL >= 3 is NULL,
   //     so Postgres drops it for free — same rule as `matchesRating`. ---
   if (filters.ratingMin !== null) {

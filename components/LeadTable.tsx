@@ -73,27 +73,33 @@ const COLUMNS: Column[] = [
  * One column is swapped and one is added. Audio goes, because the demo view has
  * no audio: a demo is presented with a picture and a link, and a recording
  * control here would be the one thing this view is specified not to have. In
- * its place go Demo image and Demo link, which are the only two facts this view
- * knows that the worklist does not.
+ * its place go Demo image and the two demo links, which are the facts this view
+ * knows that the worklist does not. (The demo comments are not a column: they
+ * are a paragraph, and a paragraph truncated to a table cell is a cell that
+ * says nothing. They live in the lead window beside the links.)
  *
- * The nine columns are paid for out of the eight, a point or two each, rather
+ * The ten columns are paid for out of the eight, a point or two each, rather
  * than by widening the table: the worklist already scrolls sideways below
  * 1180px and adding to that would push the business name off a laptop.
  */
 const DEMO_COLUMNS: Column[] = [
-  { label: "Business", width: "21%", sortKey: "name" },
-  { label: "Phone", width: "12%", sortKey: "phone" },
-  { label: "Address", width: "15%", sortKey: "address" },
-  { label: "Category", width: "9%", sortKey: "category" },
-  { label: "Website", width: "11%" },
-  { label: "Status", width: "10%" },
+  { label: "Business", width: "19%", sortKey: "name" },
+  { label: "Phone", width: "11%", sortKey: "phone" },
+  { label: "Address", width: "13%", sortKey: "address" },
+  { label: "Category", width: "8%", sortKey: "category" },
+  { label: "Website", width: "9%" },
+  { label: "Status", width: "9%" },
   // Narrow: a 28px control and a 36px thumbnail, the same footprint the Audio
   // column had, because it is the same kind of thing — one action beside the
   // row rather than a feature of the list.
   { label: "Demo image", width: "7%" },
   // Wider than the image cell: it holds a hostname, and one that truncates to
   // three characters would be a column that says nothing.
-  { label: "Demo link", width: "9%" },
+  // The two links, equally wide because neither is the important one: a lead
+  // may have either, both or neither, and the numbers are labels rather than an
+  // order of preference.
+  { label: "Demo link 1", width: "9%" },
+  { label: "Demo link 2", width: "9%" },
   { label: "Booked", width: "6%" },
 ];
 

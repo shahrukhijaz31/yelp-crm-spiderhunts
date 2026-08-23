@@ -274,6 +274,8 @@ interface LeadRow {
 interface DemoSummaryShape {
   leadId: string;
   demoUrl: string | null;
+  demoUrl2: string | null;
+  demoComments: string | null;
   image: { width: number; height: number; fileSize: number; updatedAt: string } | null;
 }
 
@@ -608,7 +610,7 @@ async function main(): Promise<void> {
     );
 
     // =======================================================================
-    section("The demo fields — the link");
+    section("The demo fields — the links");
     // =======================================================================
     const demoApi = `/api/leads/${subject.id}/demo`;
 
@@ -687,6 +689,108 @@ async function main(): Promise<void> {
       "…and the editor is the session user, not the posted one",
       demoRowNow?.updatedById === admin.id,
       String(demoRowNow?.updatedById),
+    );
+
+    // --- the second link, and the independence of the three fields --------
+    check(
+      "an agent without the module cannot write the second demo link",
+      (await send("PATCH", demoApi, leadsCookie, { demoUrl2: "https://evil.test" })).status === 403,
+    );
+
+    const setLink2 = await send("PATCH", demoApi, bothCookie, { demoUrl2: "second-demo.test/menu" });
+    check(
+      "an agent with the module can set the second demo link",
+      demoOf(setLink2)?.demoUrl2 === "https://second-demo.test/menu",
+      JSON.stringify(demoOf(setLink2)),
+    );
+    check(
+      "…and setting it left the first link exactly as it was",
+      demoOf(setLink2)?.demoUrl === "https://changed-demo.test/x",
+      JSON.stringify(demoOf(setLink2)),
+    );
+
+    for (const bad of ["javascript:alert(1)", "//evil.com", "not a url"]) {
+      const refused = await send("PATCH", demoApi, adminCookie, { demoUrl2: bad });
+      check(
+        `the second link refuses ${JSON.stringify(bad.slice(0, 30))}`,
+        refused.status === 400 && refused.body.error === "invalid_url",
+        `status ${refused.status} ${String(refused.body.error)}`,
+      );
+    }
+
+    const clearedFirst = await send("PATCH", demoApi, adminCookie, { demoUrl: null });
+    check(
+      "clearing the first link leaves the second one standing",
+      demoOf(clearedFirst)?.demoUrl === null &&
+        demoOf(clearedFirst)?.demoUrl2 === "https://second-demo.test/menu",
+      JSON.stringify(demoOf(clearedFirst)),
+    );
+    const restored = await send("PATCH", demoApi, adminCookie, { demoUrl: "https://changed-demo.test/x" });
+    check(
+      "…and the first link can be set again without disturbing the second",
+      demoOf(restored)?.demoUrl === "https://changed-demo.test/x" &&
+        demoOf(restored)?.demoUrl2 === "https://second-demo.test/menu",
+      JSON.stringify(demoOf(restored)),
+    );
+
+    // =======================================================================
+    section("The demo fields — the comments");
+    // =======================================================================
+    check(
+      "an agent without the module cannot write demo comments",
+      (await send("PATCH", demoApi, leadsCookie, { demoComments: "nope" })).status === 403,
+    );
+
+    const setComments = await send("PATCH", demoApi, bothCookie, {
+      demoComments: "  Rebuilt the menu page; they asked about online ordering.  ",
+    });
+    check(
+      "an agent with the module can save demo comments, trimmed",
+      demoOf(setComments)?.demoComments === "Rebuilt the menu page; they asked about online ordering.",
+      JSON.stringify(demoOf(setComments)),
+    );
+    check(
+      "…and neither link moved",
+      demoOf(setComments)?.demoUrl === "https://changed-demo.test/x" &&
+        demoOf(setComments)?.demoUrl2 === "https://second-demo.test/menu",
+    );
+    check(
+      "…and they persist across a fresh read",
+      demoOf(await get(demoApi, bothCookie))?.demoComments ===
+        "Rebuilt the menu page; they asked about online ordering.",
+    );
+
+    const tooLong = await send("PATCH", demoApi, adminCookie, { demoComments: "x".repeat(4001) });
+    check(
+      "comments over the length limit are refused",
+      tooLong.status === 400 && tooLong.body.error === "invalid_comments",
+      `status ${tooLong.status} ${String(tooLong.body.error)}`,
+    );
+    const notText = await send("PATCH", demoApi, adminCookie, { demoComments: { evil: true } });
+    check(
+      "comments that are not text are refused",
+      notText.status === 400 && notText.body.error === "invalid_comments",
+      `status ${notText.status} ${String(notText.body.error)}`,
+    );
+
+    check(
+      "the demo comments are not the lead's call notes",
+      (await prisma.lead.findUnique({ where: { id: subject.id }, select: { notes: true } }))?.notes ===
+        "Call again tomorrow",
+    );
+
+    const blankComments = await send("PATCH", demoApi, adminCookie, { demoComments: "   " });
+    check(
+      "blank comments are stored as nothing at all",
+      demoOf(blankComments)?.demoComments === null,
+      JSON.stringify(demoOf(blankComments)),
+    );
+
+    const nothingToDo = await send("PATCH", demoApi, adminCookie, { name: "HACKED" });
+    check(
+      "a body with none of the three fields is a 400 and writes nothing",
+      nothingToDo.status === 400 && nothingToDo.body.error === "no_changes",
+      `status ${nothingToDo.status} ${String(nothingToDo.body.error)}`,
     );
 
     // =======================================================================
@@ -828,6 +932,104 @@ async function main(): Promise<void> {
     check("no orphan is reported", removed.body.imageOrphaned === false);
     check("the demo link survived the image removal", demoOf(removed)?.demoUrl === "https://changed-demo.test/x");
     check("and the image endpoint is 404 again", (await get(imageApi, adminCookie)).status === 404);
+
+    // =======================================================================
+    section("The demo filter");
+    // =======================================================================
+    // At this point `subject` has a demo link and no image (the image was
+    // removed just above), and `other` has neither. Both are in the Called and
+    // New queues respectively, so each read below names its own queue.
+    const counts = (await get(demoList, adminCookie)).body.demoCounts as
+      | { any: number; image: number; link: number }
+      | undefined;
+    check(
+      "the demo section returns filter counts",
+      counts !== undefined &&
+        typeof counts.any === "number" &&
+        typeof counts.image === "number" &&
+        typeof counts.link === "number",
+      JSON.stringify(counts),
+    );
+    check(
+      "…and the worklist does not, because it has no such filter",
+      (await get(leadList, adminCookie)).body.demoCounts === undefined,
+    );
+
+    const withLink = await get(`${demoCalled}&demo=link`, adminCookie);
+    check(
+      "demo=link finds the lead with a link",
+      leadsOf(withLink).some((lead) => lead.id === subject.id),
+      `${leadsOf(withLink).length} rows`,
+    );
+
+    const withImage = await get(`${demoCalled}&demo=image`, adminCookie);
+    check(
+      "demo=image does not — its image was removed",
+      !leadsOf(withImage).some((lead) => lead.id === subject.id),
+      `${leadsOf(withImage).length} rows`,
+    );
+
+    const withAny = await get(`${demoCalled}&demo=any`, adminCookie);
+    check(
+      "demo=any finds it, because a link counts as a demo",
+      leadsOf(withAny).some((lead) => lead.id === subject.id),
+    );
+
+    const withNone = await get(`${demoCalled}&demo=none`, adminCookie);
+    check(
+      "demo=none excludes it",
+      !leadsOf(withNone).some((lead) => lead.id === subject.id),
+    );
+    check(
+      "…and includes the lead nobody has built anything for",
+      leadsOf(await get(`${demoList}&demo=none`, adminCookie)).some(
+        (lead) => lead.id === other.id,
+      ),
+    );
+
+    // any + none must partition the pool exactly — no lead in both, none in
+    // neither. Checked on the fixture's own two leads across both queues.
+    const anyTotal =
+      ((await get(`${demoList}&demo=any`, adminCookie)).body.total as number) +
+      ((await get(`${demoCalled}&demo=any`, adminCookie)).body.total as number);
+    const noneTotal =
+      ((await get(`${demoList}&demo=none`, adminCookie)).body.total as number) +
+      ((await get(`${demoCalled}&demo=none`, adminCookie)).body.total as number);
+    const allTotal =
+      ((await get(demoList, adminCookie)).body.total as number) +
+      ((await get(demoCalled, adminCookie)).body.total as number);
+    check(
+      "demo=any and demo=none partition the pool exactly",
+      anyTotal + noneTotal === allTotal,
+      `${anyTotal} + ${noneTotal} != ${allTotal}`,
+    );
+
+    const bogusDemo = await get(`${demoCalled}&demo=not_a_filter`, adminCookie);
+    check(
+      "an unknown demo filter is ignored rather than 400",
+      bogusDemo.status === 200 && leadsOf(bogusDemo).some((lead) => lead.id === subject.id),
+      `status ${bogusDemo.status}`,
+    );
+
+    // The worklist must not honour the parameter at all: it has no control to
+    // clear it and no chip to explain it.
+    const worklistPlain = (await get(leadList, adminCookie)).body.total as number;
+    const worklistWithDemo = (await get(`${leadList}&demo=none`, adminCookie)).body
+      .total as number;
+    check(
+      "the worklist ignores ?demo= entirely",
+      worklistPlain === worklistWithDemo,
+      `${worklistPlain} vs ${worklistWithDemo}`,
+    );
+
+    // The filter combines with the ordinary lead filters rather than replacing
+    // them — they are one `WHERE`.
+    const combined = await get(`${demoCalled}&demo=link&status=no_answer`, adminCookie);
+    check(
+      "the demo filter combines with the status filter",
+      leadsOf(combined).length === 1 && leadsOf(combined)[0]?.id === subject.id,
+      `${leadsOf(combined).length} rows`,
+    );
 
     // =======================================================================
     section("No duplication — the demo row is metadata, not a record");

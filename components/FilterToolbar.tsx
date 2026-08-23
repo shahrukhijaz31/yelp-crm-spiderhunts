@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, ListFilter, Search, X } from "lucide-react";
 
-import FilterPanel from "./FilterPanel";
+import FilterPanel, { type DemoCounts } from "./FilterPanel";
 import {
   describeActiveFilters,
   EMPTY_FILTERS,
@@ -35,6 +35,8 @@ export default function FilterToolbar({
   shown,
   open,
   onToggleOpen,
+  section = "leads",
+  demoCounts,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
@@ -43,6 +45,9 @@ export default function FilterToolbar({
   shown: number;
   open: boolean;
   onToggleOpen: () => void;
+  /** Passed straight through: it decides whether the demo band is drawn. */
+  section?: "leads" | "demo";
+  demoCounts?: DemoCounts;
 }) {
   const chips = describeActiveFilters(filters);
   const isFiltered = chips.length > 0;
@@ -221,6 +226,8 @@ export default function FilterToolbar({
                 onChange={onChange}
                 categories={categories}
                 stats={stats}
+                section={section}
+                demoCounts={demoCounts}
               />
             </div>
           </motion.div>
