@@ -40,6 +40,20 @@ enum CallStatus {
   @@map("call_status")
 }
 
+/// Which directory a lead was scraped out of. Mirrors `LEAD_SOURCES` in
+/// `lib/types.ts`, and like `CallStatus` the human labels ("Google Maps") live
+/// there rather than here, so renaming what the badge says is not a migration.
+///
+/// Two scrapers push into one table: a business found on both appears once
+/// (`mergeLeads` matches on phone, or name + address, whichever run arrives
+/// first), and this records which run put it there.
+enum LeadSource {
+  yelp
+  google
+
+  @@map("lead_source")
+}
+
 model Lead {
   /// cuid rather than an auto-increment int: leads get referenced from exports
   /// and (later) external systems, so the id must be safe to hand out and not
@@ -58,8 +72,12 @@ model Lead {
   website    String?
   rating     Float?
   owner      String?
-  /// Yelp listing URL — present in the scraper CSV and in the export.
+  /// The listing URL on whichever directory this lead came from — a Yelp biz
+  /// page or a Google Maps place — present in the scraper CSV and in the export.
   url        String?
+  /// Which directory that was. Defaults to `yelp` because that is the scraper
+  /// that was here first and it does not send the column; see the migration.
+  source     LeadSource @default(yelp)
 
   // --- Agent-owned fields ---
   status        CallStatus @default(not_called)
@@ -130,6 +148,8 @@ model Lead {
   /// the tab badges.
   @@index([firstCalledAt])
   @@index([callbackDate])
+  /// The filter rail's Source group filters on it and the panel counts by it.
+  @@index([source])
   @@index([sourceBatch])
   @@index([isDuplicate])
   @@map("leads")

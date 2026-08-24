@@ -1,4 +1,11 @@
-import { CALL_STATUSES, isCalled, type CallStatus, type Lead } from "./types";
+import {
+  CALL_STATUSES,
+  LEAD_SOURCES,
+  isCalled,
+  type CallStatus,
+  type Lead,
+  type LeadSource,
+} from "./types";
 
 /** Today's date as `YYYY-MM-DD` in the agent's local timezone. */
 export function todayIso(): string {
@@ -32,6 +39,13 @@ export interface LeadStats {
   called: number;
   notCalled: number;
   byStatus: Record<CallStatus, number>;
+  /**
+   * How many leads came from each directory. Sits beside `byStatus` and is
+   * used the same way: the filter panel puts a count against each option, so
+   * "Google Maps · 4,102" answers "is the new scraper actually feeding this?"
+   * without a click.
+   */
+  bySource: Record<LeadSource, number>;
   callbackDueToday: number;
   callbackOverdue: number;
   /*
@@ -46,6 +60,9 @@ export function computeStats(leads: Lead[], today = todayIso()): LeadStats {
   const byStatus = Object.fromEntries(
     CALL_STATUSES.map((status) => [status, 0]),
   ) as Record<CallStatus, number>;
+  const bySource = Object.fromEntries(
+    LEAD_SOURCES.map((source) => [source, 0]),
+  ) as Record<LeadSource, number>;
 
   let called = 0;
   let callbackDueToday = 0;
@@ -54,6 +71,7 @@ export function computeStats(leads: Lead[], today = todayIso()): LeadStats {
 
   for (const lead of leads) {
     byStatus[lead.status] += 1;
+    bySource[lead.source] += 1;
     if (isCalled(lead.status)) called += 1;
     if (!lead.website) missingWebsite += 1;
 
@@ -67,6 +85,7 @@ export function computeStats(leads: Lead[], today = todayIso()): LeadStats {
     called,
     notCalled: leads.length - called,
     byStatus,
+    bySource,
     callbackDueToday,
     callbackOverdue,
     missingWebsite,

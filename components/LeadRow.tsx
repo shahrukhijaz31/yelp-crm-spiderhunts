@@ -17,7 +17,11 @@ import { formatMeetingTime, isMeetingLead } from "@/lib/meetings";
 import type { DemoSummary } from "@/lib/demoWebsiteRules";
 import type { LeadSection } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
-import type { Lead } from "@/lib/types";
+import {
+  LEAD_SOURCE_SHORT_LABELS,
+  LEAD_SOURCE_STYLES,
+  type Lead,
+} from "@/lib/types";
 
 /**
  * One lead on the worklist — and, since the workspace exists, **one link**.
@@ -116,8 +120,9 @@ export default function LeadRow({
   // an anonymous cell and shunts the whole row across.
   const urgency = state === "overdue" || state === "today" ? state : undefined;
 
-  // The scraper stores whatever Yelp displayed, usually a bare domain, which is
-  // a relative path to a browser. Null means it is not a linkable address.
+  // The scrapers store whatever the listing displayed, usually a bare domain,
+  // which is a relative path to a browser. Null means it is not a linkable
+  // address.
   const websiteUrl = lead.website ? websiteHref(lead.website) : null;
 
   return (
@@ -140,24 +145,39 @@ export default function LeadRow({
         <span className="row-open-name block truncate text-cell font-medium tracking-[-0.012em] text-fg">
           {lead.name}
         </span>
-        {/* Only drawn when there is something to say — an always-present empty
-            line under every name would cost 16px a row across the whole list. */}
-        {(lead.rating !== null || lead.owner) && (
-          <span className="mt-0.5 flex items-center gap-1.5 text-meta text-fg-3">
-            {lead.rating !== null && (
-              <span className="tnum flex shrink-0 items-center gap-0.5 font-mono">
-                <Star className="h-2.5 w-2.5 fill-current" strokeWidth={0} aria-hidden="true" />
-                {lead.rating.toFixed(1)}
-              </span>
-            )}
-            {lead.rating !== null && lead.owner && <span aria-hidden="true">·</span>}
-            {lead.owner && (
-              <span className="truncate" title={lead.owner}>
-                {lead.owner}
-              </span>
-            )}
+        {/*
+          * The under-name line. It used to be drawn only when there was a
+          * rating or an owner to put on it, because an always-present empty
+          * line would have cost 16px a row across the whole list. Every lead
+          * now has a source, so the line is always earned — and the badge goes
+          * first, ahead of the rating, because "which directory is this" is
+          * read before "what does it score": a 4.2 on Google and a 4.2 on Yelp
+          * are not the same number, and the badge is what says which one this
+          * is.
+          */}
+        <span className="mt-0.5 flex items-center gap-1.5 text-meta text-fg-3">
+          {/* Deliberately smaller and quieter than the status chip two columns
+              over: a source is a fact about the row, not an outcome an agent
+              produced, and the two must not read as the same kind of thing. */}
+          <span
+            className={`shrink-0 rounded border px-1 py-px text-[10px] font-medium leading-[1.5] tracking-[0.02em] ${
+              LEAD_SOURCE_STYLES[lead.source]
+            }`}
+          >
+            {LEAD_SOURCE_SHORT_LABELS[lead.source]}
           </span>
-        )}
+          {lead.rating !== null && (
+            <span className="tnum flex shrink-0 items-center gap-0.5 font-mono">
+              <Star className="h-2.5 w-2.5 fill-current" strokeWidth={0} aria-hidden="true" />
+              {lead.rating.toFixed(1)}
+            </span>
+          )}
+          {lead.owner && (
+            <span className="truncate" title={lead.owner}>
+              {lead.owner}
+            </span>
+          )}
+        </span>
       </td>
 
       {/* Always present: `cleanLeads` drops rows without a dialable number.

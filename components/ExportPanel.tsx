@@ -62,8 +62,8 @@ export default function ExportPanel() {
         </ul>
         <p className="mt-3 text-ui leading-relaxed text-fg-3">
           CSV and Excel carry every column above. The PDF is a landscape call
-          sheet — it drops the Yelp URL, rating and owner so the columns an
-          agent reads while dialling stay legible on paper.
+          sheet — it drops the listing URL, source, rating and owner so the
+          columns an agent reads while dialling stay legible on paper.
         </p>
       </section>
     </div>

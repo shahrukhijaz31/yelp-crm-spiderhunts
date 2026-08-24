@@ -210,6 +210,21 @@
   --c-st-teal-bg: #0c2422;
   --c-st-teal-line: #1a4340;
 
+  /*
+   * SOURCE HUES — which directory a lead was scraped out of.
+   *
+   * Their own pair rather than two borrowed from the status set above: a source
+   * badge sits two columns from a status chip in the same row, and if it wore a
+   * status hue the two would read as the same kind of fact. Neither is the
+   * brand's own colour — Yelp's red is this app's accent and means "urgent".
+   */
+  --c-src-yelp: #d98ab8;
+  --c-src-yelp-bg: #241722;
+  --c-src-yelp-line: #452b3c;
+  --c-src-google: #8fa2f0;
+  --c-src-google-bg: #171a2b;
+  --c-src-google-line: #2c3355;
+
   /* Flags */
   --c-warn: #e0685f;
   --c-dup: #97a0e8;
@@ -439,6 +454,13 @@
   --c-st-teal-bg: #e7f5f3;
   --c-st-teal-line: #a7d8d3;
 
+  --c-src-yelp: #93356b;
+  --c-src-yelp-bg: #fceef6;
+  --c-src-yelp-line: #eec3dc;
+  --c-src-google: #3444a8;
+  --c-src-google-bg: #eef0fd;
+  --c-src-google-line: #c3cbf2;
+
   --c-warn: #b02b23;
   --c-dup: #3f47ad;
   --c-dup-bg: #eef0fc;
@@ -600,6 +622,13 @@
   --color-st-teal: var(--c-st-teal);
   --color-st-teal-bg: var(--c-st-teal-bg);
   --color-st-teal-line: var(--c-st-teal-line);
+
+  --color-src-yelp: var(--c-src-yelp);
+  --color-src-yelp-bg: var(--c-src-yelp-bg);
+  --color-src-yelp-line: var(--c-src-yelp-line);
+  --color-src-google: var(--c-src-google);
+  --color-src-google-bg: var(--c-src-google-bg);
+  --color-src-google-line: var(--c-src-google-line);
 
   --color-warn: var(--c-warn);
   --color-dup: var(--c-dup);

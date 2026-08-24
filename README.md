@@ -1,6 +1,7 @@
 # Lead Portal
 
-A call list for outbound agents working scraped Yelp business data. One screen:
+A call list for outbound agents working scraped business data — Yelp and Google
+Maps, each lead labelled with the directory it came from. One screen:
 every lead in a dense table, with status, notes and callback date editable
 inline. No detail pages, no one-record-at-a-time flow.
 
@@ -356,8 +357,8 @@ generated client lands in `lib/generated/prisma` and is gitignored.
 - **Upload** — `POST /api/leads/upload` parses with `parseLeadsCsv(csvText)` —
   the same function the browser used to call, unchanged — and merges into the
   table.
-- **Scraper ingest** — `POST /api/leads/ingest`, same parser, also merges.
-  See below.
+- **Scraper ingest** — `POST /api/leads/ingest`, same parser, also merges. Both
+  scrapers push here; `X-Source` names the directory. See below.
 - **Attribution** — the same `PATCH /api/leads/[id]` write also appends to
   `lead_activities`, using the user the session row resolved to. That log and
   `work_sessions` are the only source of the per-agent figures; both are
@@ -448,9 +449,16 @@ would walk an agent backwards through their own typing.
 
 ## Scraper ingest — `POST /api/leads/ingest`
 
-The Yelp scraper is a **separate project in a separate directory**, so it has no
+The scrapers are **separate projects in separate directories**, so they have no
 access to `lib/` or to Postgres. When a run finishes it POSTs the CSVs from its
 output folder to this endpoint.
+
+There are two of them — one reading Yelp, one reading Google Maps — and they
+share this endpoint rather than getting one each. They produce the same shape of
+row about the same kind of business into the same table; the one thing that
+differs is which directory it came from, and that is a column (`X-Source`) and
+not a second route with a duplicate copy of the parse, the merge and the
+reporting in it.
 
 **It merges, it does not replace.** A business already in the portal is skipped
 and left completely untouched — statuses, notes and booked callbacks survive
@@ -490,9 +498,12 @@ export LEAD_PORTAL_TOKEN=...          # /etc/leadportal/ingest-token on the serv
 python push_leads.py ./output --batch yelp-dentists-chicago
 ```
 
-**Response.** `200` with `{ inserted, skippedExisting, sourceBatch, files: [...] }`,
+**Response.** `200` with
+`{ inserted, skippedExisting, sourceBatch, declaredSource, bySource, files: [...] }`,
 where `sourceBatch` stamps every row of the push so a run can be traced or
-filtered later. Per-file parse warnings come back in `files[]`, and
+filtered later. `declaredSource` echoes the `X-Source` that was sent and
+`bySource` counts what the rows actually resolved to — compare the two to catch
+a Yelp CSV left behind in the Maps output folder. Per-file parse warnings come back in `files[]`, and
 `rejectedFiles` names any CSV that yielded nothing. A push where *no* file
 yielded a usable row is a `400`, not a quiet `200` — on a scheduled job, "0
 rows" that looks like success is how a broken scraper goes unnoticed for a week.
@@ -1004,12 +1015,42 @@ itself write.
 
 ## Expected CSV columns
 
-`name, address, categories, phone_number, website, rating, owner, url` — the
+`name, address, categories, phone_number, website, rating, owner, url` — either
 scraper's output. Common aliases (`phone`, `business_name`, `link`, …) are
-accepted; unrecognised columns are ignored with a warning. Rows with no name are
-skipped. A "phone" with fewer than 7 digits counts as no phone, and that row —
-along with any repeat of an earlier row — is filtered out before import. The
-banner reports how many of each were removed.
+accepted, including a Google Maps export's own names (`title`, `full_address`,
+`main_category`, `site`, `average_rating`, `maps_url`), so neither scraper has
+to be taught the other's vocabulary. Unrecognised columns are ignored with a
+warning. Rows with no name are skipped. A "phone" with fewer than 7 digits
+counts as no phone, and that row — along with any repeat of an earlier row — is
+filtered out before import. The banner reports how many of each were removed.
+
+### `source` — which directory a row came from
+
+Optional, and usually absent. Every lead carries one (`yelp` or `google`), and
+it is resolved per row from three things, in the order they deserve to be
+believed:
+
+1. the row's own `source` column, when the file has one;
+2. the listing URL's host — a `google.com/maps/place/…` or `yelp.com/biz/…` in
+   `url` settles it, which is what makes an export that forgot the column still
+   file itself correctly;
+3. the caller's default: the Source picker in the Import view, or `X-Source` on
+   an ingest push. Absent that, `yelp` — the scraper that was here first, and
+   the value every row already in the table was backfilled with.
+
+The per-row rules outrank the per-request one on purpose. A scraper pushing a
+folder can include one CSV left over from the other run, and a per-request label
+would relabel every row in it; a per-row URL cannot. Both the import banner and
+the ingest response report what the rows *actually* resolved to, so a mislabelled
+run shows up as a number that disagrees with the label rather than as a silently
+mis-filed scrape.
+
+Agents filter by it in the rail beside Status, it is a badge under the business
+name on every row, and it travels out in the `Source` column of a CSV/XLSX
+export (the listing URL column, once "Yelp URL", is now "Listing URL").
+
+`npm run test:lead-sources` covers the precedence rules, the Maps column names,
+the filter and the export. No database needed.
 ## A note on the `xlsx` dependency
 
 The npm-registry build of `xlsx` is pinned at 0.18.5 and carries two

@@ -18,7 +18,11 @@ import {
   CALL_STATUSES,
   CALL_STATUS_DOTS,
   CALL_STATUS_LABELS,
+  LEAD_SOURCES,
+  LEAD_SOURCE_DOTS,
+  LEAD_SOURCE_LABELS,
   type CallStatus,
+  type LeadSource,
 } from "@/lib/types";
 
 const CALLBACK_ORDER: CallbackRange[] = [
@@ -80,6 +84,13 @@ export default function FilterPanel({
       ? filters.statuses.filter((candidate) => candidate !== status)
       : [...filters.statuses, status];
     onChange({ ...filters, statuses: next });
+  }
+
+  function toggleSource(source: LeadSource) {
+    const next = filters.sources.includes(source)
+      ? filters.sources.filter((candidate) => candidate !== source)
+      : [...filters.sources, source];
+    onChange({ ...filters, sources: next });
   }
 
   function toggleCategory(name: string) {
@@ -195,6 +206,51 @@ export default function FilterPanel({
               </span>
             </Check>
           ))}
+        </div>
+
+        {/*
+          * --- Source ---------------------------------------------------
+          *
+          * Under Status rather than in a column of its own. Two options is not
+          * a column's worth of control — a fifth 215px track for two checkboxes
+          * would take width off Category, which is the list that actually needs
+          * it — and this belongs next to Status anyway: they are the two things
+          * an agent narrows by before they read a single row.
+          *
+          * Checkboxes and not buttons, unlike the demo band above, because the
+          * two are additive: ticking both is "everything", the same set as
+          * ticking neither. Exclusive buttons would have needed a third "All"
+          * option to say the same thing.
+          */}
+        <div className="mt-4">
+          <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+            <h3 className="eyebrow">Source</h3>
+            {filters.sources.length > 0 && (
+              <span className="ml-auto">
+                <Reset onClick={() => onChange({ ...filters, sources: [] })} />
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-y-0.5">
+            {LEAD_SOURCES.map((source) => (
+              <Check
+                key={source}
+                checked={filters.sources.includes(source)}
+                onChange={() => toggleSource(source)}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${LEAD_SOURCE_DOTS[source]}`}
+                />
+                <span className="min-w-0 flex-1 leading-snug">
+                  {LEAD_SOURCE_LABELS[source]}
+                </span>
+                <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                  {stats.bySource[source]}
+                </span>
+              </Check>
+            ))}
+          </div>
         </div>
       </Group>
 

@@ -1,5 +1,11 @@
 import { callbackState, normalisePhone, todayIso } from "./leadUtils";
-import { CALL_STATUS_LABELS, type CallStatus, type Lead } from "./types";
+import {
+  CALL_STATUS_LABELS,
+  LEAD_SOURCE_LABELS,
+  type CallStatus,
+  type Lead,
+  type LeadSource,
+} from "./types";
 
 /**
  * The filter model, kept out of the components on purpose.
@@ -69,6 +75,13 @@ export interface LeadFilters {
   query: string;
   /** Empty means "all statuses" rather than "none". */
   statuses: CallStatus[];
+  /**
+   * Which directories to show. Empty means all of them, exactly like
+   * `statuses` — and with two sources that is the same set as ticking both, so
+   * the panel's Reset and "untick everything" land on one state rather than
+   * two that look identical and query differently.
+   */
+  sources: LeadSource[];
   /** Empty means "all categories". A lead matches if it has *any* of these. */
   categories: string[];
   ratingMin: number | null;
@@ -89,6 +102,7 @@ export interface LeadFilters {
 export const EMPTY_FILTERS: LeadFilters = {
   query: "",
   statuses: [],
+  sources: [],
   categories: [],
   ratingMin: null,
   ratingMax: null,
@@ -98,7 +112,7 @@ export const EMPTY_FILTERS: LeadFilters = {
   demo: "all",
 };
 
-/** Selectable rating steps, matching the half-star values Yelp reports. */
+/** Selectable rating steps — the half-star values both directories report. */
 export const RATING_STEPS = [3, 3.5, 4, 4.5, 5] as const;
 
 // --- category options -------------------------------------------------------
@@ -224,6 +238,9 @@ export function matchesFilters(
   if (filters.statuses.length > 0 && !filters.statuses.includes(lead.status)) {
     return false;
   }
+  if (filters.sources.length > 0 && !filters.sources.includes(lead.source)) {
+    return false;
+  }
   if (
     filters.categories.length > 0 &&
     !lead.categories.some((category) => filters.categories.includes(category))
@@ -270,6 +287,17 @@ export function describeActiveFilters(filters: LeadFilters): FilterChip[] {
       next: {
         ...filters,
         statuses: filters.statuses.filter((candidate) => candidate !== status),
+      },
+    });
+  }
+
+  for (const source of filters.sources) {
+    chips.push({
+      id: `source:${source}`,
+      label: LEAD_SOURCE_LABELS[source],
+      next: {
+        ...filters,
+        sources: filters.sources.filter((candidate) => candidate !== source),
       },
     });
   }

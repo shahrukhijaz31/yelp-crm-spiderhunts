@@ -55,6 +55,7 @@ export function toLead(row: LeadRow): Lead {
     rating: row.rating,
     owner: row.owner,
     url: row.url,
+    source: row.source,
     status: row.status,
     notes: row.notes,
     callbackDate: toIsoDate(row.callbackDate),
@@ -83,6 +84,7 @@ export function toCreateData(lead: Lead, sourceBatch: string | null) {
     rating: lead.rating,
     owner: lead.owner,
     url: lead.url,
+    source: lead.source,
     status: lead.status,
     /*
      * A row arriving already carrying an outcome has, by definition, been

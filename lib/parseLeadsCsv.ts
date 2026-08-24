@@ -1,7 +1,14 @@
 import Papa from "papaparse";
 
 import { cleanLeads } from "./cleanLeads";
-import type { Lead } from "./types";
+import {
+  DEFAULT_LEAD_SOURCE,
+  LEAD_SOURCES,
+  leadSourceFromUrl,
+  parseLeadSource,
+  type Lead,
+  type LeadSource,
+} from "./types";
 
 /**
  * CSV -> Lead[] conversion, isolated from React and from the browser.
@@ -11,20 +18,52 @@ import type { Lead } from "./types";
  * no rework needed. `parseLeadsCsvFile` is the thin browser-only wrapper that
  * reads a `File` and hands the text off.
  *
- * Expected columns (the scraper's output):
+ * Expected columns (either scraper's output):
  *   name, address, categories, phone_number, website, rating, owner, url
+ *
+ * Plus an optional `source` column. Two scrapers now feed this parser — Yelp
+ * and Google Maps — and neither is asked to agree with the other on column
+ * names: the aliases below cover both vocabularies, so a Maps export naming its
+ * link `maps_url` and its category `main_category` lands in the same shape a
+ * Yelp export does.
  */
 
 /** Header aliases, so a slightly renamed export column still lands correctly. */
 const COLUMN_ALIASES: Record<keyof CsvRow, string[]> = {
   name: ["name", "business_name", "business name", "title"],
-  address: ["address", "full_address", "location"],
-  categories: ["categories", "category", "tags"],
-  phone_number: ["phone_number", "phone", "phone number", "telephone"],
-  website: ["website", "site", "web"],
-  rating: ["rating", "stars", "score"],
-  owner: ["owner", "owner_name", "contact"],
-  url: ["url", "yelp_url", "listing_url", "link"],
+  address: ["address", "full_address", "location", "formatted_address"],
+  categories: ["categories", "category", "tags", "main_category", "types"],
+  phone_number: [
+    "phone_number",
+    "phone",
+    "phone number",
+    "telephone",
+    "international_phone_number",
+  ],
+  website: ["website", "site", "web", "domain"],
+  rating: ["rating", "stars", "score", "average_rating"],
+  owner: ["owner", "owner_name", "contact", "owner_title"],
+  url: [
+    "url",
+    "yelp_url",
+    "listing_url",
+    "link",
+    // What a Google Maps export calls the same column.
+    "maps_url",
+    "google_url",
+    "google_maps_url",
+    "place_link",
+    "place_url",
+  ],
+  /**
+   * Which directory the row came from, when the file says so.
+   *
+   * Optional, and usually absent: the Yelp scraper predates the column
+   * entirely, and a Maps export names the source in its filename rather than in
+   * a column. {@link resolveSource} is what fills the gap — this is only the
+   * first and most explicit of the three ways a row gets a source.
+   */
+  source: ["source", "lead_source", "platform", "directory"],
 };
 
 interface CsvRow {
@@ -36,6 +75,7 @@ interface CsvRow {
   rating: string;
   owner: string;
   url: string;
+  source: string;
 }
 
 export interface ParseLeadsResult {
@@ -51,6 +91,16 @@ export interface ParseLeadsResult {
   removedNoPhone: number;
   /** Dropped by `cleanLeads` as repeats of an earlier row. */
   removedDuplicates: number;
+  /**
+   * How many of the kept rows landed on each source.
+   *
+   * Reported rather than assumed, because a source is *resolved* per row (see
+   * {@link resolveSource}) and not simply taken from the caller. A push the
+   * Google scraper labelled `google` that comes back "412 Yelp" is a mislabelled
+   * run, and the import banner and the ingest response both say so instead of
+   * silently filing a whole scrape under the wrong directory.
+   */
+  bySource: Record<LeadSource, number>;
 }
 
 export class LeadsCsvError extends Error {}
@@ -124,14 +174,42 @@ function parsePhone(value: unknown): string | null {
 }
 
 /**
+ * One row's source, from the three things that can say what it is, in the order
+ * they deserve to be believed.
+ *
+ *   1. The row's own `source` column, when the file has one and it names a
+ *      source we know. The file is being explicit; nothing outranks that.
+ *   2. The listing URL's host. A Maps export always carries
+ *      `https://www.google.com/maps/place/…`, so a run that forgot the column
+ *      still files itself correctly — which matters because the alternative is
+ *      not "unknown", it is "silently Yelp".
+ *   3. The caller's default: the `?source=` an admin picked in the Import view,
+ *      or the `X-Source` the scraper sent. Absent that, `DEFAULT_LEAD_SOURCE`.
+ *
+ * Note the order between 2 and 3: the row's own URL beats the header. A scraper
+ * pushing a folder can hand over one CSV from the other run by accident, and a
+ * per-request label would relabel every row in it; a per-row URL cannot.
+ */
+function resolveSource(
+  sourceCell: unknown,
+  url: string | null,
+  fallback: LeadSource,
+): LeadSource {
+  return parseLeadSource(sourceCell) ?? leadSourceFromUrl(url) ?? fallback;
+}
+
+/**
  * Parse CSV text into leads. Runtime-agnostic: no DOM, no fs.
  *
  * @param csvText raw file contents
  * @param idPrefix prefix for generated ids, so two uploads can't collide
+ * @param defaultSource which directory rows came from when neither a `source`
+ *   column nor the listing URL says. See {@link resolveSource}.
  */
 export function parseLeadsCsv(
   csvText: string,
   idPrefix = "csv",
+  defaultSource: LeadSource = DEFAULT_LEAD_SOURCE,
 ): ParseLeadsResult {
   const result = Papa.parse<Record<string, string>>(csvText, {
     header: true,
@@ -175,6 +253,8 @@ export function parseLeadsCsv(
       return;
     }
 
+    const url = nullable(row.url);
+
     parsed.push({
       id: `${idPrefix}-${index + 1}`,
       name,
@@ -184,7 +264,8 @@ export function parseLeadsCsv(
       website: nullable(row.website),
       rating: parseRating(row.rating),
       owner: nullable(row.owner),
-      url: nullable(row.url),
+      url,
+      source: resolveSource(row.source, url, defaultSource),
       // Agent-owned fields always start empty on import.
       status: "not_called",
       notes: "",
@@ -204,6 +285,13 @@ export function parseLeadsCsv(
   // the worklist has nothing to flag and the agent has nothing to skip past.
   const cleaned = cleanLeads(parsed);
 
+  // Counted after the clean, so the figure describes the rows that were
+  // actually kept rather than the ones the file contained.
+  const bySource = Object.fromEntries(
+    LEAD_SOURCES.map((source) => [source, 0]),
+  ) as Record<LeadSource, number>;
+  for (const lead of cleaned.leads) bySource[lead.source] += 1;
+
   return {
     leads: cleaned.leads,
     warnings,
@@ -211,12 +299,16 @@ export function parseLeadsCsv(
     parsedRows: parsed.length,
     removedNoPhone: cleaned.removedNoPhone,
     removedDuplicates: cleaned.removedDuplicates,
+    bySource,
   };
 }
 
 /** Browser-only convenience wrapper around {@link parseLeadsCsv}. */
-export async function parseLeadsCsvFile(file: File): Promise<ParseLeadsResult> {
+export async function parseLeadsCsvFile(
+  file: File,
+  defaultSource: LeadSource = DEFAULT_LEAD_SOURCE,
+): Promise<ParseLeadsResult> {
   const text = await file.text();
   const idPrefix = file.name.replace(/\.csv$/i, "").replace(/\W+/g, "-").slice(0, 24) || "csv";
-  return parseLeadsCsv(text, idPrefix);
+  return parseLeadsCsv(text, idPrefix, defaultSource);
 }

@@ -89,6 +89,7 @@ function lead(overrides: Partial<Lead>): Lead {
     rating: 4.5,
     owner: null,
     url: null,
+    source: "yelp",
     status: "not_called",
     firstCalledAt: null,
     notes: "",
@@ -102,6 +103,12 @@ function lead(overrides: Partial<Lead>): Lead {
     createdAt: "2026-08-17T00:00:00.000Z",
     updatedAt: "2026-08-17T00:00:00.000Z",
     ...overrides,
+    // `as Lead` because this fixture deliberately carries database-only fields
+    // (`firstCalledAt`, `isDuplicate`, the timestamps) that a `Lead` does not
+    // have, to prove the export ignores them. The cost is that a field *added*
+    // to `Lead` is not caught here by the compiler — `source` was not, and the
+    // export threw on `undefined` at runtime instead. If a third field goes the
+    // same way, split this into a typed `Lead` plus a separately-cast tail.
   } as Lead;
 }
 

@@ -15,6 +15,7 @@
     "db:studio": "prisma studio",
     "user:create": "tsx scripts/create-user.ts",
     "screenshots:retention": "tsx scripts/screenshot-retention.ts",
+    "test:lead-sources": "tsx scripts/test-lead-sources.ts",
     "test:recordings": "tsx scripts/test-recordings.ts",
     "test:activity": "tsx scripts/test-activity.ts",
     "test:screenshots": "tsx scripts/test-screenshots.ts",

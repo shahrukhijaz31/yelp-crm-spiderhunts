@@ -38,7 +38,13 @@ import type { LeadDetail } from "@/lib/leadDb";
 import type { DemoSummary } from "@/lib/demoWebsiteRules";
 import type { LeadSection } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
-import { CALL_STATUS_LABELS, type Lead, type LeadEditableFields } from "@/lib/types";
+import {
+  CALL_STATUS_LABELS,
+  LEAD_SOURCE_LABELS,
+  LEAD_SOURCE_STYLES,
+  type Lead,
+  type LeadEditableFields,
+} from "@/lib/types";
 import { whatsappLink } from "@/lib/whatsapp";
 
 /**
@@ -350,6 +356,15 @@ export default function LeadWorkspace({
   }, [dirty]);
 
   const website = lead.website ? websiteHref(lead.website) : null;
+  /*
+   * The listing this lead was scraped from.
+   *
+   * Run through the same `websiteHref` guard the business's own site is, and
+   * for the same reason: it is a string a third party put on a page, it lands
+   * in an `href`, and a `javascript:` URL there would run when an agent clicked
+   * it. `null` means it is shown as text, or not at all.
+   */
+  const listing = lead.url ? websiteHref(lead.url) : null;
   const whatsapp = whatsappLink(lead.phone);
   const meetingState = callbackState(shown, serverToday);
 
@@ -550,6 +565,36 @@ export default function LeadWorkspace({
           </Fact>
 
           <Fact label="Owner">{lead.owner}</Fact>
+
+          {/*
+            * Where this lead came from, and the page it came from.
+            *
+            * One fact rather than two: "Google Maps" and the Maps URL are the
+            * same answer at two levels of detail, and an agent who wants to
+            * check what the scraper saw — the photos, the hours, the reviews
+            * the columns above flatten — wants the link, not the word.
+            */}
+          <Fact label="Source">
+            <span className="inline-flex items-center gap-2">
+              <span className={`chip border ${LEAD_SOURCE_STYLES[lead.source]}`}>
+                {LEAD_SOURCE_LABELS[lead.source]}
+              </span>
+              {listing && (
+                <a
+                  href={listing}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={listing}
+                  className="inline-flex items-center gap-1 text-fg-2 transition-colors hover:text-accent"
+                >
+                  <span className="underline decoration-line-2 underline-offset-[3px]">
+                    Listing
+                  </span>
+                  <ArrowUpRight className="h-3 w-3 shrink-0" strokeWidth={2} aria-hidden="true" />
+                </a>
+              )}
+            </span>
+          </Fact>
         </dl>
       </div>
     </section>

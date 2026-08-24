@@ -1,5 +1,5 @@
 import { todayIso } from "./leadUtils";
-import type { CallStatus, Lead } from "./types";
+import type { CallStatus, Lead, LeadSource } from "./types";
 
 /**
  * Sample data. No longer part of any request path — the app reads Postgres now
@@ -46,6 +46,26 @@ function isoOffsetDays(offsetDays: number): string {
 
 function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/**
+ * Which directory a fixture lead pretends to have come from.
+ *
+ * Every third one is Google, so a seeded database exercises the Source filter,
+ * the row badge and the export column instead of showing one value everywhere —
+ * a fixture where every lead is Yelp would look identical whether the source
+ * column worked or not. Deterministic rather than random for the usual reason:
+ * two people running the seed should be looking at the same portal.
+ */
+function seedSource(index: number): LeadSource {
+  return index % 3 === 0 ? "google" : "yelp";
+}
+
+/** The listing URL a lead of that source would actually carry. */
+function listingUrl(source: LeadSource, name: string): string {
+  return source === "google"
+    ? `https://www.google.com/maps/place/${encodeURIComponent(name)}`
+    : `https://www.yelp.com/biz/${slugify(name)}-san-francisco`;
 }
 
 const SEEDS: MockSeed[] = [
@@ -446,24 +466,28 @@ const SEEDS: MockSeed[] = [
 ];
 
 export function getMockLeads(): Lead[] {
-  return SEEDS.map((seed, index) => ({
-    id: `mock-${String(index + 1).padStart(3, "0")}`,
-    name: seed.name,
-    address: seed.address,
-    categories: seed.categories,
-    phone: seed.phone,
-    website: seed.website,
-    rating: seed.rating,
-    owner: seed.owner,
-    url: `https://www.yelp.com/biz/${slugify(seed.name)}-san-francisco`,
-    status: seed.status ?? "not_called",
-    notes: seed.notes ?? "",
-    callbackDate:
-      seed.callbackInDays === undefined ? null : isoOffsetDays(seed.callbackInDays),
-    meetingTime: seed.meetingTime ?? null,
-    meetingAttendees: seed.meetingAttendees ?? null,
-    meetingNotes: seed.meetingNotes ?? "",
-    meetingCompletedAt:
-      seed.completedInDays === undefined ? null : isoOffsetDays(seed.completedInDays),
-  }));
+  return SEEDS.map((seed, index) => {
+    const source = seedSource(index);
+    return {
+      id: `mock-${String(index + 1).padStart(3, "0")}`,
+      name: seed.name,
+      address: seed.address,
+      categories: seed.categories,
+      phone: seed.phone,
+      website: seed.website,
+      rating: seed.rating,
+      owner: seed.owner,
+      url: listingUrl(source, seed.name),
+      source,
+      status: seed.status ?? "not_called",
+      notes: seed.notes ?? "",
+      callbackDate:
+        seed.callbackInDays === undefined ? null : isoOffsetDays(seed.callbackInDays),
+      meetingTime: seed.meetingTime ?? null,
+      meetingAttendees: seed.meetingAttendees ?? null,
+      meetingNotes: seed.meetingNotes ?? "",
+      meetingCompletedAt:
+        seed.completedInDays === undefined ? null : isoOffsetDays(seed.completedInDays),
+    };
+  });
 }

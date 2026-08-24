@@ -6,7 +6,15 @@ import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
 import type { LeadPageMeta, LeadPageQuery, LeadSort, LeadSortKey } from "./leadQuery";
 import { normalisePhone, type LeadStats } from "./leadUtils";
 import { prisma } from "./prisma";
-import { CALL_STATUSES, isCalled, type CallStatus, type Lead, type LeadEditableFields } from "./types";
+import {
+  CALL_STATUSES,
+  LEAD_SOURCES,
+  isCalled,
+  type CallStatus,
+  type Lead,
+  type LeadEditableFields,
+  type LeadSource,
+} from "./types";
 import type { LeadWorkCounts, LeadWorkState } from "./workState";
 
 /**
@@ -162,6 +170,12 @@ function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
   // --- status: empty means "all statuses", never "none" ---
   if (filters.statuses.length > 0) {
     clauses.push(Prisma.sql`l.status::text IN (${Prisma.join(filters.statuses)})`);
+  }
+
+  // --- source: empty means "every directory", never "none" — same rule as
+  //     status, and the same reason: the filter narrows, it does not exclude ---
+  if (filters.sources.length > 0) {
+    clauses.push(Prisma.sql`l.source::text IN (${Prisma.join(filters.sources)})`);
   }
 
   // --- category: a lead matches if it has *any* of them (`&&` is overlap) ---
@@ -559,16 +573,22 @@ export async function leadStats(today: string): Promise<LeadStats> {
   // is unset", quietly reporting every undated lead as due today.
   if (!todayDate) throw new Error(`leadStats expected YYYY-MM-DD, got ${today}`);
 
-  // One transaction, so the five figures describe the same instant. A status
-  // total that had counted a lead the callback totals had not would show up as
-  // a stat bar that does not add up.
-  const [groups, total, callbackDueToday, callbackOverdue, missingWebsite] =
+  // One transaction, so the figures describe the same instant. A status total
+  // that had counted a lead the callback totals had not would show up as a
+  // stat bar that does not add up.
+  const [groups, sourceGroups, total, callbackDueToday, callbackOverdue, missingWebsite] =
     await prisma.$transaction([
       // Raw rather than `groupBy` only because `groupBy`'s inferred result type
       // is widened past usefulness by `$transaction`'s tuple; the statement is
       // the one `groupBy` would have written.
       prisma.$queryRaw<{ status: CallStatus; count: number }[]>(
         Prisma.sql`SELECT status::text AS status, count(*)::int AS count FROM leads GROUP BY status`,
+      ),
+      // Two rows at most, and inside the same transaction as the status counts
+      // so the two breakdowns of the same table cannot add up to two different
+      // totals on the same screen.
+      prisma.$queryRaw<{ source: LeadSource; count: number }[]>(
+        Prisma.sql`SELECT source::text AS source, count(*)::int AS count FROM leads GROUP BY source`,
       ),
       prisma.lead.count(),
       prisma.lead.count({ where: { callbackDate: todayDate } }),
@@ -582,6 +602,14 @@ export async function leadStats(today: string): Promise<LeadStats> {
   ) as Record<CallStatus, number>;
   for (const group of groups) byStatus[group.status] += group.count;
 
+  // Seeded at zero for every source, so a directory nobody has scraped yet
+  // still appears in the filter panel — as an option reading "0" rather than as
+  // an option that is silently missing.
+  const bySource = Object.fromEntries(
+    LEAD_SOURCES.map((source) => [source, 0]),
+  ) as Record<LeadSource, number>;
+  for (const group of sourceGroups) bySource[group.source] += group.count;
+
   // `isCalled` is "anything but not_called", so the not-called count *is* the
   // uncalled total and there is nothing to add up.
   const notCalled = byStatus.not_called;
@@ -591,6 +619,7 @@ export async function leadStats(today: string): Promise<LeadStats> {
     called: total - notCalled,
     notCalled,
     byStatus,
+    bySource,
     callbackDueToday,
     callbackOverdue,
     missingWebsite,

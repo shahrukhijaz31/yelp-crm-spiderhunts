@@ -4,6 +4,13 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { describeCleaning } from "@/lib/cleanLeads";
+import {
+  DEFAULT_LEAD_SOURCE,
+  LEAD_SOURCES,
+  LEAD_SOURCE_DOTS,
+  LEAD_SOURCE_LABELS,
+  type LeadSource,
+} from "@/lib/types";
 
 const EXPECTED_COLUMNS = [
   "name",
@@ -14,6 +21,7 @@ const EXPECTED_COLUMNS = [
   "rating",
   "owner",
   "url",
+  "source",
 ];
 
 type Notice = { tone: "ok" | "error"; message: string; lines?: string[] };
@@ -45,6 +53,8 @@ interface UploadResult {
   total: number;
   removedNoPhone: number;
   removedDuplicates: number;
+  /** What the rows actually resolved to — not simply what was picked below. */
+  bySource: Record<LeadSource, number>;
   warnings: string[];
 }
 export default function ImportPanel({ initialTotal }: { initialTotal: number }) {
@@ -53,6 +63,16 @@ export default function ImportPanel({ initialTotal }: { initialTotal: number }) 
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  /*
+   * Which directory this file came from, when the file itself does not say.
+   *
+   * A *fallback* and not a label: the server believes a row's own `source`
+   * column first and its listing URL second (`resolveSource` in
+   * `lib/parseLeadsCsv.ts`), so picking Google here cannot relabel a Yelp
+   * export that was dropped in by mistake. That is why the report below counts
+   * what actually landed rather than echoing this back.
+   */
+  const [source, setSource] = useState<LeadSource>(DEFAULT_LEAD_SOURCE);
   // Seeded by the server and moved on by the upload's own report, so the line
   // under the drop target is right immediately after an import rather than
   // waiting for the refresh below to come back.
@@ -64,6 +84,7 @@ export default function ImportPanel({ initialTotal }: { initialTotal: number }) 
     try {
       const body = new FormData();
       body.append("file", file);
+      body.append("source", source);
       const response = await fetch("/api/leads/upload", { method: "POST", body });
       const payload = await response.json();
 
@@ -99,8 +120,20 @@ export default function ImportPanel({ initialTotal }: { initialTotal: number }) 
         removedNoPhone: result.removedNoPhone,
         removedDuplicates: result.removedDuplicates,
       });
+      // "…of which 312 from Google Maps and 4 from Yelp." Only drawn when the
+      // file actually held both, because on a single-source import it would
+      // restate the number in the sentence before it.
+      const mixed = LEAD_SOURCES.filter((key) => (result.bySource?.[key] ?? 0) > 0);
+      const breakdown =
+        mixed.length > 1
+          ? `From ${mixed
+              .map((key) => `${result.bySource[key]} ${LEAD_SOURCE_LABELS[key]}`)
+              .join(" and ")}.`
+          : null;
+
       const sentences = [
         `Added ${result.imported} new lead${result.imported === 1 ? "" : "s"}.`,
+        breakdown,
         result.skippedExisting > 0
           ? `${result.skippedExisting} ${result.skippedExisting === 1 ? "was" : "were"} already in the worklist and ${result.skippedExisting === 1 ? "was" : "were"} left unchanged.`
           : null,
@@ -129,13 +162,61 @@ export default function ImportPanel({ initialTotal }: { initialTotal: number }) 
       <header>
         <h1 className="page-title">Import leads</h1>
         <p className="mt-3 page-intro">
-          Load a CSV from the scraper. New businesses are added to the worklist
+          Load a CSV from either scraper. New businesses are added to the worklist
           and saved to the database; any already on it are left untouched, so
           statuses, notes and callbacks are never overwritten by an import. Rows
           without a dialable phone number, and repeats within the file, are
           removed automatically.
         </p>
       </header>
+
+      {/*
+        * --- Source ------------------------------------------------------
+        *
+        * Above the drop target, because it has to be answered before the file
+        * is dropped — the upload starts the instant a file lands, and there is
+        * no confirm step to change it in.
+        *
+        * Worded as a fallback rather than as a label, and it means it: the
+        * server reads each row's own `source` column and listing URL first, so
+        * a Maps export dropped here with "Yelp" selected still files itself as
+        * Google. The sentence under the buttons says so, because a control that
+        * looks decisive but is not is worse than no control.
+        */}
+      <section className="panel px-5 py-4">
+        <h2 className="eyebrow">Source</h2>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {LEAD_SOURCES.map((option) => {
+            const active = source === option;
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setSource(option)}
+                aria-pressed={active}
+                className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-ui transition-colors ${
+                  active
+                    ? "border-accent-line bg-accent-soft font-medium text-accent"
+                    : "border-line bg-surface text-fg-2 hover:border-line-2 hover:text-fg"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${LEAD_SOURCE_DOTS[option]}`}
+                />
+                {LEAD_SOURCE_LABELS[option]}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-3 text-ui leading-relaxed text-fg-3">
+          Used only for rows that do not say where they came from. A{" "}
+          <span className="font-mono">source</span> column, or a listing URL on{" "}
+          <span className="font-mono">yelp.com</span> or{" "}
+          <span className="font-mono">google.com/maps</span>, wins over this —
+          so dropping the wrong export here cannot mislabel it.
+        </p>
+      </section>
 
       <input
         ref={inputRef}
@@ -245,7 +326,9 @@ export default function ImportPanel({ initialTotal }: { initialTotal: number }) 
         <p className="mt-3 text-ui leading-relaxed text-fg-3">
           Common aliases (<span className="font-mono">phone</span>,{" "}
           <span className="font-mono">business_name</span>,{" "}
-          <span className="font-mono">link</span>) are accepted; unrecognised
+          <span className="font-mono">link</span>,{" "}
+          <span className="font-mono">maps_url</span>,{" "}
+          <span className="font-mono">main_category</span>) are accepted; unrecognised
           columns are ignored with a warning. Rows without a name are skipped,
           and a phone with fewer than seven digits counts as no phone at all, so
           that row is filtered out rather than imported.

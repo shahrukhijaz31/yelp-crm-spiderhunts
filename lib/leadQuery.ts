@@ -6,7 +6,7 @@ import {
   type DemoFilter,
   type LeadFilters,
 } from "./filters";
-import { CALL_STATUSES, type CallStatus } from "./types";
+import { CALL_STATUSES, LEAD_SOURCES, type CallStatus, type LeadSource } from "./types";
 import { WORKLIST_VIEWS, type WorklistView } from "./views";
 import {
   DEFAULT_WORK_STATE,
@@ -183,6 +183,10 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   if (text) params.set("q", text.slice(0, MAX_QUERY_LENGTH));
 
   for (const status of filters.statuses) params.append("status", status);
+  // Repeated, like `status` and `category`: the three are multi-select lists
+  // and a comma-joined value would have to be split back apart by a second
+  // convention that could disagree with this one.
+  for (const source of filters.sources) params.append("source", source);
   for (const category of filters.categories) params.append("category", category);
 
   if (filters.ratingMin !== null) params.set("ratingMin", String(filters.ratingMin));
@@ -253,6 +257,15 @@ export function parseLeadSearchParams(
       (CALL_STATUSES as readonly string[]).includes(value),
     );
 
+  // Same closed-set treatment as `status`: an unrecognised `?source=facebook`
+  // is dropped rather than queried for, so a hand-edited URL cannot ask the
+  // database about a directory that does not exist.
+  const sources = params
+    .getAll("source")
+    .filter((value): value is LeadSource =>
+      (LEAD_SOURCES as readonly string[]).includes(value),
+    );
+
   // Blank strings dropped: `?category=` is not a request for the leads whose
   // category is the empty string, it is a stray separator.
   const categories = params.getAll("category").filter((value) => value.trim() !== "");
@@ -278,6 +291,7 @@ export function parseLeadSearchParams(
     ...EMPTY_FILTERS,
     query: (params.get("q") ?? "").slice(0, MAX_QUERY_LENGTH),
     statuses,
+    sources,
     categories,
     ratingMin: readRating(params.get("ratingMin")),
     ratingMax: readRating(params.get("ratingMax")),

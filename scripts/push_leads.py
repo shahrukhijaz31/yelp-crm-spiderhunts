@@ -6,13 +6,20 @@ project (it lives here so the endpoint and its only client stay in one repo and
 cannot drift). Standard library only, so it runs in any virtualenv the scraper
 already has.
 
-    python push_leads.py ./output
+    python push_leads.py ./output --source google
     python push_leads.py ./output/yelp_dentists.csv --batch yelp-dentists
 
 Configuration, by environment variable or flag:
 
     LEAD_PORTAL_URL     https://leads.spiderhunts-coworkingspace.com
     LEAD_PORTAL_TOKEN   the INGEST_TOKEN from /etc/lead-portal/env
+
+`--source` names the directory the run read: `yelp` (the default) or `google`.
+It is a FALLBACK, not a label — the portal believes each row's own `source`
+column first and its listing URL second, so a `google.com/maps/place/...` in a
+row files that row as Google whatever this flag says. That is deliberate: a
+folder that picked up one CSV from the other run would otherwise be relabelled
+wholesale. The portal reports back what the rows actually resolved to.
 
 Semantics worth knowing before wiring this into a cron job: the endpoint
 MERGES. Businesses already in the portal are skipped untouched, so agents'
@@ -35,6 +42,10 @@ import uuid
 from pathlib import Path
 
 ENDPOINT = "/api/leads/ingest"
+# What the portal will accept in X-Source. Anything else is a 400 there rather
+# than a default, so it is refused here too — with a message that names the
+# flag instead of quoting an HTTP status.
+SOURCES = ("yelp", "google")
 # The server rejects >32MB per push; stop before the wire so the failure names
 # the actual problem instead of arriving as a 413.
 MAX_BYTES = 32 * 1024 * 1024
@@ -70,7 +81,13 @@ def encode_multipart(files: list[Path]) -> tuple[bytes, str]:
     return b"".join(parts), f"multipart/form-data; boundary={boundary}"
 
 
-def push(base_url: str, token: str, files: list[Path], batch: str | None) -> dict:
+def push(
+    base_url: str,
+    token: str,
+    files: list[Path],
+    batch: str | None,
+    source: str | None,
+) -> dict:
     body, content_type = encode_multipart(files)
     if len(body) > MAX_BYTES:
         raise SystemExit(
@@ -84,6 +101,8 @@ def push(base_url: str, token: str, files: list[Path], batch: str | None) -> dic
     }
     if batch:
         headers["X-Batch"] = batch
+    if source:
+        headers["X-Source"] = source
 
     request = urllib.request.Request(
         base_url.rstrip("/") + ENDPOINT, data=body, headers=headers, method="POST"
@@ -119,6 +138,12 @@ def main() -> int:
         help="ingest token (default: $LEAD_PORTAL_TOKEN)",
     )
     parser.add_argument("--batch", help="name for this run, stamped on every row")
+    parser.add_argument(
+        "--source",
+        choices=SOURCES,
+        help="which directory this run read; used only for rows that do not say "
+        "(default: yelp, the portal's own default)",
+    )
     args = parser.parse_args()
 
     if not args.url or not args.token:
@@ -134,13 +159,23 @@ def main() -> int:
         return 1
 
     print(f"pushing {len(files)} file(s) to {args.url}{ENDPOINT}")
-    result = push(args.url, args.token, files, args.batch)
+    result = push(args.url, args.token, files, args.batch, args.source)
 
     print(
         f"inserted {result['inserted']} new lead(s), "
         f"skipped {result['skippedExisting']} already in the portal "
         f"(batch {result['sourceBatch']})"
     )
+    # What the rows actually resolved to. Printed whenever it is not simply the
+    # source that was declared — that disagreement is the visible symptom of a
+    # CSV from the other scraper sitting in this output folder.
+    by_source = result.get("bySource") or {}
+    landed = {name: count for name, count in by_source.items() if count}
+    declared = result.get("declaredSource")
+    if len(landed) > 1 or (landed and declared and declared not in landed):
+        summary = ", ".join(f"{count} {name}" for name, count in landed.items())
+        print(f"  source breakdown: {summary} (declared {declared})", file=sys.stderr)
+
     for report in result.get("files", []):
         for warning in report.get("warnings", []):
             print(f"  {report['filename']}: {warning}", file=sys.stderr)

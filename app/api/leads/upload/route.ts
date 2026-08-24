@@ -2,6 +2,7 @@ import { apiAdmin } from "@/lib/authz";
 import { countLeads, mergeLeads } from "@/lib/leadDb";
 import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
 import { LEAD_IMPORT_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
+import { DEFAULT_LEAD_SOURCE, parseLeadSource } from "@/lib/types";
 
 /**
  * POST /api/leads/upload — import a CSV into Postgres.
@@ -61,7 +62,7 @@ function batchIdFromFilename(filename: string | null): string {
  */
 async function readCsv(
   request: Request,
-): Promise<{ text: string; filename: string | null } | Response> {
+): Promise<{ text: string; filename: string | null; source: string | null } | Response> {
   const tooLarge = () =>
     Response.json(
       { error: "too_large", message: `That file is over the ${MAX_BYTES / 1024 / 1024}MB limit.` },
@@ -78,12 +79,22 @@ async function readCsv(
       );
     }
     if (file.size > MAX_BYTES) return tooLarge();
-    return { text: await file.text(), filename: file.name };
+    return {
+      text: await file.text(),
+      filename: file.name,
+      // The Import view's Source picker. Only consulted when a row says nothing
+      // about its own origin — see `resolveSource` in `lib/parseLeadsCsv.ts`.
+      source: typeof form.get("source") === "string" ? String(form.get("source")) : null,
+    };
   }
 
   const text = await request.text();
   if (text.length > MAX_BYTES) return tooLarge();
-  return { text, filename: request.headers.get("x-filename") };
+  return {
+    text,
+    filename: request.headers.get("x-filename"),
+    source: request.headers.get("x-source"),
+  };
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -107,9 +118,19 @@ export async function POST(request: Request): Promise<Response> {
 
   const sourceBatch = batchIdFromFilename(read.filename);
 
+  /*
+   * Unlike `/api/leads/ingest`, an unrecognised value here is not an error.
+   * That route is a cron job and a bad label there means a misconfigured
+   * machine nobody is watching; this one has a person in front of it choosing
+   * from a two-option control, so anything else arriving is a hand-rolled curl
+   * and the default is the honest answer rather than a 400 the caller did not
+   * ask a question to get.
+   */
+  const defaultSource = parseLeadSource(read.source) ?? DEFAULT_LEAD_SOURCE;
+
   let parsed;
   try {
-    parsed = parseLeadsCsv(read.text, sourceBatch);
+    parsed = parseLeadsCsv(read.text, sourceBatch, defaultSource);
   } catch (error) {
     if (error instanceof LeadsCsvError) {
       return Response.json({ error: "invalid_csv", message: error.message }, { status: 400 });
@@ -156,6 +177,9 @@ export async function POST(request: Request): Promise<Response> {
         skippedRows: parsed.skippedRows,
         removedNoPhone: parsed.removedNoPhone,
         removedDuplicates: parsed.removedDuplicates,
+        // What the file actually resolved to, so the import banner can report
+        // "312 Google Maps, 4 Yelp" rather than repeating what was picked.
+        bySource: parsed.bySource,
         warnings: parsed.warnings,
       },
       { headers: { "Cache-Control": "no-store" } },

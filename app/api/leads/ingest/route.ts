@@ -1,14 +1,27 @@
 import { IngestAuthError, requireIngestToken } from "@/lib/ingestAuth";
 import { mergeLeads } from "@/lib/leadDb";
 import { LeadsCsvError, parseLeadsCsv } from "@/lib/parseLeadsCsv";
-import type { Lead } from "@/lib/types";
+import {
+  DEFAULT_LEAD_SOURCE,
+  LEAD_SOURCES,
+  parseLeadSource,
+  type Lead,
+  type LeadSource,
+} from "@/lib/types";
 
 /**
  * POST /api/leads/ingest — the scraper's push endpoint.
  *
- * The Yelp scraper is a separate project in a separate directory (and on a
- * separate machine in production), so it cannot import `lib/` or reach
- * Postgres. It finishes a run, then POSTs the CSVs from its output folder here.
+ * The scrapers are separate projects in separate directories (and on separate
+ * machines in production), so they cannot import `lib/` or reach Postgres. A
+ * run finishes, then POSTs the CSVs from its output folder here.
+ *
+ * There are two of them now — one reading Yelp, one reading Google Maps — and
+ * they share this endpoint rather than getting one each. They produce the same
+ * shape of row about the same kind of business into the same table, and the one
+ * thing that genuinely differs is *which directory it came from*, which is a
+ * column (`X-Source`, below) rather than a second route with a duplicate copy
+ * of the parse, merge and reporting in it.
  *
  * How this differs from the sibling `POST /api/leads/upload`, and why both
  * exist rather than one route with a flag:
@@ -50,7 +63,17 @@ interface FileReport {
   skippedRows: number;
   removedNoPhone: number;
   removedDuplicates: number;
+  /** What the rows in this file actually resolved to, per source. */
+  bySource: Record<LeadSource, number>;
   warnings: string[];
+}
+
+/** Zero against every source, so a report always has the full shape. */
+function emptySourceCounts(): Record<LeadSource, number> {
+  return Object.fromEntries(LEAD_SOURCES.map((key) => [key, 0])) as Record<
+    LeadSource,
+    number
+  >;
 }
 
 class IngestError extends Error {
@@ -61,6 +84,32 @@ class IngestError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * Which directory this push came from, as declared by the scraper.
+ *
+ * A *fallback*, not an override: `parseLeadsCsv` believes a row's own `source`
+ * column first and its listing URL second, and only reaches for this when
+ * neither says. That ordering is what makes a mixed or mislabelled folder
+ * survive — see `resolveSource` in `lib/parseLeadsCsv.ts`.
+ *
+ * An unknown value is rejected rather than defaulted. A scraper sending
+ * `X-Source: Google Business` has been misconfigured, and quietly filing its
+ * whole run under Yelp is how that goes unnoticed for a week — the same reason
+ * an empty push is a 400 below.
+ */
+function readSource(header: string | null): LeadSource | Response {
+  if (header === null || header.trim() === "") return DEFAULT_LEAD_SOURCE;
+  const source = parseLeadSource(header);
+  if (source) return source;
+  return Response.json(
+    {
+      error: "unknown_source",
+      message: `X-Source "${header}" is not a known lead source. Expected one of: ${LEAD_SOURCES.join(", ")}.`,
+    },
+    { status: 400 },
+  );
 }
 
 /**
@@ -134,6 +183,9 @@ export async function POST(request: Request): Promise<Response> {
     throw error;
   }
 
+  const source = readSource(request.headers.get("x-source"));
+  if (source instanceof Response) return source;
+
   const sourceBatch = batchId(request.headers.get("x-batch"));
 
   let files: IngestFile[];
@@ -154,7 +206,7 @@ export async function POST(request: Request): Promise<Response> {
 
   for (const file of files) {
     try {
-      const parsed = parseLeadsCsv(file.text, sourceBatch);
+      const parsed = parseLeadsCsv(file.text, sourceBatch, source);
       candidates.push(...parsed.leads);
       reports.push({
         filename: file.filename,
@@ -163,6 +215,7 @@ export async function POST(request: Request): Promise<Response> {
         skippedRows: parsed.skippedRows,
         removedNoPhone: parsed.removedNoPhone,
         removedDuplicates: parsed.removedDuplicates,
+        bySource: parsed.bySource,
         warnings: parsed.warnings,
       });
     } catch (error) {
@@ -174,6 +227,7 @@ export async function POST(request: Request): Promise<Response> {
         skippedRows: 0,
         removedNoPhone: 0,
         removedDuplicates: 0,
+        bySource: emptySourceCounts(),
         warnings: [`Could not parse: ${error.message}`],
       });
     }
@@ -204,6 +258,15 @@ export async function POST(request: Request): Promise<Response> {
         skippedExisting: merged.skippedExisting,
         receivedFiles: files.length,
         usableRows: candidates.length,
+        // The source this push *declared*, and what its rows actually resolved
+        // to. A scraper can compare the two and alert when they disagree —
+        // which is what a Yelp CSV accidentally left in the Maps output folder
+        // looks like from the outside.
+        declaredSource: source,
+        bySource: candidates.reduce((counts, lead) => {
+          counts[lead.source] += 1;
+          return counts;
+        }, emptySourceCounts()),
         // Surfaced at the top level so a scraper can alert on it without
         // walking the per-file reports.
         rejectedFiles: rejected.map((report) => report.filename),

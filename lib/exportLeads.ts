@@ -1,5 +1,5 @@
 import { displayWebsite, formatCallbackDate } from "./leadUtils";
-import { CALL_STATUS_LABELS, type Lead } from "./types";
+import { CALL_STATUS_LABELS, LEAD_SOURCE_LABELS, type Lead } from "./types";
 
 /**
  * Lead → file. One row-shaping definition feeds all three formats, so a CSV,
@@ -53,10 +53,18 @@ const COLUMNS: Array<{ header: string; width: number; value: (lead: Lead) => str
       value: (lead) => (lead.rating === null ? "" : lead.rating.toFixed(1)),
     },
     { header: "Owner", width: 20, value: (lead) => lead.owner ?? "" },
+    {
+      header: "Source",
+      width: 12,
+      value: (lead) => LEAD_SOURCE_LABELS[lead.source],
+    },
     { header: "Status", width: 20, value: (lead) => CALL_STATUS_LABELS[lead.status] },
     { header: "Callback date", width: 14, value: (lead) => lead.callbackDate ?? "" },
     { header: "Notes", width: 46, value: (lead) => lead.notes },
-    { header: "Yelp URL", width: 40, value: (lead) => lead.url ?? "" },
+    // Was "Yelp URL". Renamed once Google Maps rows started arriving in the
+    // same table: the column holds whichever listing the row came from, and
+    // the Source column beside it says which that is.
+    { header: "Listing URL", width: 40, value: (lead) => lead.url ?? "" },
   ];
 
 /**
