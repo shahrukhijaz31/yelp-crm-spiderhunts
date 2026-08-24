@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { X } from "lucide-react";
 
@@ -241,7 +242,28 @@ export default function LeadOverlay({
     return () => opener?.focus?.();
   }, []);
 
-  return (
+  /*
+   * Rendered into `document.body`, not into the worklist.
+   *
+   * `position: fixed` is only relative to the viewport while no ancestor is a
+   * containing block for fixed descendants — and `transform`, `filter`,
+   * `backdrop-filter`, `will-change` and a transform animation *in effect* all
+   * make one. That is not a hypothetical: the portal's page wrapper animated a
+   * transform with `animation-fill-mode: both`, which never stops being in
+   * effect, so this window anchored to the wrapper and lost its header off the
+   * top of the screen whenever the list behind it was scrolled.
+   *
+   * That cause is fixed in `.page-enter`. This is the other half: a window that
+   * covers the viewport should not depend on what every ancestor between it and
+   * the body happens to be doing, and the next `backdrop-filter` somebody adds
+   * to a wrapper should not be able to break it again.
+   *
+   * A portal moves the DOM node only. The component is still a React child of
+   * the worklist, so `AnimatePresence` still runs its exit animation, the
+   * callbacks still close over the list's state, and Escape still reaches the
+   * handler this component registered.
+   */
+  const overlay = (
     <div
       className="lead-overlay"
       role="dialog"
@@ -301,6 +323,11 @@ export default function LeadOverlay({
       </motion.div>
     </div>
   );
+
+  // `document` is always there by the time this renders — the window is opened
+  // by a click, so there is no server render of it to guard against — but the
+  // check costs nothing and keeps the component honest about needing a DOM.
+  return typeof document === "undefined" ? overlay : createPortal(overlay, document.body);
 }
 
 /**

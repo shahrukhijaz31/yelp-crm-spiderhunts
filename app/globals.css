@@ -2518,8 +2518,34 @@ select option {
 /* A whole screen arriving after a navigation. Shorter and shallower than a
    card: this runs on every click in the sidebar, so it has to be under the
    threshold where it becomes something to wait for. */
+/*
+ * `backwards`, emphatically not `both`, and it is a bug fix rather than a
+ * preference.
+ *
+ * `both` means `backwards` plus `forwards`, and `forwards` keeps the animation
+ * *in effect* for the life of the element. An element with a transform
+ * animation in effect is a containing block for fixed-position descendants —
+ * Blink decides that from "is transform animated", not from the value, so it
+ * stays true even though this one settles on `transform: none`.
+ *
+ * Every screen in the portal is wrapped in this class, so that made the page
+ * wrapper the containing block for every `position: fixed` element inside a
+ * screen. The lead window is the one where it showed: `inset: 0` anchored to
+ * the wrapper instead of the viewport, so opening a lead from a list scrolled
+ * 45px down put the window's header — the business name, the status, the close
+ * button — 45px above the top of the screen, clipped and unreachable.
+ *
+ * Dropping `forwards` costs nothing, because the `to` keyframe is
+ * `opacity: 1; transform: none` — the element's natural state. The animation
+ * looks identical; it simply stops claiming to be animating once it has
+ * finished. `backwards` is kept so the first frame is the `from` state rather
+ * than a flash of the final one.
+ *
+ * The same trap, one layer down, is why `.panel` has no `backdrop-filter` —
+ * see the note there.
+ */
 .page-enter {
-  animation: rise-in 180ms var(--ease-out-soft) both;
+  animation: rise-in 180ms var(--ease-out-soft) backwards;
   --rise: 4px;
 }
 
