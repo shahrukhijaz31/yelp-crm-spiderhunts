@@ -3,7 +3,7 @@ import Worklist from "@/components/Worklist";
 import { requireModule } from "@/lib/authz";
 import { demoFilterCounts, demoSummariesFor } from "@/lib/demoWebsites";
 import { EMPTY_FILTERS } from "@/lib/filters";
-import { leadCategories, listLeadsPage } from "@/lib/leadDb";
+import { leadCategories, leadLocations, listLeadsPage } from "@/lib/leadDb";
 import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
 import { DEFAULT_WORK_STATE } from "@/lib/workState";
@@ -65,12 +65,14 @@ export default async function DemoWebsitesPage(props: PageProps<"/demo-websites"
     pageSize: readPageSize(one(params.pageSize)),
   });
 
-  // Two reads that depend on the page above, and one that does not. The demo
+  // Reads that depend on the page above, and reads that do not. The demo
   // metadata is keyed by the ids `listLeadsPage` just chose, so it cannot start
-  // until that has answered; the category list is independent and rides along.
-  const [demos, categories, demoCounts] = await Promise.all([
+  // until that has answered; the filter panel's category and location lists are
+  // independent and ride along.
+  const [demos, categories, locations, demoCounts] = await Promise.all([
     demoSummariesFor(result.leads.map((lead) => lead.id)),
     leadCategories(),
+    leadLocations(),
     // The numbers on the demo filter buttons, so the panel opens with them
     // rather than filling in after a round trip.
     demoFilterCounts(),
@@ -87,6 +89,7 @@ export default async function DemoWebsitesPage(props: PageProps<"/demo-websites"
         totalPages: result.totalPages,
       }}
       initialCategories={categories}
+      initialLocations={locations}
       initialDemos={demos}
       initialDemoCounts={demoCounts}
       serverToday={today}

@@ -1,6 +1,7 @@
 // Prisma 7 exports model row types with a `Model` suffix (`LeadModel`), which
 // leaves the name `Lead` free for the app's own type below.
 import type { LeadModel as LeadRow } from "./generated/prisma/models";
+import { parseAddressLocation } from "./leadLocation";
 import { isCalled, type Lead } from "./types";
 
 /**
@@ -56,6 +57,8 @@ export function toLead(row: LeadRow): Lead {
     owner: row.owner,
     url: row.url,
     source: row.source,
+    country: row.country,
+    city: row.city,
     status: row.status,
     notes: row.notes,
     callbackDate: toIsoDate(row.callbackDate),
@@ -85,6 +88,17 @@ export function toCreateData(lead: Lead, sourceBatch: string | null) {
     owner: lead.owner,
     url: lead.url,
     source: lead.source,
+    /*
+     * Location is re-derived here rather than trusted from the caller.
+     *
+     * `toCreateData` is the one door every insert goes through — the CSV
+     * import, the scraper push and the seed alike — so deriving it here means a
+     * row cannot reach the table with a country that disagrees with its own
+     * address. The parse is cheap and pure (`lib/leadLocation.ts`), and doing
+     * it once at the door is what lets the filter be an indexed `WHERE` rather
+     * than a scan.
+     */
+    ...parseAddressLocation(lead.address),
     status: lead.status,
     /*
      * A row arriving already carrying an outcome has, by definition, been

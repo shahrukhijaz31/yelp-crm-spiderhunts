@@ -23,7 +23,12 @@ import ViewTabs from "./ViewTabs";
 import { useLeadQueue } from "./LeadQueueProvider";
 import { usePortalStats } from "./PortalStatsProvider";
 import type { DemoSummary, DemoSummaryMap } from "@/lib/demoWebsiteRules";
-import { EMPTY_FILTERS, type CategoryOption, type LeadFilters } from "@/lib/filters";
+import {
+  EMPTY_FILTERS,
+  type CategoryOption,
+  type LeadFilters,
+  type LocationOptions,
+} from "@/lib/filters";
 import { leadPosition, leadWorkspaceHref } from "@/lib/leadLink";
 import { todayIso, type LeadStats } from "@/lib/leadUtils";
 import {
@@ -127,6 +132,7 @@ export default function Worklist({
   initialLeads,
   initialMeta,
   initialCategories,
+  initialLocations,
   initialDemos,
   initialDemoCounts,
   section = "leads",
@@ -135,6 +141,7 @@ export default function Worklist({
   initialLeads: Lead[];
   initialMeta: LeadPageMeta;
   initialCategories: CategoryOption[];
+  initialLocations: LocationOptions;
   /**
    * Demo metadata for the first page, when the demo view rendered it. Sparse,
    * and absent for the worklist, which draws no demo columns.
@@ -798,6 +805,7 @@ export default function Worklist({
             filters={filters}
             onChange={setFilters}
             categories={initialCategories}
+            locations={initialLocations}
             stats={stats}
             shown={meta.total}
             open={filtersOpen}

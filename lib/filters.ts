@@ -1,3 +1,4 @@
+import { UNKNOWN_LOCATION, countryLabel } from "./leadLocation";
 import { callbackState, normalisePhone, todayIso } from "./leadUtils";
 import {
   CALL_STATUS_LABELS,
@@ -84,6 +85,29 @@ export interface LeadFilters {
   sources: LeadSource[];
   /** Empty means "all categories". A lead matches if it has *any* of these. */
   categories: string[];
+  /**
+   * Which countries to show, as ISO-2 codes, plus the literal
+   * {@link UNKNOWN_LOCATION} for leads whose address could not be parsed.
+   *
+   * Empty means every country, the same rule `statuses`, `sources` and
+   * `categories` all follow: a filter narrows, it never excludes. Untouched, it
+   * therefore shows the unparseable leads too — which is the only safe default,
+   * because an agent who has not asked about location must never silently stop
+   * being shown leads the parser could not place.
+   */
+  countries: string[];
+  /**
+   * Which towns to show, spelled exactly as `leads.city` stores them (the
+   * parser normalises case, so there is one spelling per town), plus
+   * {@link UNKNOWN_LOCATION}.
+   *
+   * Independent of `countries` rather than nested under it: the two are ANDed
+   * like every other pair of groups here, so ticking a country and a town in a
+   * different one legitimately matches nothing. The panel only *offers* the
+   * towns in the selected countries, which is where that pairing belongs — a
+   * display rule, not a query one.
+   */
+  cities: string[];
   ratingMin: number | null;
   ratingMax: number | null;
   callback: CallbackRange;
@@ -104,6 +128,8 @@ export const EMPTY_FILTERS: LeadFilters = {
   statuses: [],
   sources: [],
   categories: [],
+  countries: [],
+  cities: [],
   ratingMin: null,
   ratingMax: null,
   callback: "all",
@@ -135,6 +161,69 @@ export function collectCategories(leads: Lead[]): CategoryOption[] {
   );
 }
 
+// --- location options -------------------------------------------------------
+
+export interface CountryOption {
+  /** ISO-2, or {@link UNKNOWN_LOCATION} for the leads with no country. */
+  code: string;
+  count: number;
+}
+
+export interface CityOption {
+  /** The town, or {@link UNKNOWN_LOCATION}. */
+  name: string;
+  /** Which country it was counted under — what lets the panel cascade. */
+  country: string;
+  count: number;
+}
+
+/**
+ * The two lists the Location group offers, paired so the panel can narrow the
+ * towns to the selected countries. Built by `leadLocations()` from SQL for the
+ * paged screens, and by {@link collectLocations} in memory for Export.
+ */
+export interface LocationOptions {
+  countries: CountryOption[];
+  cities: CityOption[];
+}
+
+export const EMPTY_LOCATION_OPTIONS: LocationOptions = { countries: [], cities: [] };
+
+/**
+ * The same lists as `leadLocations()`, from leads already in memory.
+ *
+ * The counterpart to {@link collectCategories}, and it exists for the same one
+ * caller: Export holds every matching lead client-side, so asking the server
+ * for facets it could count from the array it is holding would be a round trip
+ * for an answer it already has. `null` becomes {@link UNKNOWN_LOCATION} here
+ * exactly as it does in SQL, so the two lists are interchangeable.
+ */
+export function collectLocations(leads: Lead[]): LocationOptions {
+  const countries = new Map<string, number>();
+  const cities = new Map<string, CityOption>();
+
+  for (const lead of leads) {
+    const country = lead.country ?? UNKNOWN_LOCATION;
+    const city = lead.city ?? UNKNOWN_LOCATION;
+    countries.set(country, (countries.get(country) ?? 0) + 1);
+    // Keyed by the pair, because one town name in two countries is two options
+    // — and the panel has to know which country each belongs to.
+    const key = `${country}/${city}`;
+    const existing = cities.get(key);
+    if (existing) existing.count += 1;
+    else cities.set(key, { name: city, country, count: 1 });
+  }
+
+  return {
+    countries: Array.from(countries, ([code, count]) => ({ code, count })).sort(
+      (a, b) => b.count - a.count || a.code.localeCompare(b.code),
+    ),
+    cities: Array.from(cities.values()).sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+    ),
+  };
+}
+
 // --- matching ---------------------------------------------------------------
 
 function matchesQuery(lead: Lead, query: string): boolean {
@@ -149,6 +238,22 @@ function matchesQuery(lead: Lead, query: string): boolean {
   // Phone matches on digits, so "4155550182" finds "(415) 555-0182".
   const digits = normalisePhone(needle);
   return digits.length >= 3 && normalisePhone(lead.phone).includes(digits);
+}
+
+/**
+ * One location field against one selection.
+ *
+ * The whole of the location matching, for both country and city, because the
+ * two behave identically: empty selection matches everything, a null field
+ * matches only when {@link UNKNOWN_LOCATION} was picked. That second rule is
+ * what makes "Unknown location" a real option rather than a label on a bucket
+ * nothing can reach — and it is why the sentinel exists at all, since SQL and
+ * JavaScript both refuse to find NULL in a list of strings.
+ */
+function matchesLocation(value: string | null, selected: string[]): boolean {
+  if (selected.length === 0) return true;
+  if (value === null) return selected.includes(UNKNOWN_LOCATION);
+  return selected.includes(value);
 }
 
 function matchesRating(lead: Lead, filters: LeadFilters): boolean {
@@ -247,6 +352,8 @@ export function matchesFilters(
   ) {
     return false;
   }
+  if (!matchesLocation(lead.country, filters.countries)) return false;
+  if (!matchesLocation(lead.city, filters.cities)) return false;
   if (!matchesRating(lead, filters)) return false;
   if (!matchesCallback(lead, filters, today, bounds.start, bounds.end)) return false;
   return matchesQuery(lead, filters.query);
@@ -311,6 +418,40 @@ export function describeActiveFilters(filters: LeadFilters): FilterChip[] {
         categories: filters.categories.filter(
           (candidate) => candidate !== category,
         ),
+      },
+    });
+  }
+
+  for (const country of filters.countries) {
+    chips.push({
+      id: `country:${country}`,
+      label: countryLabel(country),
+      /*
+       * Only the country is cleared, never the towns picked under it.
+       *
+       * Tempting to clear both — but this function is pure over `LeadFilters`
+       * and has no idea which country a town is in, so "the towns that belonged
+       * to it" is not something it can compute. Guessing (clear all towns when
+       * the last country goes) would silently discard a selection an agent
+       * made, which is worse than leaving it. The panel is where the two are
+       * related, and it keeps every selected town visible and untickable
+       * whatever the country selection is, so nothing can end up active and
+       * unreachable.
+       */
+      next: {
+        ...filters,
+        countries: filters.countries.filter((candidate) => candidate !== country),
+      },
+    });
+  }
+
+  for (const city of filters.cities) {
+    chips.push({
+      id: `city:${city}`,
+      label: city === UNKNOWN_LOCATION ? "Unknown town" : city,
+      next: {
+        ...filters,
+        cities: filters.cities.filter((candidate) => candidate !== city),
       },
     });
   }

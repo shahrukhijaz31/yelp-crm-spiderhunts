@@ -1,7 +1,13 @@
 import { identityKeys } from "./cleanLeads";
-import { weekBounds, type CategoryOption } from "./filters";
+import {
+  weekBounds,
+  type CategoryOption,
+  type CityOption,
+  type LocationOptions,
+} from "./filters";
 import { Prisma } from "./generated/prisma/client";
 import { describeLeadActivity, recordLeadActivity } from "./leadActivity";
+import { UNKNOWN_LOCATION } from "./leadLocation";
 import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
 import type { LeadPageMeta, LeadPageQuery, LeadSort, LeadSortKey } from "./leadQuery";
 import { normalisePhone, type LeadStats } from "./leadUtils";
@@ -183,6 +189,31 @@ function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
     clauses.push(
       Prisma.sql`l.categories && ARRAY[${Prisma.join(filters.categories)}]::text[]`,
     );
+  }
+
+  /* --- location (lib/leadLocation.ts) ---
+   *
+   * Two independent `IN` lists, ANDed like every other pair of groups, each
+   * with an extra arm for the leads whose address the parser could not read.
+   * That arm is the reason `UNKNOWN_LOCATION` exists: `NULL IN ('US')` is NULL
+   * and never true, so without it "Unknown location" would be an option that
+   * matched nothing at all. See `matchesLocation` in `lib/filters.ts` — same
+   * three rules, same order.
+   */
+  for (const [selected, column] of [
+    [filters.countries, Prisma.sql`l.country`],
+    [filters.cities, Prisma.sql`l.city`],
+  ] as const) {
+    if (selected.length === 0) continue;
+    const named = selected.filter((value) => value !== UNKNOWN_LOCATION);
+    const arms: Prisma.Sql[] = [];
+    if (named.length > 0) {
+      arms.push(Prisma.sql`${column} IN (${Prisma.join(named)})`);
+    }
+    if (selected.length !== named.length) {
+      arms.push(Prisma.sql`${column} IS NULL`);
+    }
+    clauses.push(Prisma.sql`(${Prisma.join(arms, " OR ")})`);
   }
 
   /*
@@ -683,6 +714,61 @@ export async function leadCategories(): Promise<CategoryOption[]> {
   );
 
   return rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/**
+ * Every country and town in the table, with a count each — the two lists the
+ * Location group in the filter panel offers.
+ *
+ * One statement rather than two, and grouped by the pair rather than by each
+ * column separately, because the panel needs to know *which country a town is
+ * in*: ticking "United Kingdom" narrows the town list to British towns, and
+ * that mapping is not derivable from two independent lists. The country totals
+ * are then summed from the same rows in JS, so the two lists can never describe
+ * different instants and disagree about how many leads are in Britain.
+ *
+ * NULL is carried through as {@link UNKNOWN_LOCATION} rather than dropped. A
+ * lead whose address defeated the parser is still a lead somebody has to call,
+ * and the count of them is the only signal that a shape of address is being
+ * missed — hiding it would make the parser look perfect by construction.
+ *
+ * Reads the whole table, and is called once per page load like `leadCategories`
+ * beside it. It is an index-only scan of `leads_country_city_idx`, which is
+ * what that index is for.
+ */
+export async function leadLocations(): Promise<LocationOptions> {
+  const rows = await prisma.$queryRaw<
+    { country: string | null; city: string | null; count: number }[]
+  >(
+    Prisma.sql`
+      SELECT country, city, count(*)::int AS count
+      FROM leads
+      GROUP BY country, city
+    `,
+  );
+
+  const countries = new Map<string, number>();
+  const cities: CityOption[] = [];
+
+  for (const row of rows) {
+    const country = row.country ?? UNKNOWN_LOCATION;
+    countries.set(country, (countries.get(country) ?? 0) + row.count);
+    cities.push({
+      name: row.city ?? UNKNOWN_LOCATION,
+      country,
+      count: row.count,
+    });
+  }
+
+  // Most common first, ties alphabetical — the ordering `leadCategories` uses,
+  // sorted in JS for the same reason: `localeCompare` and not Postgres's
+  // collation, so the panel's lists all read the same way.
+  return {
+    countries: Array.from(countries, ([code, count]) => ({ code, count })).sort(
+      (a, b) => b.count - a.count || a.code.localeCompare(b.code),
+    ),
+    cities: cities.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+  };
 }
 
 /**

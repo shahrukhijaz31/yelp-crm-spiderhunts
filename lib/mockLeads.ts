@@ -1,3 +1,4 @@
+import { parseAddressLocation } from "./leadLocation";
 import { todayIso } from "./leadUtils";
 import type { CallStatus, Lead, LeadSource } from "./types";
 
@@ -479,6 +480,10 @@ export function getMockLeads(): Lead[] {
       owner: seed.owner,
       url: listingUrl(source, seed.name),
       source,
+      // Parsed rather than written into the seeds: the fixture should exercise
+      // the same derivation a scraped row goes through, so a demo database
+      // shows the Location filter behaving exactly as production does.
+      ...parseAddressLocation(seed.address),
       status: seed.status ?? "not_called",
       notes: seed.notes ?? "",
       callbackDate:

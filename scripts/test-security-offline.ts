@@ -98,6 +98,8 @@ function lead(overrides: Partial<Lead>): Lead {
     meetingAttendees: null,
     meetingNotes: "",
     meetingCompletedAt: null,
+    country: null,
+    city: null,
     isDuplicate: false,
     sourceBatch: null,
     createdAt: "2026-08-17T00:00:00.000Z",

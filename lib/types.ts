@@ -229,6 +229,16 @@ export interface Lead {
   /** Which directory the row was scraped out of. See {@link LEAD_SOURCES}. */
   source: LeadSource;
 
+  /*
+   * Location, derived from `address` rather than scraped — no directory sends
+   * it. See `lib/leadLocation.ts` for the rules and why they are parsed once at
+   * write time instead of being re-read out of the string on every query.
+   */
+  /** ISO 3166-1 alpha-2, or null when the address did not say. */
+  country: string | null;
+  /** The town, case-normalised, or null when the address did not say. */
+  city: string | null;
+
   // --- Agent-owned fields ---
   status: CallStatus;
   notes: string;

@@ -1,0 +1,54 @@
+-- Where a lead is, as two columns a query can use.
+--
+-- Until now the only location a lead carried was `address`: one freeform
+-- string, formatted by whichever directory scraped it. That was enough while
+-- every row was in one city. It is not enough now that runs come back from the
+-- UK and elsewhere, because "show me the UK leads" cannot be answered from it —
+-- `address LIKE '%UK%'` matches a business on Ukiah Street and misses every
+-- London row whose address ends in a postcode, and no index can help a leading
+-- wildcard anyway.
+--
+-- So the country and the city are parsed out of the address once, when the lead
+-- is written, and stored here. The rules are in `lib/leadLocation.ts` and
+-- nowhere else — deliberately not restated in SQL, because a second copy would
+-- drift from the first on the first fix and the two would then disagree about
+-- which country half the table is in.
+--
+-- `text` and not an enum, unlike `lead_source`. The set of scrapers is closed
+-- and adding one should be a deliberate migration; the set of countries is not,
+-- and a run in a country nobody anticipated must be storable on the day it
+-- lands rather than after a deploy. The UI's country *labels* are still a
+-- closed set (`COUNTRY_LABELS`), which is where the "no unknown badges"
+-- guarantee actually belongs.
+--
+-- Both nullable, and NULL is a real value here rather than a gap: it means the
+-- parser could not read that address. Those rows are counted and selectable
+-- under "Unknown location" in the filter panel, so an address shape the rules
+-- miss shows up as a number somebody can go and look at instead of being
+-- quietly filed under a guess.
+ALTER TABLE "leads" ADD COLUMN "country" TEXT;
+ALTER TABLE "leads" ADD COLUMN "city" TEXT;
+
+-- The filter rail's Location group is a `WHERE country IN (…)` / `city IN (…)`
+-- on every page it is set on, and a `GROUP BY country, city` for the counts
+-- beside each option. One composite index rather than two singles: the city
+-- list is only ever read within a country, and a leading `country` serves a
+-- country-only filter just as well as a standalone index would.
+CREATE INDEX "leads_country_city_idx" ON "leads"("country", "city");
+
+-- NO BACKFILL HERE, ON PURPOSE.
+--
+-- Every row already in the table has an address and therefore a location, so
+-- these columns do need filling — but filling them means running the parser,
+-- and the parser is TypeScript. Writing an `UPDATE … regexp_replace(...)` that
+-- reproduces it would be the second copy of the rules this migration is
+-- explicitly avoiding, and it would be the copy nobody ever updates.
+--
+-- Run the backfill after migrating, once:
+--
+--     npm run leads:backfill-location
+--
+-- It is idempotent and re-runnable (`scripts/backfill-lead-location.ts`), so it
+-- is also how a later improvement to the parser reaches rows already stored.
+-- Until it has run, every existing lead reads as "Unknown location" — visible
+-- and obviously wrong, rather than plausible and wrong.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   CALLBACK_RANGE_LABELS,
@@ -12,7 +12,9 @@ import {
   type CategoryOption,
   type DemoFilter,
   type LeadFilters,
+  type LocationOptions,
 } from "@/lib/filters";
+import { UNKNOWN_LOCATION, countryLabel } from "@/lib/leadLocation";
 import type { LeadStats } from "@/lib/leadUtils";
 import {
   CALL_STATUSES,
@@ -65,6 +67,7 @@ export default function FilterPanel({
   filters,
   onChange,
   categories,
+  locations,
   stats,
   section = "leads",
   demoCounts,
@@ -72,12 +75,14 @@ export default function FilterPanel({
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
   categories: CategoryOption[];
+  locations: LocationOptions;
   stats: LeadStats;
   /** The demo band is drawn for the Demo Websites view only. */
   section?: "leads" | "demo";
   demoCounts?: DemoCounts;
 }) {
   const [categoryQuery, setCategoryQuery] = useState("");
+  const [cityQuery, setCityQuery] = useState("");
 
   function toggleStatus(status: CallStatus) {
     const next = filters.statuses.includes(status)
@@ -100,9 +105,59 @@ export default function FilterPanel({
     onChange({ ...filters, categories: next });
   }
 
+  function toggleCountry(code: string) {
+    const next = filters.countries.includes(code)
+      ? filters.countries.filter((candidate) => candidate !== code)
+      : [...filters.countries, code];
+    onChange({ ...filters, countries: next });
+  }
+
+  function toggleCity(name: string) {
+    const next = filters.cities.includes(name)
+      ? filters.cities.filter((candidate) => candidate !== name)
+      : [...filters.cities, name];
+    onChange({ ...filters, cities: next });
+  }
+
   const visibleCategories = categories.filter((category) =>
     category.name.toLowerCase().includes(categoryQuery.trim().toLowerCase()),
   );
+
+  /*
+   * The town list, narrowed to the selected countries — the one place the two
+   * location controls are related to each other.
+   *
+   * They are independent in the *query* (`matchesFilters` ANDs them like any
+   * other pair of groups); the cascade is a display rule and lives only here,
+   * because this is the only layer that knows which country a town is in. Which
+   * is the right place for it: an agent who ticks "United Kingdom" wants the
+   * next list to be British towns, not four thousand towns worldwide.
+   *
+   * One town in two countries is two rows in `locations.cities`, so they are
+   * folded back together by name after the narrowing. Otherwise picking both
+   * the UK and the US would offer "Richmond" twice, with a checkbox each,
+   * ticking the same filter.
+   *
+   * A town that is already ticked always survives, whatever the country
+   * selection is. Without that, unticking a country would leave its towns
+   * filtering the worklist from outside the panel — active, invisible, and
+   * clearable only from the chip in the toolbar.
+   */
+  const visibleCities = useMemo(() => {
+    const wanted = filters.countries;
+    const totals = new Map<string, number>();
+
+    for (const city of locations.cities) {
+      const inScope = wanted.length === 0 || wanted.includes(city.country);
+      if (!inScope && !filters.cities.includes(city.name)) continue;
+      totals.set(city.name, (totals.get(city.name) ?? 0) + city.count);
+    }
+
+    const needle = cityQuery.trim().toLowerCase();
+    return Array.from(totals, ([name, count]) => ({ name, count }))
+      .filter((city) => city.name.toLowerCase().includes(needle))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [locations.cities, filters.countries, filters.cities, cityQuery]);
 
   const demoTotal = stats.total;
 
@@ -172,7 +227,7 @@ export default function FilterPanel({
 
       {/* `gap-x-6` rather than 8: two of these columns hold wrapping labels,
           and 16px of the gutter is better spent on the words. */}
-      <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_165px_210px] xl:gap-y-4">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-[minmax(200px,1fr)_minmax(200px,1fr)_minmax(200px,1fr)_150px_195px] xl:gap-y-4">
       {/* --- Status: multi-select ------------------------------------- */}
       <Group
         title="Status"
@@ -298,6 +353,114 @@ export default function FilterPanel({
               ))}
             </div>
           )}
+        </div>
+      </Group>
+
+      {/* --- Location: country, then the towns within it ---------------- */}
+      <Group
+        title="Location"
+        action={
+          (filters.countries.length > 0 || filters.cities.length > 0) && (
+            <Reset
+              onClick={() => onChange({ ...filters, countries: [], cities: [] })}
+            />
+          )
+        }
+      >
+        {/*
+          * Country above town, and both in one column, because that is the
+          * order the question is asked in: an agent picks the country they are
+          * calling into and then, sometimes, a town inside it. The town list
+          * narrows to whatever countries are ticked — see `visibleCities`.
+          *
+          * Neither list is scraped from a column the directories provide;
+          * `lib/leadLocation.ts` reads both out of the address. That is why
+          * "Unknown location" is an option rather than a silence: it is the
+          * count of addresses the rules could not place, and an agent can
+          * select it and work those leads like any others.
+          */}
+        {locations.countries.length === 0 ? (
+          <p className="py-2 text-ui text-fg-3">No location data yet.</p>
+        ) : (
+          <div className="flex flex-col gap-y-0.5">
+            {locations.countries.map((country) => (
+              <Check
+                key={country.code}
+                checked={filters.countries.includes(country.code)}
+                onChange={() => toggleCountry(country.code)}
+              >
+                <span
+                  className={`min-w-0 flex-1 truncate leading-snug ${
+                    country.code === UNKNOWN_LOCATION ? "italic text-fg-3" : ""
+                  }`}
+                  title={countryLabel(country.code)}
+                >
+                  {countryLabel(country.code)}
+                </span>
+                <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                  {country.count.toLocaleString()}
+                </span>
+              </Check>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-4">
+          <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+            <h3 className="eyebrow">Town / city</h3>
+            {filters.countries.length > 0 && (
+              <span className="text-caption text-fg-4">
+                in {filters.countries.length === 1
+                  ? countryLabel(filters.countries[0])
+                  : `${filters.countries.length} countries`}
+              </span>
+            )}
+            {filters.cities.length > 0 && (
+              <span className="ml-auto">
+                <Reset onClick={() => onChange({ ...filters, cities: [] })} />
+              </span>
+            )}
+          </div>
+
+          <input
+            type="search"
+            value={cityQuery}
+            onChange={(event) => setCityQuery(event.target.value)}
+            placeholder="Find a town…"
+            aria-label="Find a town"
+            className={`${CONTROL} mb-2 w-full placeholder:text-fg-3`}
+          />
+
+          {/* The same scroll box the category list gets, and for the same
+              reason: a country with four hundred towns in it must not make the
+              filter panel four hundred rows tall. */}
+          <div className="max-h-[176px] overflow-y-auto pr-1">
+            {visibleCities.length === 0 ? (
+              <p className="py-2 text-ui text-fg-3">No matching town.</p>
+            ) : (
+              <div className="flex flex-col gap-y-0.5">
+                {visibleCities.map((city) => (
+                  <Check
+                    key={city.name}
+                    checked={filters.cities.includes(city.name)}
+                    onChange={() => toggleCity(city.name)}
+                  >
+                    <span
+                      className={`min-w-0 flex-1 truncate ${
+                        city.name === UNKNOWN_LOCATION ? "italic text-fg-3" : ""
+                      }`}
+                      title={city.name === UNKNOWN_LOCATION ? "Unknown town" : city.name}
+                    >
+                      {city.name === UNKNOWN_LOCATION ? "Unknown town" : city.name}
+                    </span>
+                    <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                      {city.count.toLocaleString()}
+                    </span>
+                  </Check>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </Group>
 

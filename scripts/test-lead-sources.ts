@@ -72,6 +72,8 @@ function lead(overrides: Partial<Lead>): Lead {
     meetingAttendees: null,
     meetingNotes: "",
     meetingCompletedAt: null,
+    country: null,
+    city: null,
     ...overrides,
   };
 }

@@ -79,6 +79,32 @@ model Lead {
   /// that was here first and it does not send the column; see the migration.
   source     LeadSource @default(yelp)
 
+  // --- Location, derived from `address` (see lib/leadLocation.ts) ---
+  /// ISO 3166-1 alpha-2, parsed out of the address when the lead is written.
+  ///
+  /// Not scraped: no directory sends a country column, and the portal now holds
+  /// runs from more than one of them. The shape of the postal tail is what
+  /// names the country (`CA 94122` vs `M1 2AB`), so it is parsed once here
+  /// rather than re-derived on every query — a `LIKE` over `address` cannot use
+  /// an index, cannot be grouped for the filter panel's counts, and matches a
+  /// business on Ukiah Street when asked for the UK.
+  ///
+  /// Null is a real, visible state, not a gap to be cleaned up later: it means
+  /// the address defeated the parser, and those leads are countable under
+  /// "Unknown location" in the filter rather than filed under a guess.
+  ///
+  /// A plain `String?` and not an enum, unlike `source`. The set of countries
+  /// is open in a way the set of scrapers is not — a run in a new country is a
+  /// normal Tuesday, and it must not need a migration to be storable. The
+  /// *labels* are still a closed set (`COUNTRY_LABELS`), so the UI never has to
+  /// render a code it does not know; that is a display concern, not a storage
+  /// one.
+  country    String?
+  /// The town, normalised for case so `SAN FRANCISCO` and `san francisco` are
+  /// one entry in the filter list. Null on the same terms as `country`, and
+  /// independently of it: an address can name one without the other.
+  city       String?
+
   // --- Agent-owned fields ---
   status        CallStatus @default(not_called)
   /// When this lead was first *worked* — stamped the moment an agent saves a
@@ -150,6 +176,11 @@ model Lead {
   @@index([callbackDate])
   /// The filter rail's Source group filters on it and the panel counts by it.
   @@index([source])
+  /// The Location group does both too — `WHERE country IN (…)` on the query and
+  /// `GROUP BY` on the facet counts. Composite rather than two indexes because
+  /// the city list is always read *within* a country in the panel, and a
+  /// leading `country` serves a country-only filter just as well.
+  @@index([country, city])
   @@index([sourceBatch])
   @@index([isDuplicate])
   @@map("leads")

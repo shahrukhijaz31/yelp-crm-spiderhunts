@@ -5,7 +5,7 @@ import Worklist from "@/components/Worklist";
 import { requireModule } from "@/lib/authz";
 import { landingPathFor } from "@/lib/modules";
 import { EMPTY_FILTERS } from "@/lib/filters";
-import { leadCategories, listLeadsPage } from "@/lib/leadDb";
+import { leadCategories, leadLocations, listLeadsPage } from "@/lib/leadDb";
 import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
 import { DEFAULT_WORK_STATE } from "@/lib/workState";
@@ -89,7 +89,13 @@ export default async function Home(props: PageProps<"/">) {
   // The New/Called counts are *not* read here: the sidebar shows them on every
   // screen, so they are the layout's job (`LeadQueueProvider`), and reading
   // them again would be a second identical aggregate per page load.
-  const categories = await leadCategories();
+  // The location lists are read on the same terms and for the same reason: the
+  // countries and towns in the table change with an import, not with a
+  // keystroke. Concurrent, because neither aggregate depends on the other.
+  const [categories, locations] = await Promise.all([
+    leadCategories(),
+    leadLocations(),
+  ]);
 
   return (
     <Worklist
@@ -101,6 +107,7 @@ export default async function Home(props: PageProps<"/">) {
         totalPages: result.totalPages,
       }}
       initialCategories={categories}
+      initialLocations={locations}
       serverToday={today}
     />
   );

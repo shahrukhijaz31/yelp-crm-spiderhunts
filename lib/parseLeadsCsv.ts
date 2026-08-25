@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 
 import { cleanLeads } from "./cleanLeads";
+import { parseAddressLocation } from "./leadLocation";
 import {
   DEFAULT_LEAD_SOURCE,
   LEAD_SOURCES,
@@ -266,6 +267,17 @@ export function parseLeadsCsv(
       owner: nullable(row.owner),
       url,
       source: resolveSource(row.source, url, defaultSource),
+      /*
+       * Location, read out of the address the row just supplied.
+       *
+       * No directory sends a country or a city column, so there is nothing to
+       * alias in `COLUMN_ALIASES` and nothing to fall back to — the address is
+       * the only place the information exists. Derived here so that a parsed
+       * lead is complete before it reaches `cleanLeads`, the preview table or
+       * the database, and `toCreateData` re-derives it at the door for the same
+       * reason: neither end has to trust the other.
+       */
+      ...parseAddressLocation(cleanText(row.address)),
       // Agent-owned fields always start empty on import.
       status: "not_called",
       notes: "",
