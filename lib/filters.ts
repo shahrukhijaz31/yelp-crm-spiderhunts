@@ -96,20 +96,6 @@ export interface LeadFilters {
    * being shown leads the parser could not place.
    */
   countries: string[];
-  /**
-   * Which towns to show, spelled exactly as `leads.city` stores them (the
-   * parser normalises case, so there is one spelling per town), plus
-   * {@link UNKNOWN_LOCATION}.
-   *
-   * Independent of `countries` rather than nested under it: the two are ANDed
-   * like every other pair of groups here, so ticking a country and a town in a
-   * different one legitimately matches nothing. The panel only *offers* the
-   * towns in the selected countries, which is where that pairing belongs — a
-   * display rule, not a query one.
-   */
-  cities: string[];
-  ratingMin: number | null;
-  ratingMax: number | null;
   callback: CallbackRange;
   /** Inclusive ISO bounds, only read when `callback` is `custom`. */
   callbackFrom: string | null;
@@ -129,17 +115,11 @@ export const EMPTY_FILTERS: LeadFilters = {
   sources: [],
   categories: [],
   countries: [],
-  cities: [],
-  ratingMin: null,
-  ratingMax: null,
   callback: "all",
   callbackFrom: null,
   callbackTo: null,
   demo: "all",
 };
-
-/** Selectable rating steps — the half-star values both directories report. */
-export const RATING_STEPS = [3, 3.5, 4, 4.5, 5] as const;
 
 // --- category options -------------------------------------------------------
 
@@ -169,59 +149,24 @@ export interface CountryOption {
   count: number;
 }
 
-export interface CityOption {
-  /** The town, or {@link UNKNOWN_LOCATION}. */
-  name: string;
-  /** Which country it was counted under — what lets the panel cascade. */
-  country: string;
-  count: number;
-}
-
 /**
- * The two lists the Location group offers, paired so the panel can narrow the
- * towns to the selected countries. Built by `leadLocations()` from SQL for the
- * paged screens, and by {@link collectLocations} in memory for Export.
- */
-export interface LocationOptions {
-  countries: CountryOption[];
-  cities: CityOption[];
-}
-
-export const EMPTY_LOCATION_OPTIONS: LocationOptions = { countries: [], cities: [] };
-
-/**
- * The same lists as `leadLocations()`, from leads already in memory.
+ * The same list as `leadCountries()`, from leads already in memory.
  *
  * The counterpart to {@link collectCategories}, and it exists for the same one
  * caller: Export holds every matching lead client-side, so asking the server
- * for facets it could count from the array it is holding would be a round trip
+ * for a count it could take from the array it is holding would be a round trip
  * for an answer it already has. `null` becomes {@link UNKNOWN_LOCATION} here
  * exactly as it does in SQL, so the two lists are interchangeable.
  */
-export function collectLocations(leads: Lead[]): LocationOptions {
-  const countries = new Map<string, number>();
-  const cities = new Map<string, CityOption>();
-
+export function collectCountries(leads: Lead[]): CountryOption[] {
+  const counts = new Map<string, number>();
   for (const lead of leads) {
     const country = lead.country ?? UNKNOWN_LOCATION;
-    const city = lead.city ?? UNKNOWN_LOCATION;
-    countries.set(country, (countries.get(country) ?? 0) + 1);
-    // Keyed by the pair, because one town name in two countries is two options
-    // — and the panel has to know which country each belongs to.
-    const key = `${country}/${city}`;
-    const existing = cities.get(key);
-    if (existing) existing.count += 1;
-    else cities.set(key, { name: city, country, count: 1 });
+    counts.set(country, (counts.get(country) ?? 0) + 1);
   }
-
-  return {
-    countries: Array.from(countries, ([code, count]) => ({ code, count })).sort(
-      (a, b) => b.count - a.count || a.code.localeCompare(b.code),
-    ),
-    cities: Array.from(cities.values()).sort(
-      (a, b) => b.count - a.count || a.name.localeCompare(b.name),
-    ),
-  };
+  return Array.from(counts, ([code, count]) => ({ code, count })).sort(
+    (a, b) => b.count - a.count || a.code.localeCompare(b.code),
+  );
 }
 
 // --- matching ---------------------------------------------------------------
@@ -241,29 +186,18 @@ function matchesQuery(lead: Lead, query: string): boolean {
 }
 
 /**
- * One location field against one selection.
+ * The country against the selection.
  *
- * The whole of the location matching, for both country and city, because the
- * two behave identically: empty selection matches everything, a null field
- * matches only when {@link UNKNOWN_LOCATION} was picked. That second rule is
- * what makes "Unknown location" a real option rather than a label on a bucket
- * nothing can reach — and it is why the sentinel exists at all, since SQL and
- * JavaScript both refuse to find NULL in a list of strings.
+ * Empty selection matches everything; a lead with no country matches only when
+ * {@link UNKNOWN_LOCATION} was picked. That second rule is what makes "Unknown
+ * location" a real option rather than a label on a bucket nothing can reach —
+ * and it is why the sentinel exists at all, since SQL and JavaScript both
+ * refuse to find NULL in a list of strings.
  */
 function matchesLocation(value: string | null, selected: string[]): boolean {
   if (selected.length === 0) return true;
   if (value === null) return selected.includes(UNKNOWN_LOCATION);
   return selected.includes(value);
-}
-
-function matchesRating(lead: Lead, filters: LeadFilters): boolean {
-  if (filters.ratingMin === null && filters.ratingMax === null) return true;
-  // An unrated lead cannot be shown to satisfy a rating bound, so it drops out
-  // whenever one is set. The panel says so under the control.
-  if (lead.rating === null) return false;
-  if (filters.ratingMin !== null && lead.rating < filters.ratingMin) return false;
-  if (filters.ratingMax !== null && lead.rating > filters.ratingMax) return false;
-  return true;
 }
 
 function matchesCallback(
@@ -353,8 +287,6 @@ export function matchesFilters(
     return false;
   }
   if (!matchesLocation(lead.country, filters.countries)) return false;
-  if (!matchesLocation(lead.city, filters.cities)) return false;
-  if (!matchesRating(lead, filters)) return false;
   if (!matchesCallback(lead, filters, today, bounds.start, bounds.end)) return false;
   return matchesQuery(lead, filters.query);
 }
@@ -366,10 +298,6 @@ export interface FilterChip {
   label: string;
   /** The filter set with just this chip removed. */
   next: LeadFilters;
-}
-
-function formatRating(value: number): string {
-  return value.toFixed(1);
 }
 
 /**
@@ -426,49 +354,10 @@ export function describeActiveFilters(filters: LeadFilters): FilterChip[] {
     chips.push({
       id: `country:${country}`,
       label: countryLabel(country),
-      /*
-       * Only the country is cleared, never the towns picked under it.
-       *
-       * Tempting to clear both — but this function is pure over `LeadFilters`
-       * and has no idea which country a town is in, so "the towns that belonged
-       * to it" is not something it can compute. Guessing (clear all towns when
-       * the last country goes) would silently discard a selection an agent
-       * made, which is worse than leaving it. The panel is where the two are
-       * related, and it keeps every selected town visible and untickable
-       * whatever the country selection is, so nothing can end up active and
-       * unreachable.
-       */
       next: {
         ...filters,
         countries: filters.countries.filter((candidate) => candidate !== country),
       },
-    });
-  }
-
-  for (const city of filters.cities) {
-    chips.push({
-      id: `city:${city}`,
-      label: city === UNKNOWN_LOCATION ? "Unknown town" : city,
-      next: {
-        ...filters,
-        cities: filters.cities.filter((candidate) => candidate !== city),
-      },
-    });
-  }
-
-  if (filters.ratingMin !== null || filters.ratingMax !== null) {
-    const min = filters.ratingMin;
-    const max = filters.ratingMax;
-    const label =
-      min !== null && max !== null
-        ? `Rating ${formatRating(min)}–${formatRating(max)}`
-        : min !== null
-          ? `Rating ${formatRating(min)}+`
-          : `Rating up to ${formatRating(max as number)}`;
-    chips.push({
-      id: "rating",
-      label,
-      next: { ...filters, ratingMin: null, ratingMax: null },
     });
   }
 

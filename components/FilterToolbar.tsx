@@ -9,7 +9,7 @@ import {
   describeActiveFilters,
   EMPTY_FILTERS,
   type CategoryOption,
-  type LocationOptions,
+  type CountryOption,
   type LeadFilters,
 } from "@/lib/filters";
 import type { LeadStats } from "@/lib/leadUtils";
@@ -32,7 +32,7 @@ export default function FilterToolbar({
   filters,
   onChange,
   categories,
-  locations,
+  countries,
   stats,
   shown,
   open,
@@ -43,7 +43,7 @@ export default function FilterToolbar({
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
   categories: CategoryOption[];
-  locations: LocationOptions;
+  countries: CountryOption[];
   stats: LeadStats;
   shown: number;
   open: boolean;
@@ -228,7 +228,7 @@ export default function FilterToolbar({
                 filters={filters}
                 onChange={onChange}
                 categories={categories}
-                locations={locations}
+                countries={countries}
                 stats={stats}
                 section={section}
                 demoCounts={demoCounts}

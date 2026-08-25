@@ -27,7 +27,7 @@ import {
   EMPTY_FILTERS,
   type CategoryOption,
   type LeadFilters,
-  type LocationOptions,
+  type CountryOption,
 } from "@/lib/filters";
 import { leadPosition, leadWorkspaceHref } from "@/lib/leadLink";
 import { todayIso, type LeadStats } from "@/lib/leadUtils";
@@ -132,7 +132,7 @@ export default function Worklist({
   initialLeads,
   initialMeta,
   initialCategories,
-  initialLocations,
+  initialCountries,
   initialDemos,
   initialDemoCounts,
   section = "leads",
@@ -141,7 +141,7 @@ export default function Worklist({
   initialLeads: Lead[];
   initialMeta: LeadPageMeta;
   initialCategories: CategoryOption[];
-  initialLocations: LocationOptions;
+  initialCountries: CountryOption[];
   /**
    * Demo metadata for the first page, when the demo view rendered it. Sparse,
    * and absent for the worklist, which draws no demo columns.
@@ -805,7 +805,7 @@ export default function Worklist({
             filters={filters}
             onChange={setFilters}
             categories={initialCategories}
-            locations={initialLocations}
+            countries={initialCountries}
             stats={stats}
             shown={meta.total}
             open={filtersOpen}

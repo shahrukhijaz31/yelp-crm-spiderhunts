@@ -82,15 +82,6 @@ const MAX_QUERY_LENGTH = 200;
 const CALLBACK_RANGES = Object.keys(CALLBACK_RANGE_LABELS) as CallbackRange[];
 
 /**
- * Bounds on the city filter, which is the one multi-select here whose values
- * are not a closed set — they are scraped text, so the vocabulary cannot be
- * checked, only its size. A town name is a few words; a thousand of them in one
- * `IN` list is not a filter anyone ticked.
- */
-const MAX_CITY_LENGTH = 120;
-const MAX_CITY_VALUES = 200;
-
-/**
  * The columns a header click can sort by, plus `default` for the order the
  * table has always had (insertion order — see `listLeads`).
  *
@@ -200,10 +191,6 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   for (const category of filters.categories) params.append("category", category);
   // Location, repeated per value like the three lists above it.
   for (const country of filters.countries) params.append("country", country);
-  for (const city of filters.cities) params.append("city", city);
-
-  if (filters.ratingMin !== null) params.set("ratingMin", String(filters.ratingMin));
-  if (filters.ratingMax !== null) params.set("ratingMax", String(filters.ratingMax));
 
   // Demo content. Written whatever the section — the demo view is the only
   // thing that sets it, and a URL it produced must survive a copy-paste.
@@ -235,14 +222,6 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
 /** `YYYY-MM-DD` and nothing else — this string reaches a date comparison. */
 function isIsoDate(value: string | null): value is string {
   return value !== null && /^\d{4}-\d{2}-\d{2}$/.test(value);
-}
-
-/** A finite number inside the rating scale, or null. */
-function readRating(value: string | null): number | null {
-  if (value === null || value.trim() === "") return null;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  return Math.min(5, Math.max(0, parsed));
 }
 
 function readOneOf<T extends string>(
@@ -288,24 +267,12 @@ export function parseLeadSearchParams(
    * come from `COUNTRY_LABELS`, which is the list the UI can actually draw, so
    * `?country=XX` is dropped rather than queried for. `none` is admitted
    * alongside them — it is the "Unknown location" option, not a country.
-   *
-   * City cannot be a closed set and is not treated as one. It is scraped text,
-   * so the list is whatever is in the table; it is validated the way `category`
-   * is — non-blank, capped in number — and reaches SQL as a bound parameter.
-   * The cap is what a closed set buys elsewhere: a hand-built URL repeating
-   * `&city=` a thousand times would otherwise become a thousand-element `IN`.
    */
   const countries = params
     .getAll("country")
     .filter(
       (value) => value === UNKNOWN_LOCATION || LEAD_COUNTRIES.includes(value),
     );
-
-  const cities = params
-    .getAll("city")
-    .map((value) => value.trim())
-    .filter((value) => value !== "" && value.length <= MAX_CITY_LENGTH)
-    .slice(0, MAX_CITY_VALUES);
 
   const section = readOneOf(params.get("section"), LEAD_SECTIONS, DEFAULT_LEAD_SECTION);
 
@@ -331,9 +298,6 @@ export function parseLeadSearchParams(
     sources,
     categories,
     countries,
-    cities,
-    ratingMin: readRating(params.get("ratingMin")),
-    ratingMax: readRating(params.get("ratingMax")),
     callback,
     callbackFrom: isIsoDate(callbackFrom) ? callbackFrom : null,
     callbackTo: isIsoDate(callbackTo) ? callbackTo : null,

@@ -1,6 +1,6 @@
 import {
   EMPTY_FILTERS,
-  collectLocations,
+  collectCountries,
   describeActiveFilters,
   matchesFilters,
   type LeadFilters,
@@ -372,16 +372,17 @@ function filtering(): void {
     matchesFilters(manchester, both, today) && matchesFilters(nowhere, both, today),
   );
 
-  const town = withFilters({ cities: ["Manchester"] });
-  check("a town narrows to it", matchesFilters(manchester, town, today));
-  check("and excludes the others", !matchesFilters(sf, town, today));
-
-  // The groups AND, like every other pair in the rail.
-  const contradiction = withFilters({ countries: ["US"], cities: ["Manchester"] });
+  /*
+   * The town is still parsed and still stored on the lead — it is only the
+   * *filter* that was removed. So a lead carries its town and nothing narrows
+   * by it, which is what this asserts: a country filter must not start behaving
+   * differently because the leads happen to be in different towns.
+   */
+  const sameCountryDifferentTowns = withFilters({ countries: ["US"] });
   check(
-    "country and town are ANDed, so a contradiction matches nothing",
-    !matchesFilters(manchester, contradiction, today) &&
-      !matchesFilters(sf, contradiction, today),
+    "two towns in one country both match that country",
+    matchesFilters(sf, sameCountryDifferentTowns, today) &&
+      matchesFilters(lead({ id: "l4", country: "US", city: "Oakland" }), sameCountryDifferentTowns, today),
   );
 }
 
@@ -394,7 +395,7 @@ function options(): void {
     lead({ id: "l4", country: "GB", city: "Manchester" }),
     lead({ id: "l5", country: null, city: null }),
   ];
-  const { countries, cities } = collectLocations(leads);
+  const countries = collectCountries(leads);
 
   check(
     "countries are counted and ordered by size",
@@ -407,15 +408,9 @@ function options(): void {
     JSON.stringify(countries),
   );
   check(
-    "towns carry the country they were counted under",
-    cities.find((entry) => entry.name === "Manchester")?.country === "GB",
-    JSON.stringify(cities),
-  );
-  check(
-    "a repeated town is one option with a count of two",
-    cities.filter((entry) => entry.name === "San Francisco").length === 1 &&
-      cities.find((entry) => entry.name === "San Francisco")?.count === 2,
-    JSON.stringify(cities),
+    "a second country is its own option",
+    countries.find((entry) => entry.code === "GB")?.count === 1,
+    JSON.stringify(countries),
   );
 }
 
@@ -431,20 +426,14 @@ function queryString(): void {
       "2026-08-25",
     ).filters;
 
-  const trip = round({ countries: ["GB", UNKNOWN_LOCATION], cities: ["Manchester", "Leeds"] });
+  const trip = round({ countries: ["GB", UNKNOWN_LOCATION] });
   check(
     "countries survive the round trip",
     trip.countries.join(",") === `GB,${UNKNOWN_LOCATION}`,
     trip.countries.join(","),
   );
-  check(
-    "towns survive it too",
-    trip.cities.join(",") === "Manchester,Leeds",
-    trip.cities.join(","),
-  );
-
   const hostile = parseLeadSearchParams(
-    new URLSearchParams("country=XX&country=GB&country=us&city=&city=Leeds"),
+    new URLSearchParams("country=XX&country=GB&country=us"),
     "2026-08-25",
   ).filters;
   check(
@@ -452,28 +441,31 @@ function queryString(): void {
     hostile.countries.join(",") === "GB",
     hostile.countries.join(","),
   );
+  // The removed filters must not be readable from a hand-built URL either.
+  const removed = parseLeadSearchParams(
+    new URLSearchParams("city=Leeds&ratingMin=4&ratingMax=5"),
+    "2026-08-25",
+  ).filters as unknown as Record<string, unknown>;
   check(
-    "a blank city is a stray separator, not a filter",
-    hostile.cities.join(",") === "Leeds",
-    hostile.cities.join(","),
+    "the town filter is gone from the URL vocabulary, not just the panel",
+    removed.cities === undefined,
+    JSON.stringify(removed.cities),
+  );
+  check(
+    "and so is the rating filter",
+    removed.ratingMin === undefined && removed.ratingMax === undefined,
+    `${JSON.stringify(removed.ratingMin)}/${JSON.stringify(removed.ratingMax)}`,
   );
 
-  const flood = new URLSearchParams();
-  for (let index = 0; index < 500; index += 1) flood.append("city", `Town ${index}`);
+  const chips = describeActiveFilters({ ...EMPTY_FILTERS, countries: ["GB"] });
   check(
-    "a flood of towns is capped rather than turned into a 500-element IN list",
-    parseLeadSearchParams(flood, "2026-08-25").filters.cities.length === 200,
+    "the country gets a clearable chip",
+    chips.some((chip) => chip.id === "country:GB" && chip.label === "United Kingdom"),
+    chips.map((chip) => chip.id).join(", "),
   );
-
-  const chips = describeActiveFilters({
-    ...EMPTY_FILTERS,
-    countries: ["GB"],
-    cities: ["Manchester"],
-  });
   check(
-    "each location constraint gets its own clearable chip",
-    chips.some((chip) => chip.id === "country:GB" && chip.label === "United Kingdom") &&
-      chips.some((chip) => chip.id === "city:Manchester"),
+    "and it is the only chip a country selection produces",
+    chips.length === 1,
     chips.map((chip) => chip.id).join(", "),
   );
 }

@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import ExportControls from "./ExportControls";
 import FilterToolbar from "./FilterToolbar";
 import { useLeads } from "./LeadsProvider";
-import { collectCategories, collectLocations } from "@/lib/filters";
+import { collectCategories, collectCountries } from "@/lib/filters";
 import { EXPORT_COLUMN_HEADERS } from "@/lib/exportLeads";
 
 /**
@@ -25,7 +25,7 @@ export default function ExportPanel() {
   // Export is the one view with every matching row in memory, so asking the
   // server to group what is sitting in an array here would be a round trip
   // for an answer it can compute. Same reasoning as `collectCategories`.
-  const locations = useMemo(() => collectLocations(leads), [leads]);
+  const countries = useMemo(() => collectCountries(leads), [leads]);
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-7">
@@ -44,7 +44,7 @@ export default function ExportPanel() {
           filters={exportFilters}
           onChange={setExportFilters}
           categories={categories}
-          locations={locations}
+          countries={countries}
           stats={stats}
           shown={exportVisibleLeads.length}
           open={filtersOpen}
