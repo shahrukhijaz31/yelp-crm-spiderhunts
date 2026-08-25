@@ -8,6 +8,7 @@ import {
 import {
   LEAD_COUNTRIES,
   UNKNOWN_LOCATION,
+  buildTownIndex,
   countryLabel,
   normaliseCity,
   parseAddressLocation,
@@ -206,6 +207,88 @@ function elsewhere(): void {
   // the country is not, and the parser says exactly that rather than guessing.
   expectPlace("Rue de Rivoli 12, 75001 Paris", "—/Paris");
   expectPlace("Friedrichstrasse 43, 10117 Berlin, Germany", "DE/Berlin");
+}
+
+/**
+ * The shape almost every live address actually has, and the corpus that reads
+ * it. See `TownIndex` in `lib/leadLocation.ts`.
+ */
+function runOnAddresses(): void {
+  section("Run-on addresses — the comma is before the province, not the town");
+
+  // Learned from the rows that spell their town out as its own segment.
+  const towns = buildTownIndex(
+    [
+      "Calgary", "Vancouver", "Ottawa", "Brossard", "Gatineau", "La Prairie",
+      "Richmond Hill", "Niagara Falls", "Thunder Bay", "Montreal",
+    ].map((city) => ({ country: "CA", city })),
+  );
+  const towns2 = buildTownIndex(
+    ["Manchester", "London", "Stoke-on-Trent"].map((city) => ({
+      country: "GB",
+      city,
+    })),
+  );
+
+  function expectWith(index: ReturnType<typeof buildTownIndex>, address: string, expected: string) {
+    const { country, city } = parseAddressLocation(address, index);
+    const actual = `${country ?? "—"}/${city ?? "—"}`;
+    check(`${address}  →  ${expected}`, actual === expected, actual);
+  }
+
+  // The country was already right without the corpus; the town was not.
+  check(
+    "without the corpus the country is still read",
+    place("3909 Macleod Trail SE Calgary, AB T2G 2R4 Canada") === "CA/—",
+    place("3909 Macleod Trail SE Calgary, AB T2G 2R4 Canada"),
+  );
+
+  expectWith(towns, "3909 Macleod Trail SE Calgary, AB T2G 2R4 Canada", "CA/Calgary");
+  expectWith(towns, "595 W 8th Avenue Vancouver, BC V5Z 1C6 Canada", "CA/Vancouver");
+  expectWith(towns, "62 Barrette Street Ottawa, ON K1L 8B3 Canada", "CA/Ottawa");
+  expectWith(towns, "8650 Taschereau Blvd Brossard, QC J4X 1C2 Canada", "CA/Brossard");
+  expectWith(
+    towns,
+    "1080 Mainland Street Unit 413 Vancouver, BC V6B 2T4 Canada",
+    "CA/Vancouver",
+  );
+  expectWith(
+    towns,
+    "101 Rue Saint-Jean-Bosco Bureaux A-1330 Gatineau, QC J8Y 3G5 Canada",
+    "CA/Gatineau",
+  );
+
+  /*
+   * Multi-word towns, which are the whole reason the match is longest-first and
+   * not "the last word". Splitting on the final token would invent towns called
+   * Hill, Falls and Bay, each an option an agent could tick.
+   */
+  section("Run-on addresses — multi-word towns are not truncated");
+  expectWith(towns, "90 Taschereau Blvd La Prairie, QC J5R 1S8 Canada", "CA/La Prairie");
+  expectWith(towns, "12 Yonge Street Richmond Hill, ON L4C 1A1 Canada", "CA/Richmond Hill");
+  expectWith(towns, "5 Clifton Hill Niagara Falls, ON L2G 3N5 Canada", "CA/Niagara Falls");
+  expectWith(towns, "1 Water St Thunder Bay, ON P7B 1A1 Canada", "CA/Thunder Bay");
+
+  section("Run-on addresses — the corpus recognises, it never invents");
+  // No such town has ever been spelled out, so none is produced.
+  expectWith(towns, "44 Unknownville Road Nowheretown, ON K0A 1A0 Canada", "CA/—");
+  // A town known in Canada does not leak into a British address, or the reverse.
+  expectWith(towns2, "12 High St Manchester M1 2AB, UK", "GB/Manchester");
+  expectWith(towns, "12 High St Manchester M1 2AB, UK", "GB/—");
+  expectWith(towns2, "3909 Macleod Trail SE Calgary, AB T2G 2R4 Canada", "CA/—");
+
+  // A comma-separated town is believed on its own terms and never overridden.
+  expectWith(towns, "1 Wellington St, Nowheretown, ON K1A 0A6", "CA/Nowheretown");
+
+  section("Run-on addresses — the trailing country with no comma before it");
+  // The fault that left 42,733 of 45,039 live leads unplaced.
+  expectPlace("4213 Rue Drolet Montreal, QC H2W 2L7 Canada", "CA/—");
+  expectPlace("12 High St, Manchester M1 2AB United Kingdom", "GB/Manchester");
+  check(
+    "an unparsed postal segment never becomes a town",
+    place("5440 Royalmount Ave Montreal, QC H4P 1H7 Canada").split("/")[1] === "—",
+    place("5440 Royalmount Ave Montreal, QC H4P 1H7 Canada"),
+  );
 }
 
 function refusals(): void {
@@ -427,6 +510,7 @@ function main(): void {
   unitedKingdom();
   canada();
   elsewhere();
+  runOnAddresses();
   refusals();
   casing();
   vocabulary();

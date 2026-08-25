@@ -516,6 +516,95 @@ function cityBefore(before: string[], country: string | null): string | null {
   return null;
 }
 
+// --- towns learned from the data --------------------------------------------
+
+/**
+ * Town names already known for a country, lowercased, as learned from the rows
+ * that spelled them out unambiguously.
+ *
+ * **Why the parser needs a corpus at all.** Most of the live table is written
+ * with the town run into the street line and no comma between them:
+ *
+ *     3909 Macleod Trail SE Calgary, AB T2G 2R4 Canada
+ *
+ * The comma sits before the *province*, not before the town, so the postal tail
+ * gives up the country and nothing else — the town is the last word of a
+ * segment that also holds a house number, a street and sometimes a unit. There
+ * is no rule over that string alone that finds `Calgary` and does not also find
+ * `Hill` in `Richmond Hill`, `Falls` in `Niagara Falls` or `Bay` in `Thunder
+ * Bay`. Splitting on the last word is how a filter ends up offering three towns
+ * that do not exist.
+ *
+ * So the town is not guessed from the string — it is *recognised*. The rows
+ * that do carry a comma (`…, Calgary, AB T2G 2R4`) name their towns plainly;
+ * those names become this index, and a run-on segment is then matched against
+ * it, longest name first. `Richmond Hill` wins over `Hill` because it is longer
+ * and both are tested.
+ *
+ * Two properties this gets for free, and neither is incidental:
+ *
+ *   - **It cannot invent a town.** Every value it can produce already appeared,
+ *     spelled out, somewhere else in the same country's data. A miss returns
+ *     null and the lead reads "Unknown town" — never a plausible wrong answer.
+ *   - **It needs no dataset.** No gazetteer to ship, licence or keep current;
+ *     the vocabulary is whatever the scrapers have actually seen.
+ *
+ * Keyed by country so `London` matched against Canadian rows is the Ontario one
+ * and cannot leak into British ones, and vice versa.
+ */
+export type TownIndex = Map<string, Set<string>>;
+
+/** The most words a town name may have, and so how far back a suffix is tried. */
+const MAX_TOWN_WORDS = 4;
+
+/**
+ * An index built from rows that already have a country and a city.
+ *
+ * Fed by the backfill from its first pass over the table, and by `mergeLeads`
+ * from the rows it already reads to detect duplicates — so neither pays an
+ * extra query for it.
+ */
+export function buildTownIndex(
+  rows: { country: string | null; city: string | null }[],
+): TownIndex {
+  const index: TownIndex = new Map();
+  for (const row of rows) {
+    if (row.city === null) continue;
+    const key = row.country ?? "";
+    let towns = index.get(key);
+    if (!towns) {
+      towns = new Set();
+      index.set(key, towns);
+    }
+    towns.add(row.city.toLowerCase());
+  }
+  return index;
+}
+
+/**
+ * The longest known town this segment ends with, or null.
+ *
+ * Anchored at the end and on a word boundary, because the town is the last
+ * thing before the comma in every run-on shape the scrapers produce. Longest
+ * first so a two-word town is never truncated to its second word.
+ */
+function townSuffix(
+  segment: string | null | undefined,
+  country: string | null,
+  index: TownIndex | undefined,
+): string | null {
+  if (!segment || !index) return null;
+  const towns = index.get(country ?? "");
+  if (!towns) return null;
+
+  const words = segment.replace(/\s+/g, " ").trim().split(" ");
+  for (let take = Math.min(MAX_TOWN_WORDS, words.length); take >= 1; take -= 1) {
+    const candidate = normaliseCity(words.slice(words.length - take).join(" "));
+    if (candidate && towns.has(candidate.toLowerCase())) return candidate;
+  }
+  return null;
+}
+
 // --- the tail ---------------------------------------------------------------
 
 interface TailReading {
@@ -526,6 +615,13 @@ interface TailReading {
   usePrevious: boolean;
   /** False when nothing in the tail was recognised as postal at all. */
   matched: boolean;
+  /**
+   * What was left of the tail once the postal code was taken out of it, when
+   * that leftover was not usable as a town on its own — `12 High St Manchester`
+   * from `12 High St Manchester M1 2AB`. The run-on town is in here, and it is
+   * kept so {@link townSuffix} can be tried against it.
+   */
+  leftover: string | null;
 }
 
 const NO_MATCH: TailReading = {
@@ -533,6 +629,7 @@ const NO_MATCH: TailReading = {
   city: null,
   usePrevious: false,
   matched: false,
+  leftover: null,
 };
 
 /**
@@ -545,23 +642,29 @@ const NO_MATCH: TailReading = {
  */
 function readTail(tail: string): TailReading {
   /** A rule that found the town inside the tail, or says it is the one before. */
-  const placed = (country: string | null, city: string | null): TailReading => ({
+  const placed = (
+    country: string | null,
+    city: string | null,
+    leftover: string | null = null,
+  ): TailReading => ({
     country,
     city,
     usePrevious: city === null,
     matched: true,
+    // Only worth keeping when it did not already yield a town.
+    leftover: city === null ? leftover : null,
   });
 
   // Canada before the US: both can carry a two-letter regional code, and the
   // letter-digit-letter body is the half that tells them apart.
   const canadian = CA_POSTAL.exec(tail);
   if (canadian && (!canadian[2] || CA_PROVINCES.has(canadian[2].toUpperCase()))) {
-    return placed("CA", cityFrom(canadian[1], "CA"));
+    return placed("CA", cityFrom(canadian[1], "CA"), canadian[1] ?? null);
   }
 
   const american = US_ZIP.exec(tail);
   if (american && US_STATES.has(american[2].toUpperCase())) {
-    return placed("US", cityFrom(american[1], "US"));
+    return placed("US", cityFrom(american[1], "US"), american[1] ?? null);
   }
 
   // A bare regional code with no postal code at all — `…, Ottawa, ON` and
@@ -584,7 +687,7 @@ function readTail(tail: string): TailReading {
 
   const australian = AU_POSTCODE.exec(tail);
   if (australian && AU_STATES.has(australian[2].toUpperCase())) {
-    return placed("AU", cityFrom(australian[1], "AU"));
+    return placed("AU", cityFrom(australian[1], "AU"), australian[1] ?? null);
   }
 
   /*
@@ -605,14 +708,15 @@ function readTail(tail: string): TailReading {
   if (british) {
     const rest =
       tail.slice(0, british.index) + tail.slice(british.index + british[0].length);
-    return placed("GB", cityFrom(rest.replace(/\s+/g, " ").trim() || undefined, "GB"));
+    const leftover = rest.replace(/\s+/g, " ").trim();
+    return placed("GB", cityFrom(leftover || undefined, "GB"), leftover || null);
   }
 
   const irish = IE_EIRCODE.exec(tail);
-  if (irish) return placed("IE", cityFrom(irish[1], "IE"));
+  if (irish) return placed("IE", cityFrom(irish[1], "IE"), irish[1] ?? null);
 
   const dutch = NL_POSTCODE.exec(tail);
-  if (dutch) return placed("NL", cityFrom(dutch[1], "NL"));
+  if (dutch) return placed("NL", cityFrom(dutch[1], "NL"), dutch[1] ?? null);
 
   /*
    * A numeric postal code with no country signature in it.
@@ -643,7 +747,10 @@ function readTail(tail: string): TailReading {
  * (`…, USA` alone), a city and no country (`75001 Paris` with nothing after
  * it), both, or neither. Nothing here ever guesses one from the other.
  */
-export function parseAddressLocation(address: string | null | undefined): LeadLocation {
+export function parseAddressLocation(
+  address: string | null | undefined,
+  towns?: TownIndex,
+): LeadLocation {
   if (typeof address !== "string") return NOWHERE;
   const segments = splitSegments(address);
   if (segments.length === 0) return NOWHERE;
@@ -679,9 +786,24 @@ export function parseAddressLocation(address: string | null | undefined): LeadLo
   if (tail.country && !country) country = tail.country;
 
   if (tail.matched) {
-    const city = tail.usePrevious
-      ? cityBefore(segments.slice(0, -1), country)
-      : tail.city;
+    if (!tail.usePrevious) return { country, city: tail.city };
+
+    const before = segments.slice(0, -1);
+    /*
+     * Four attempts, in falling order of certainty.
+     *
+     * A town written as its own segment is believed outright; only when there
+     * is not one does the run-on matching get a turn, and that can only return
+     * a name the data has already spelled out somewhere (see {@link TownIndex}).
+     * So a comma-separated address never has its town decided by the corpus,
+     * and a run-on one never has a town invented for it.
+     */
+    const city =
+      cityBefore(before, country) ??
+      townSuffix(tail.leftover, country, towns) ??
+      townSuffix(before[before.length - 1], country, towns) ??
+      null;
+
     return { country, city };
   }
 

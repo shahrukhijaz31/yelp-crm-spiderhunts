@@ -7,7 +7,7 @@ import {
 } from "./filters";
 import { Prisma } from "./generated/prisma/client";
 import { describeLeadActivity, recordLeadActivity } from "./leadActivity";
-import { UNKNOWN_LOCATION } from "./leadLocation";
+import { UNKNOWN_LOCATION, buildTownIndex } from "./leadLocation";
 import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
 import type { LeadPageMeta, LeadPageQuery, LeadSort, LeadSortKey } from "./leadQuery";
 import { normalisePhone, type LeadStats } from "./leadUtils";
@@ -916,10 +916,25 @@ export async function mergeLeads(
   // dragging every note and meeting field over the wire to answer a set
   // membership question.
   const existing = await prisma.lead.findMany({
-    select: { name: true, address: true, phone: true },
+    select: { name: true, address: true, phone: true, country: true, city: true },
   });
 
   const seen = new Set(existing.flatMap(identityKeys));
+
+  /*
+   * The towns already known, for reading the run-on addresses in this push.
+   *
+   * Most scraped addresses run the town into the street line with no comma
+   * (`3909 Macleod Trail SE Calgary, AB …`), and the only safe way to find the
+   * town in one is to recognise a name the data has already spelled out — see
+   * `TownIndex`. Built from the rows fetched immediately above rather than from
+   * a query of its own, so duplicate detection and this share one read.
+   *
+   * A town nobody has spelled out yet is simply not found, and that lead reads
+   * "Unknown town" until it is — at which point re-running the backfill picks
+   * up every earlier row that was waiting on the same name.
+   */
+  const towns = buildTownIndex(existing);
 
   const fresh: Lead[] = [];
   let skippedExisting = 0;
@@ -938,7 +953,9 @@ export async function mergeLeads(
 
   for (let i = 0; i < fresh.length; i += INSERT_CHUNK) {
     await prisma.lead.createMany({
-      data: fresh.slice(i, i + INSERT_CHUNK).map((lead) => toCreateData(lead, sourceBatch)),
+      data: fresh
+        .slice(i, i + INSERT_CHUNK)
+        .map((lead) => toCreateData(lead, sourceBatch, towns)),
     });
   }
 

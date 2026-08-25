@@ -7,7 +7,11 @@ loadEnv({ path: [".env.local", ".env"], quiet: true });
 // when DATABASE_URL is unset, and the whole point of the dotenv call above is
 // that it *is* unset until that line has run. ES imports are evaluated before
 // any statement in this file, so a top-level import of it would lose the race.
-import { parseAddressLocation } from "../lib/leadLocation";
+import {
+  buildTownIndex,
+  parseAddressLocation,
+  type TownIndex,
+} from "../lib/leadLocation";
 
 /**
  * Fill `leads.country` and `leads.city` from `leads.address`.
@@ -49,6 +53,63 @@ interface Tally {
   unplaced: number;
 }
 
+/**
+ * Every row's `id` and `address`, a page at a time.
+ *
+ * Shared by both passes so the traversal — keyset on the primary key, never
+ * OFFSET — is written once. `select` is widened by the caller through the
+ * generic, so the learning pass does not drag columns it will not read.
+ */
+type Db = Awaited<typeof import("../lib/prisma")>["prisma"];
+
+async function* eachLead(prisma: Db): AsyncGenerator<LeadRow[]> {
+  let cursor: string | null = null;
+  for (;;) {
+    const rows: LeadRow[] = await prisma.lead.findMany({
+      select: { id: true, address: true, country: true, city: true },
+      orderBy: { id: "asc" },
+      take: BATCH,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    if (rows.length === 0) return;
+    cursor = rows[rows.length - 1].id;
+    yield rows;
+  }
+}
+
+interface LeadRow {
+  id: string;
+  address: string;
+  country: string | null;
+  city: string | null;
+}
+
+/**
+ * Pass one: learn the towns.
+ *
+ * Parses every address with no index, which finds a town only where the address
+ * spelled one out as its own comma-separated segment. Those are the unambiguous
+ * ones, and they become the vocabulary the second pass uses to recognise towns
+ * that are run into the street line — see `TownIndex` in `lib/leadLocation.ts`.
+ *
+ * A whole extra traversal, and worth it: without this the live table yields a
+ * town for about one row in seventy, because almost every address is written
+ * `3909 Macleod Trail SE Calgary, AB …` with the comma before the province
+ * rather than before the town.
+ */
+async function learnTowns(prisma: Db): Promise<TownIndex> {
+  const learned: { country: string | null; city: string | null }[] = [];
+  for await (const rows of eachLead(prisma)) {
+    for (const row of rows) learned.push(parseAddressLocation(row.address));
+  }
+  const index = buildTownIndex(learned);
+  const towns = Array.from(index.values()).reduce((sum, set) => sum + set.size, 0);
+  console.log(
+    `Learned ${towns.toLocaleString()} town name(s) across ${index.size} countr(y/ies) from addresses that spelled them out.\n`,
+  );
+  return index;
+}
+
 async function main(): Promise<void> {
   const { prisma } = await import("../lib/prisma");
 
@@ -57,9 +118,11 @@ async function main(): Promise<void> {
     `${DRY_RUN ? "Dry run" : "Backfill"} over ${total.toLocaleString()} lead(s)\n`,
   );
 
+  const towns = await learnTowns(prisma);
+
   const tally: Tally = { scanned: 0, updated: 0, unchanged: 0, unplaced: 0 };
   const countries = new Map<string, number>();
-  const towns = new Map<string, number>();
+  const townCounts = new Map<string, number>();
   /** Unreadable addresses, quoted at the end so the rules can be fixed. */
   const samples: string[] = [];
   /*
@@ -72,31 +135,15 @@ async function main(): Promise<void> {
    */
   const placed: string[] = [];
 
-  // Keyset pagination on the primary key rather than `skip`/`take`: this is the
-  // one traversal in the codebase that reads every row, and an OFFSET deep into
-  // a large table re-walks everything before it on each page.
-  let cursor: string | null = null;
-
-  for (;;) {
-    const rows: { id: string; address: string; country: string | null; city: string | null }[] =
-      await prisma.lead.findMany({
-        select: { id: true, address: true, country: true, city: true },
-        orderBy: { id: "asc" },
-        take: BATCH,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      });
-
-    if (rows.length === 0) break;
-    cursor = rows[rows.length - 1].id;
-
+  for await (const rows of eachLead(prisma)) {
     for (const row of rows) {
       tally.scanned += 1;
-      const { country, city } = parseAddressLocation(row.address);
+      const { country, city } = parseAddressLocation(row.address, towns);
 
       countries.set(country ?? "—", (countries.get(country ?? "—") ?? 0) + 1);
       if (city !== null) {
         const key = `${country ?? "—"} / ${city}`;
-        towns.set(key, (towns.get(key) ?? 0) + 1);
+        townCounts.set(key, (townCounts.get(key) ?? 0) + 1);
       }
 
       if (country === null) {
@@ -144,8 +191,8 @@ async function main(): Promise<void> {
     console.log(`  ${code.padEnd(4)} ${String(count.toLocaleString()).padStart(8)}  ${share}%`);
   }
 
-  console.log(`\nTop towns (${towns.size.toLocaleString()} distinct)`);
-  for (const [name, count] of Array.from(towns)
+  console.log(`\nTop towns (${townCounts.size.toLocaleString()} distinct)`);
+  for (const [name, count] of Array.from(townCounts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 20)) {
     console.log(`  ${String(count.toLocaleString()).padStart(7)}  ${name}`);

@@ -1,7 +1,7 @@
 // Prisma 7 exports model row types with a `Model` suffix (`LeadModel`), which
 // leaves the name `Lead` free for the app's own type below.
 import type { LeadModel as LeadRow } from "./generated/prisma/models";
-import { parseAddressLocation } from "./leadLocation";
+import { parseAddressLocation, type TownIndex } from "./leadLocation";
 import { isCalled, type Lead } from "./types";
 
 /**
@@ -77,7 +77,11 @@ export function toLead(row: LeadRow): Lead {
  * database mint the cuid means an id is unique across every import, which is
  * what makes it safe to reference from an export.
  */
-export function toCreateData(lead: Lead, sourceBatch: string | null) {
+export function toCreateData(
+  lead: Lead,
+  sourceBatch: string | null,
+  towns?: TownIndex,
+) {
   return {
     name: lead.name,
     address: lead.address,
@@ -98,7 +102,7 @@ export function toCreateData(lead: Lead, sourceBatch: string | null) {
      * it once at the door is what lets the filter be an indexed `WHERE` rather
      * than a scan.
      */
-    ...parseAddressLocation(lead.address),
+    ...parseAddressLocation(lead.address, towns),
     status: lead.status,
     /*
      * A row arriving already carrying an outcome has, by definition, been
