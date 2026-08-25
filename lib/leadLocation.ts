@@ -183,6 +183,48 @@ const COUNTRY_NAMES: Record<string, string> = {
   brasil: "BR",
 };
 
+/**
+ * The same country names again, as a pattern that matches one at the *end* of a
+ * segment rather than as the whole of one.
+ *
+ * Real scraper output does not put a comma before the country. Production is
+ * full of rows like `5440 Royalmount Ave Montreal, QC H4P 1H7 Canada`, where
+ * the final segment is `QC H4P 1H7 Canada` — so an exact-match lookup finds no
+ * country, every anchored postal pattern fails on the trailing word, and the
+ * row falls through every rule. That one missing comma left 42,733 of 45,039
+ * live leads unplaced.
+ *
+ * Longest name first, so `united states` is tried before `us` and the whole
+ * name is stripped rather than half of it. The leading `\s` is required: it is
+ * what stops `Norfolk` ending in "uk" and `Sunderland` ending in "land".
+ */
+const TRAILING_COUNTRY = new RegExp(
+  "\\s+(" +
+    Object.keys(COUNTRY_NAMES)
+      .sort((a, b) => b.length - a.length)
+      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|") +
+    ")$",
+  "i",
+);
+
+/**
+ * A segment with any trailing country name cut off it, and the country it named.
+ *
+ * Returns the segment untouched and a null country when it does not end in one.
+ */
+function splitTrailingCountry(segment: string): {
+  country: string | null;
+  rest: string;
+} {
+  const match = TRAILING_COUNTRY.exec(segment);
+  if (!match) return { country: null, rest: segment };
+  return {
+    country: COUNTRY_NAMES[match[1].toLowerCase()] ?? null,
+    rest: segment.slice(0, match.index).trim(),
+  };
+}
+
 // --- regional codes ---------------------------------------------------------
 
 /**
@@ -431,6 +473,20 @@ function looksLikeStreet(segment: string): boolean {
 function cityFrom(segment: string | undefined, country: string | null): string | null {
   if (segment === undefined) return null;
   if (looksLikeStreet(segment)) return null;
+  /*
+   * A town name has no digits in it.
+   *
+   * This is the guard that stops the last-resort branch of the parse turning an
+   * unrecognised postal segment into a "town". Without it `QC H4P 1H7 Canada`
+   * became a city called `QC H4p 1h7 Canada`, and a filter offering thousands
+   * of those is worse than one offering none — an agent can tick it, get a
+   * meaningless slice of the worklist, and have nothing on screen to say why.
+   *
+   * Safe against every rule above, because each one hands over a candidate with
+   * the postal code already removed: the UK rule cuts it out, and the anchored
+   * patterns capture the town in a group of their own.
+   */
+  if (/\d/.test(segment)) return null;
   const region = regionCountry(segment);
   if (region !== null && (country === null || region === country)) return null;
   return normaliseCity(segment);
@@ -592,13 +648,29 @@ export function parseAddressLocation(address: string | null | undefined): LeadLo
   const segments = splitSegments(address);
   if (segments.length === 0) return NOWHERE;
 
-  // 1. An explicit country name at the very end wins over every shape below.
-  //    A run that says "United Kingdom" is not guessing, and neither are we.
+  /*
+   * 1. An explicit country name at the end wins over every shape below — a run
+   *    that says "United Kingdom" is not guessing, and neither are we.
+   *
+   *    Taken two ways, because the directories write it both ways. It may be a
+   *    segment of its own (`…, SE1 9SG, United Kingdom`), in which case the
+   *    segment goes; or it may be tacked onto the postal segment with no comma
+   *    (`…, QC H4P 1H7 Canada`), in which case only those words go and what is
+   *    left is still the postal tail, to be read as one below.
+   */
   let country: string | null = null;
-  const named = COUNTRY_NAMES[segments[segments.length - 1].toLowerCase()];
+  const last = segments[segments.length - 1];
+  const named = COUNTRY_NAMES[last.toLowerCase()];
   if (named) {
     country = named;
     segments.pop();
+  } else {
+    const trailing = splitTrailingCountry(last);
+    if (trailing.country) {
+      country = trailing.country;
+      if (trailing.rest === "") segments.pop();
+      else segments[segments.length - 1] = trailing.rest;
+    }
   }
   if (segments.length === 0) return { country, city: null };
 

@@ -59,8 +59,18 @@ async function main(): Promise<void> {
 
   const tally: Tally = { scanned: 0, updated: 0, unchanged: 0, unplaced: 0 };
   const countries = new Map<string, number>();
-  /** A few unreadable addresses, quoted at the end so the rules can be fixed. */
+  const towns = new Map<string, number>();
+  /** Unreadable addresses, quoted at the end so the rules can be fixed. */
   const samples: string[] = [];
+  /*
+   * Addresses that *did* parse, quoted with what they parsed to.
+   *
+   * Counting the failures is not enough to trust a run: a rule that quietly
+   * files half the table under the wrong town reports zero failures and looks
+   * perfect. These are what let someone read a dozen real results and see that
+   * the towns are towns.
+   */
+  const placed: string[] = [];
 
   // Keyset pagination on the primary key rather than `skip`/`take`: this is the
   // one traversal in the codebase that reads every row, and an OFFSET deep into
@@ -84,9 +94,20 @@ async function main(): Promise<void> {
       const { country, city } = parseAddressLocation(row.address);
 
       countries.set(country ?? "—", (countries.get(country ?? "—") ?? 0) + 1);
+      if (city !== null) {
+        const key = `${country ?? "—"} / ${city}`;
+        towns.set(key, (towns.get(key) ?? 0) + 1);
+      }
+
       if (country === null) {
         tally.unplaced += 1;
-        if (samples.length < 10 && row.address.trim() !== "") samples.push(row.address);
+        // Spread across the table rather than the first 25 rows, which would
+        // all come from one import and show one shape.
+        if (samples.length < 25 && tally.scanned % 37 === 0 && row.address.trim() !== "") {
+          samples.push(row.address);
+        }
+      } else if (placed.length < 15 && tally.scanned % 53 === 0) {
+        placed.push(`${(country ?? "—").padEnd(3)} ${(city ?? "—").padEnd(22)} ${row.address}`);
       }
 
       if (country === row.country && city === row.city) {
@@ -119,7 +140,20 @@ async function main(): Promise<void> {
 
   console.log("\nBy country");
   for (const [code, count] of Array.from(countries).sort((a, b) => b[1] - a[1])) {
-    console.log(`  ${code.padEnd(4)} ${count.toLocaleString()}`);
+    const share = ((count / Math.max(1, tally.scanned)) * 100).toFixed(1);
+    console.log(`  ${code.padEnd(4)} ${String(count.toLocaleString()).padStart(8)}  ${share}%`);
+  }
+
+  console.log(`\nTop towns (${towns.size.toLocaleString()} distinct)`);
+  for (const [name, count] of Array.from(towns)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20)) {
+    console.log(`  ${String(count.toLocaleString()).padStart(7)}  ${name}`);
+  }
+
+  if (placed.length > 0) {
+    console.log("\nA sample of what parsed, to be read rather than counted:");
+    for (const line of placed) console.log(`  ${line}`);
   }
 
   if (samples.length > 0) {
