@@ -36,7 +36,16 @@ export async function GET(request: Request): Promise<Response> {
   // `resolveRange` validates and clamps: an unknown preset is "today", a
   // malformed custom date falls back, and a reversed pair is swapped. A report
   // is not a place to 400 somebody over a date picker.
-  const range = resolveRange(params.get("range"), params.get("from"), params.get("to"));
+  //
+  // The `??` is what makes a caller who names no preset at all get the same
+  // window the screen opens on — the rolling shift window, not the calendar
+  // day. An unknown preset still clamps to "today", which is `resolveRange`'s
+  // business and shared with every other report.
+  const range = resolveRange(
+    params.get("range") ?? "last10h",
+    params.get("from"),
+    params.get("to"),
+  );
   const agent = params.get("agent");
   const userId = agent && agent !== "all" ? agent : null;
 

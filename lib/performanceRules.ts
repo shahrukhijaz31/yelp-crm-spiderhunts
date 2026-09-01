@@ -22,11 +22,35 @@ import { todayIso } from "./leadUtils";
 // Date ranges
 // ---------------------------------------------------------------------------
 
-export const RANGE_KEYS = ["today", "yesterday", "last7", "last30", "custom"] as const;
+/**
+ * How far back the shift window reaches.
+ *
+ * Ten hours because a night shift is not a calendar day: an agent who starts at
+ * 19:00 and finishes at 03:00 has their evening counted on one date and their
+ * small hours on the next, so "Today" reports the same shift as two half-days
+ * and neither figure is the number of calls that person made. A rolling window
+ * long enough to cover a whole shift is the only preset here that answers
+ * "how many calls has this agent made this shift" with one number.
+ */
+export const SHIFT_WINDOW_HOURS = 10;
+
+/*
+ * `last10h` leads the list because it is the default on the team report, and a
+ * picker whose first option is not the one it opens on reads as broken.
+ */
+export const RANGE_KEYS = [
+  "last10h",
+  "today",
+  "yesterday",
+  "last7",
+  "last30",
+  "custom",
+] as const;
 
 export type RangeKey = (typeof RANGE_KEYS)[number];
 
 export const RANGE_LABELS: Record<RangeKey, string> = {
+  last10h: "Last 10 hours",
   today: "Today",
   yesterday: "Yesterday",
   last7: "Last 7 days",
@@ -35,9 +59,15 @@ export const RANGE_LABELS: Record<RangeKey, string> = {
 };
 
 export interface DateRange {
-  /** Inclusive start instant — local midnight of the first day. */
+  /**
+   * Inclusive start instant — local midnight of the first day, except for
+   * `last10h`, which is a rolling window and starts ten hours before now.
+   */
   from: Date;
-  /** Exclusive end instant — local midnight after the last day. */
+  /**
+   * Exclusive end instant — local midnight after the last day, except for
+   * `last10h`, where it is the instant the range was resolved.
+   */
   to: Date;
   /** First and last day as `YYYY-MM-DD`, for labelling and for the day series. */
   fromDay: string;
@@ -54,11 +84,16 @@ function startOfDay(iso: string): Date {
   return new Date(year, (month ?? 1) - 1, day ?? 1, 0, 0, 0, 0);
 }
 
+/** The `YYYY-MM-DD` a Date falls on in the server's own timezone. */
+function localDay(date: Date): string {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
 export function addDays(iso: string, delta: number): string {
   const date = startOfDay(iso);
   date.setDate(date.getDate() + delta);
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+  return localDay(date);
 }
 
 function isIsoDay(value: unknown): value is string {
@@ -72,6 +107,13 @@ function isIsoDay(value: unknown): value is string {
  * worklist's callback highlighting — so "today" means the same thing on the
  * report as it does on the call list, which is the only way the two can be read
  * side by side.
+ *
+ * `last10h` is the exception to all of that, and deliberately so: it is a
+ * rolling window off `now`, not a run of days, because a shift that starts in
+ * the evening and ends after midnight belongs to no single day and any
+ * day-aligned preset splits it in two. Its `fromDay`/`toDay` are still filled
+ * in — they are what the day-by-day chart and the caption read — and they are
+ * simply the two dates the window happens to touch.
  *
  * Half-open `[from, to)` throughout: a closed upper bound would either drop
  * everything saved in the last millisecond of a day or double-count the
@@ -89,10 +131,32 @@ export function resolveRange(
   fromParam?: string | null,
   toParam?: string | null,
   today = todayIso(),
+  now = new Date(),
 ): DateRange {
   const rangeKey: RangeKey = (RANGE_KEYS as readonly string[]).includes(key ?? "")
     ? (key as RangeKey)
     : "today";
+
+  // The one preset that is not made of whole days, so it is built here rather
+  // than through the day arithmetic below: its bounds are instants, and
+  // rounding them to midnight is precisely the thing it exists to avoid.
+  if (rangeKey === "last10h") {
+    const from = new Date(now.getTime() - SHIFT_WINDOW_HOURS * 3_600_000);
+    const fromDay = localDay(from);
+    const toDay = localDay(now);
+    return {
+      from,
+      to: now,
+      fromDay,
+      toDay,
+      key: rangeKey,
+      label: RANGE_LABELS.last10h,
+      // One window, not two, even when it straddles midnight — `days` is the
+      // denominator of the per-day averages, and a ten-hour shift divided by
+      // two days would report half the work anybody did.
+      days: 1,
+    };
+  }
 
   let fromDay = today;
   let toDay = today;

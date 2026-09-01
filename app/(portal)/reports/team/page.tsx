@@ -32,7 +32,10 @@ export default async function TeamPerformancePage() {
   // allowed to be a build-time render.
   await connection();
 
-  const range = resolveRange("today");
+  // The shift window, not the calendar day: half this team works an evening
+  // shift that ends after midnight, and "Today" reports such a shift as two
+  // part-days on two dates. See `SHIFT_WINDOW_HOURS`.
+  const range = resolveRange("last10h");
   const [report, users] = await Promise.all([teamPerformance(range), listUsers()]);
 
   return (
