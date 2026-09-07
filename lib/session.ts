@@ -32,6 +32,11 @@ import { prisma } from "./prisma";
  *             enough to cover a shift plus lunch without a surprise logout.
  *   ABSOLUTE  7 days from sign-in, never extended. A tab left open on a shared
  *             machine forever still has to re-authenticate eventually.
+ *
+ * Both clocks live on the row, and the row is the only thing enforced. The
+ * cookie carries a copy of the idle expiry purely so the browser stops sending
+ * a token that cannot work any more, which means it has to be restated as the
+ * idle clock rolls — see `reissueCookie`.
  */
 
 const IDLE_MS = 12 * 60 * 60 * 1000;
@@ -68,6 +73,35 @@ function cookieOptions(expires: Date) {
     path: "/",
     expires,
   };
+}
+
+/**
+ * Restate the session cookie with the row's current idle expiry.
+ *
+ * The browser's copy is the half of the session that cannot be inspected: a
+ * request carries a cookie's value and never its expiry, so the only way to
+ * keep the two in step is to say it again on every request that is allowed to.
+ *
+ * Setting a cookie is only legal in a Server Function or a Route Handler —
+ * during a Server Component render Next throws, because headers are already on
+ * their way. That is not an error here, so it is swallowed: a page render
+ * misses its turn and the next route handler catches the cookie up. The worst
+ * case is the behaviour we had before, for one more request.
+ *
+ * Synchronous, and takes the already-resolved store: the failure being
+ * tolerated is a throw, not a rejection, and `catch` on a promise would not
+ * see it.
+ */
+function reissueCookie(
+  cookieStore: Awaited<ReturnType<typeof cookies>>,
+  token: string,
+  expiresAt: Date,
+): void {
+  try {
+    cookieStore.set(SESSION_COOKIE, token, cookieOptions(expiresAt));
+  } catch {
+    // Render context — see above.
+  }
 }
 
 /**
@@ -153,28 +187,69 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
 
   const now = new Date();
   if (session.expiresAt <= now || session.absoluteExpiresAt <= now) {
+    /*
+     * Say which clock ran out, and on what figures.
+     *
+     * "My session ended and I do not know why" is otherwise unanswerable after
+     * the fact: the row is deleted on the way past, so the evidence for what
+     * happened is gone by the time anybody thinks to look for it. `lastSeen`
+     * against `expires` is the whole diagnosis — a gap of the idle window means
+     * the session did what it was meant to, and anything shorter means it did
+     * not.
+     */
+    console.warn(
+      `[session] ended user=${session.user.id} ` +
+        `clock=${session.expiresAt <= now ? "idle" : "absolute"} ` +
+        `lastSeen=${session.lastSeenAt.toISOString()} ` +
+        `expires=${session.expiresAt.toISOString()} ` +
+        `absolute=${session.absoluteExpiresAt.toISOString()}`,
+    );
     await prisma.session.delete({ where: { id: session.id } }).catch(() => {});
     return null;
   }
 
   if (!session.user.isActive) {
     // Disabling an account ends its sessions immediately, not at next expiry.
+    // Logged for the same reason as expiry: from the user's chair this is
+    // indistinguishable from a session running out, and it is not one.
+    console.warn(`[session] ended user=${session.user.id} clock=none reason=account_disabled`);
     await prisma.session.deleteMany({ where: { userId: session.user.id } }).catch(() => {});
     return null;
   }
 
-  // Rolling idle expiry, at most once an hour, capped by the absolute clock.
+  /*
+   * Rolling idle expiry, in two halves that must not share a schedule.
+   *
+   * The row is rewritten at most once an hour, for the reason REFRESH_AFTER_MS
+   * exists. The cookie is restated on every request that may set one, because
+   * a cookie's expiry is write-only from here — we cannot read back what the
+   * browser is holding, so the only safe assumption is that it is stale.
+   *
+   * Coupling the two is what the bug was. The cookie was written once, at
+   * sign-in, and never again, so the row's idle window rolled forward while
+   * the browser discarded the token twelve hours after sign-in whatever the
+   * user did in between. The session then ended mid-use with a perfectly live
+   * row behind it, and the only cure was to sign in again.
+   */
+  let expiresAt = session.expiresAt;
+
   if (now.getTime() - session.lastSeenAt.getTime() > REFRESH_AFTER_MS) {
     const extended = new Date(
       Math.min(now.getTime() + IDLE_MS, session.absoluteExpiresAt.getTime()),
     );
-    await prisma.session
-      .update({
+    try {
+      await prisma.session.update({
         where: { id: session.id },
         data: { expiresAt: extended, lastSeenAt: now },
-      })
-      .catch(() => {});
+      });
+      expiresAt = extended;
+    } catch {
+      // The row keeping its old expiry is survivable. Promising the browser an
+      // expiry that was never stored is not, so the cookie follows the write.
+    }
   }
+
+  reissueCookie(cookieStore, token, expiresAt);
 
   return {
     id: session.user.id,
@@ -210,9 +285,19 @@ export async function destroySession(): Promise<void> {
   cookieStore.set(SESSION_COOKIE, "", cookieOptions(new Date(0)));
 }
 
-/** Sign a user out of every browser. Used when a role changes or an account is disabled. */
+/**
+ * Sign a user out of every browser. Used when a role changes or an account is
+ * disabled.
+ *
+ * Logged with the count, because this is the other thing that looks exactly
+ * like an expiry from the user's side and is not one: an administrator editing
+ * an account, or issuing a password reset, ends every session that account has
+ * within the second. Without the line there is nothing to correlate against
+ * the complaint.
+ */
 export async function destroyAllSessionsFor(userId: string): Promise<void> {
-  await prisma.session.deleteMany({ where: { userId } });
+  const { count } = await prisma.session.deleteMany({ where: { userId } });
+  if (count > 0) console.warn(`[session] ended user=${userId} clock=none reason=all_revoked n=${count}`);
 }
 
 /**
@@ -230,9 +315,10 @@ export async function destroyOtherSessionsFor(userId: string): Promise<void> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
-  await prisma.session.deleteMany({
+  const { count } = await prisma.session.deleteMany({
     where: token ? { userId, tokenHash: { not: hashToken(token) } } : { userId },
   });
+  if (count > 0) console.warn(`[session] ended user=${userId} clock=none reason=other_revoked n=${count}`);
 }
 
 /**
