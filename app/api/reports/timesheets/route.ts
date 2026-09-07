@@ -1,6 +1,6 @@
 import { resolveTimesheetRange } from "@/lib/activityRules";
 import { apiAdmin } from "@/lib/authz";
-import { timeReport, timesheet } from "@/lib/timeTracking";
+import { timeReport, timesheet, type TimeReportFilters } from "@/lib/timeTracking";
 
 /**
  * GET /api/reports/timesheets — the timesheet and the report behind it.
@@ -19,20 +19,15 @@ import { timeReport, timesheet } from "@/lib/timeTracking";
  *                             clamped to `MAX_TIMESHEET_DAYS`
  *   `agent`                   one employee, or everybody
  *   `minActivity`             keep employees at or above an activity percentage
+ *   `status`                  working / inactive / offline, right now
  *
  * Every one is a *filter* on a read that `apiAdmin()` has already authorized.
  * None decides whether the caller may see anything, which is why they are safe
  * as arbitrary strings and are clamped rather than rejected.
  *
- * The activity filter applies to the summary table only.
- *
- * There was a `status` filter here too — working / inactive / offline, as of
- * the moment the request was served. It is gone, for the reason the timesheet
- * table never had one: a report over a past period that is narrowed by who
- * happens to be at their desk right now has contents that change depending on
- * when it was opened, which is not a thing anybody can sign. The presence it
- * described is live, and lives on the Time Tracking dashboard, which is about
- * right now and can therefore say it honestly.
+ * The activity filters apply to the summary table only. Narrowing a timesheet
+ * by "who is working right now" would produce a payroll document whose contents
+ * change depending on when it was opened, which is not a thing anybody can sign.
  *
  * ---------------------------------------------------------------------------
  * Aggregation is server-side, and structurally so
@@ -49,6 +44,10 @@ function readMinActivity(raw: string | null): number | null {
   const value = Number(raw);
   if (!Number.isFinite(value) || value < 0 || value > 100) return null;
   return Math.round(value);
+}
+
+function readStatus(raw: string | null): TimeReportFilters["status"] {
+  return raw === "working" || raw === "inactive" || raw === "offline" ? raw : null;
 }
 
 /** A cuid, or nothing. A filter, never a permission — see `safeId` next door. */
@@ -70,6 +69,7 @@ export async function GET(request: Request): Promise<Response> {
       timeReport(range, {
         userId,
         minActivity: readMinActivity(params.get("minActivity")),
+        status: readStatus(params.get("status")),
       }),
       timesheet(range, userId),
     ]);
