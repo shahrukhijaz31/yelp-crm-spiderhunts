@@ -290,6 +290,23 @@ export default function Worklist({
    * by business name and staying on page 4 lands an agent in the middle of the
    * alphabet, which is not where anyone means to be after clicking a heading.
    */
+  /*
+   * The New queue cannot be narrowed by call status, so it does not carry one.
+   *
+   * The control is gone from the rail there (see `FilterPanel`), and this is
+   * the other half of that: a selection made in Called must not survive the
+   * switch and quietly filter a queue whose leads are all `not_called`. Hiding
+   * the checkboxes alone would leave exactly the state this rail's own history
+   * warns about — a filter applied with nothing on screen to clear it.
+   *
+   * Cleared during render rather than in an effect, like the page reset below,
+   * so the drop and the criteria change are one update and the fetch under
+   * them is made once.
+   */
+  if (workState === "new" && filters.statuses.length > 0) {
+    setFilters({ ...filters, statuses: [] });
+  }
+
   const criteriaKey = JSON.stringify([section, workState, view, appliedFilters, sort, today]);
   const [lastCriteria, setLastCriteria] = useState(criteriaKey);
   if (lastCriteria !== criteriaKey) {
@@ -811,6 +828,7 @@ export default function Worklist({
             open={filtersOpen}
             onToggleOpen={() => setFiltersOpen((open) => !open)}
             section={section}
+            workState={workState}
             demoCounts={demoCounts}
           />
         </div>

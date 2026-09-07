@@ -25,6 +25,7 @@ import {
   type CallStatus,
   type LeadSource,
 } from "@/lib/types";
+import type { LeadWorkState } from "@/lib/workState";
 
 const CALLBACK_ORDER: CallbackRange[] = [
   "all",
@@ -70,6 +71,7 @@ export default function FilterPanel({
   stats,
   section = "leads",
   demoCounts,
+  workState,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
@@ -79,8 +81,29 @@ export default function FilterPanel({
   /** The demo band is drawn for the Demo Websites view only. */
   section?: "leads" | "demo";
   demoCounts?: DemoCounts;
+  /**
+   * Which lead queue the rail is narrowing, when it is narrowing one. Absent on
+   * Export, which filters the whole table and keeps every control.
+   */
+  workState?: LeadWorkState;
 }) {
   const [categoryQuery, setCategoryQuery] = useState("");
+
+  /*
+   * A call status is not a question the New queue can answer.
+   *
+   * New means `first_called_at IS NULL` — nobody has saved an outcome against
+   * the lead, so its status is `not_called` and can be nothing else (see
+   * `lib/workState.ts`). Eight checkboxes of which one matches everything and
+   * seven match nothing is not a filter; it is a control that appears to
+   * narrow the list and cannot. It belongs to Called, where an outcome exists
+   * to filter on, and to Export, which is filtering the whole table.
+   *
+   * Source stays in both. Where a lead came from is known at ingest and is
+   * just as answerable before the first call as after it — which is why it
+   * takes over this column's heading rather than losing its own.
+   */
+  const canFilterByStatus = workState !== "new";
 
   function toggleStatus(status: CallStatus) {
     const next = filters.statuses.includes(status)
@@ -186,38 +209,44 @@ export default function FilterPanel({
       <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_minmax(190px,1fr)_210px] xl:gap-y-4">
       {/* --- Status: multi-select ------------------------------------- */}
       <Group
-        title="Status"
+        title={canFilterByStatus ? "Status" : "Source"}
         action={
-          filters.statuses.length > 0 && (
-            <Reset onClick={() => onChange({ ...filters, statuses: [] })} />
-          )
+          canFilterByStatus
+            ? filters.statuses.length > 0 && (
+                <Reset onClick={() => onChange({ ...filters, statuses: [] })} />
+              )
+            : filters.sources.length > 0 && (
+                <Reset onClick={() => onChange({ ...filters, sources: [] })} />
+              )
         }
       >
         {/* One column — see the note on this component. `Called - Owner not
             available` is the longest label in the app and it has to fit. */}
-        <div className="flex flex-col gap-y-0.5">
-          {CALL_STATUSES.map((status) => (
-            <Check
-              key={status}
-              checked={filters.statuses.includes(status)}
-              onChange={() => toggleStatus(status)}
-            >
-              <span
-                aria-hidden="true"
-                className={`h-1.5 w-1.5 shrink-0 rounded-full ${CALL_STATUS_DOTS[status]}`}
-              />
-              {/* Wraps rather than truncates. One column already gives these
-                  room at every width the panel is used at, but "Called - Owner
-                  not available" is long enough that a narrow window would clip
-                  it again — and a status you cannot read is a status you cannot
-                  filter by. Two lines is a cheaper price than an ellipsis. */}
-              <span className="min-w-0 flex-1 leading-snug">{CALL_STATUS_LABELS[status]}</span>
-              <span className="tnum shrink-0 font-mono text-meta text-fg-3">
-                {stats.byStatus[status]}
-              </span>
-            </Check>
-          ))}
-        </div>
+        {canFilterByStatus && (
+          <div className="flex flex-col gap-y-0.5">
+            {CALL_STATUSES.map((status) => (
+              <Check
+                key={status}
+                checked={filters.statuses.includes(status)}
+                onChange={() => toggleStatus(status)}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${CALL_STATUS_DOTS[status]}`}
+                />
+                {/* Wraps rather than truncates. One column already gives these
+                    room at every width the panel is used at, but "Called - Owner
+                    not available" is long enough that a narrow window would clip
+                    it again — and a status you cannot read is a status you cannot
+                    filter by. Two lines is a cheaper price than an ellipsis. */}
+                <span className="min-w-0 flex-1 leading-snug">{CALL_STATUS_LABELS[status]}</span>
+                <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                  {stats.byStatus[status]}
+                </span>
+              </Check>
+            ))}
+          </div>
+        )}
 
         {/*
           * --- Source ---------------------------------------------------
@@ -233,15 +262,20 @@ export default function FilterPanel({
           * ticking neither. Exclusive buttons would have needed a third "All"
           * option to say the same thing.
           */}
-        <div className="mt-4">
-          <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
-            <h3 className="eyebrow">Source</h3>
-            {filters.sources.length > 0 && (
-              <span className="ml-auto">
-                <Reset onClick={() => onChange({ ...filters, sources: [] })} />
-              </span>
-            )}
-          </div>
+        {/* Its own sub-heading only while Status is above it. Alone in the
+            column it *is* the group, and a heading repeating the group's own
+            title is noise. */}
+        <div className={canFilterByStatus ? "mt-4" : ""}>
+          {canFilterByStatus && (
+            <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+              <h3 className="eyebrow">Source</h3>
+              {filters.sources.length > 0 && (
+                <span className="ml-auto">
+                  <Reset onClick={() => onChange({ ...filters, sources: [] })} />
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex flex-col gap-y-0.5">
             {LEAD_SOURCES.map((source) => (
               <Check

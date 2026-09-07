@@ -13,6 +13,7 @@ import {
   type LeadFilters,
 } from "@/lib/filters";
 import type { LeadStats } from "@/lib/leadUtils";
+import type { LeadWorkState } from "@/lib/workState";
 
 /**
  * The command bar: instant search, the filter expander, the active-filter chips
@@ -39,6 +40,7 @@ export default function FilterToolbar({
   onToggleOpen,
   section = "leads",
   demoCounts,
+  workState,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
@@ -51,6 +53,8 @@ export default function FilterToolbar({
   /** Passed straight through: it decides whether the demo band is drawn. */
   section?: "leads" | "demo";
   demoCounts?: DemoCounts;
+  /** Also straight through: it decides whether Status is a question worth asking. */
+  workState?: LeadWorkState;
 }) {
   const chips = describeActiveFilters(filters);
   const isFiltered = chips.length > 0;
@@ -231,6 +235,7 @@ export default function FilterToolbar({
                 countries={countries}
                 stats={stats}
                 section={section}
+                workState={workState}
                 demoCounts={demoCounts}
               />
             </div>
