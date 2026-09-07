@@ -33,13 +33,6 @@ import type { TimeReport, TimeReportFilters } from "@/lib/timeTracking";
 
 const PERIODS: RangeKey[] = ["today", "yesterday", "last7", "last30", "custom"];
 
-const STATUSES: Array<{ value: string; label: string }> = [
-  { value: "all", label: "Any status" },
-  { value: "working", label: "Working now" },
-  { value: "inactive", label: "Inactive now" },
-  { value: "offline", label: "Offline now" },
-];
-
 export interface TimesheetPayload {
   range: { key: RangeKey; from: string; to: string; label: string };
   report: TimeReport;
@@ -59,7 +52,6 @@ export default function TimesheetsPanel({
   const [customTo, setCustomTo] = useState(initialPayload.range.to);
   const [agentId, setAgentId] = useState("all");
   const [minActivity, setMinActivity] = useState("");
-  const [status, setStatus] = useState("all");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,7 +71,6 @@ export default function TimesheetsPanel({
     }
     if (agentId !== "all") params.set("agent", agentId);
     if (minActivity !== "") params.set("minActivity", minActivity);
-    if (status !== "all") params.set("status", status);
 
     try {
       const response = await fetch(`/api/reports/timesheets?${params}`, { cache: "no-store" });
@@ -94,7 +85,7 @@ export default function TimesheetsPanel({
     } finally {
       if (ticket === request.current) setBusy(false);
     }
-  }, [rangeKey, customFrom, customTo, agentId, minActivity, status]);
+  }, [rangeKey, customFrom, customTo, agentId, minActivity]);
 
   useEffect(() => {
     if (primed.current) {
@@ -188,11 +179,6 @@ export default function TimesheetsPanel({
             onChange={(event) => setMinActivity(event.target.value)}
             className="ui-field h-9 w-[104px]"
           />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="status" className="field-label">Status</label>
-          <Select id="status" value={status} onChange={setStatus} options={STATUSES} />
         </div>
 
         <p className="ml-auto self-center text-meta text-fg-4" aria-live="polite">

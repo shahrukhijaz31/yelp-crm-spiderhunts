@@ -850,8 +850,6 @@ export interface TimeReportFilters {
   userId: string | null;
   /** Keep only agents whose activity percentage is at or above this. */
   minActivity: number | null;
-  /** `working`, `inactive`, `offline`, or null for everybody. */
-  status: "working" | "inactive" | "offline" | null;
 }
 
 /**
@@ -862,20 +860,25 @@ export interface TimeReportFilters {
  * satisfied structurally: there is no query in this function that returns a row
  * per interval, so there is nothing to accidentally send.
  *
- * The filters are applied *after* aggregation, in JavaScript, over at most one
- * row per employee. That is deliberate rather than lazy: `minActivity` and
- * `status` are predicates on computed values (a weighted mean, and a comparison
- * of two clocks), so pushing them into SQL would mean a `HAVING` on one and a
- * correlated subquery on the other for a list that is tens of rows long. The
- * expensive part — the scan over intervals and sessions — is already narrowed
- * by the date range and the optional agent, which *are* in SQL.
+ * `minActivity` is applied *after* aggregation, in JavaScript, over at most one
+ * row per employee. That is deliberate rather than lazy: it is a predicate on a
+ * computed value — a weighted mean — so pushing it into SQL would mean a
+ * `HAVING` for a list that is tens of rows long. The expensive part — the scan
+ * over intervals and sessions — is already narrowed by the date range and the
+ * optional agent, which *are* in SQL.
+ *
+ * There is deliberately no live-presence filter. One existed, keeping only the
+ * agents who were working, inactive or offline at the instant the request was
+ * served, and it did not belong on a report about a period: the answer moved
+ * every time the page was opened, and over any range but today it was a
+ * predicate on a clock the range does not cover. `TimeTrackingPanel` is the
+ * screen that is about right now.
  */
 export async function timeReport(
   range: DateRange,
   filters: TimeReportFilters,
 ): Promise<TimeReport> {
   const now = new Date();
-  const idleThreshold = inactivityThresholdSeconds();
   const scope = filters.userId;
 
   const [users, intervals, tracked, sessionCounts, leadWork, shots, openSessions] =
@@ -959,17 +962,6 @@ export async function timeReport(
     rows = rows.filter((row) => row.activityPercentage !== null && row.activityPercentage >= floor);
   }
 
-  if (filters.status !== null) {
-    const status = filters.status;
-    rows = rows.filter((row) => {
-      const lastActivityAt = intervals.get(row.userId)?.lastActivityAt ?? null;
-      const working = isWorking(row.online, lastActivityAt, now, idleThreshold);
-      if (status === "working") return working;
-      if (status === "inactive") return row.online && !working;
-      return !row.online;
-    });
-  }
-
   const totals = rows.reduce(
     (sum, row) => ({
       trackedSeconds: sum.trackedSeconds + row.trackedSeconds,
@@ -1000,7 +992,8 @@ export async function timeReport(
        * Straight from the aggregate when nothing was filtered out, so it is the
        * true interval-duration-weighted mean rather than a mean of means.
        *
-       * With a filter applied that aggregate describes the wrong population, so
+       * With `minActivity` applied that aggregate describes the wrong
+       * population, so
        * it is recomputed over the surviving rows — weighted by tracked time,
        * because that is the only weight a row carries. The two weightings agree
        * whenever intervals cover tracked time evenly and diverge slightly when
@@ -1009,7 +1002,7 @@ export async function timeReport(
        * be a summary of the rows on screen.
        */
       activityPercentage:
-        filters.minActivity === null && filters.status === null
+        filters.minActivity === null
           ? (intervals.get(null)?.activityPercentage ?? null)
           : weightedOverRows(rows),
     },

@@ -25,9 +25,9 @@ export default async function TimesheetsPage() {
 
   await connection();
 
-  // The default view: this week, everybody, no activity or status filter.
+  // The default view: this week, everybody, no activity filter.
   const range = resolveTimesheetRange(new URLSearchParams({ range: "last7" }));
-  const filters = { userId: null, minActivity: null, status: null };
+  const filters = { userId: null, minActivity: null };
 
   const [report, rows, users] = await Promise.all([
     timeReport(range, filters),
