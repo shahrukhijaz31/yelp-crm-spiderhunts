@@ -3,11 +3,7 @@
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 
-import {
-  WORKLIST_VIEWS,
-  WORKLIST_VIEW_LABELS,
-  type WorklistView,
-} from "@/lib/views";
+import { WORKLIST_VIEW_LABELS, type WorklistView } from "@/lib/views";
 
 /**
  * The worklist's view switcher.
@@ -37,12 +33,20 @@ import {
  */
 export default function ViewTabs({
   view,
+  views,
   counts,
   onChange,
   breakdownOpen,
   onToggleBreakdown,
 }: {
   view: WorklistView;
+  /**
+   * The views this queue can answer, from `viewsFor`. Passed rather than read
+   * from `WORKLIST_VIEWS` here so the rule about which scopes exist lives in
+   * the domain module beside `isInView`, and this component keeps drawing
+   * whatever it is handed.
+   */
+  views: readonly WorklistView[];
   counts: Record<WorklistView, number>;
   onChange: (view: WorklistView) => void;
   breakdownOpen: boolean;
@@ -54,7 +58,7 @@ export default function ViewTabs({
     <div className="flex flex-wrap items-center gap-3">
       <LayoutGroup id="worklist-views">
         <div role="tablist" aria-label="Lead views" className="segmented">
-          {WORKLIST_VIEWS.map((candidate) => {
+          {views.map((candidate) => {
             const active = candidate === view;
             return (
               <button

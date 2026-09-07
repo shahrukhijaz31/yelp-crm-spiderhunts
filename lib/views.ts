@@ -1,5 +1,6 @@
 import { callbackState } from "./leadUtils";
 import type { Lead } from "./types";
+import type { LeadWorkState } from "./workState";
 
 /**
  * The worklist's tabbed views. Each is a scope over the same dataset — an
@@ -24,6 +25,29 @@ export const WORKLIST_VIEW_HINTS: Record<WorklistView, string> = {
   overdue: "Callbacks whose date has passed — work these first.",
   issues: "No website on the listing — often the best fit for a first pitch.",
 };
+
+/**
+ * The views a queue can actually answer.
+ *
+ * Both callback views read `callbackDate` and nothing else, and the New queue
+ * has no callbacks worth a tab: a lead there has never been worked, so in
+ * practice its callback column is empty and both tabs come back with nothing.
+ * A tab that is always empty is not a scope, it is a dead end — and these two
+ * were worse than empty, because the badges beside them are slices of a
+ * workspace-wide aggregate (see `Worklist`) and so counted the Called queue's
+ * callbacks while showing zero rows.
+ *
+ * `isInView` is deliberately left alone. It still answers honestly for any lead
+ * handed to it, including the uncalled one that *can* carry a callback date —
+ * `updateLead` treats a callback-only save as bookkeeping and leaves such a
+ * lead in New. That lead is reachable under All leads, which is the right place
+ * for a handful of rows; what it does not get is two permanent tabs.
+ */
+export function viewsFor(workState: LeadWorkState): readonly WorklistView[] {
+  return workState === "new" ? NEW_QUEUE_VIEWS : WORKLIST_VIEWS;
+}
+
+const NEW_QUEUE_VIEWS = ["all", "issues"] as const satisfies readonly WorklistView[];
 
 export function isInView(
   lead: Lead,

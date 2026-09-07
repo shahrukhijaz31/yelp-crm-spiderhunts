@@ -43,7 +43,7 @@ import {
 } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
-import { WORKLIST_VIEW_HINTS, type WorklistView } from "@/lib/views";
+import { WORKLIST_VIEW_HINTS, viewsFor, type WorklistView } from "@/lib/views";
 import {
   DEFAULT_WORK_STATE,
   LEAD_WORK_STATE_HINTS,
@@ -280,17 +280,6 @@ export default function Worklist({
   );
 
   /*
-   * Any change to *what* is being looked at returns to page one. Page 4 of an
-   * unfiltered list has nothing to do with page 4 of a search, and landing on
-   * an empty page after typing is the classic way a paginated table looks
-   * broken. Done during render rather than in an effect so the reset and the
-   * criteria change are one update, and the fetch below is made once.
-   *
-   * The sort counts as a change of criteria for the same reason. Re-ordering
-   * by business name and staying on page 4 lands an agent in the middle of the
-   * alphabet, which is not where anyone means to be after clicking a heading.
-   */
-  /*
    * The New queue cannot be narrowed by call status, so it does not carry one.
    *
    * The control is gone from the rail there (see `FilterPanel`), and this is
@@ -307,6 +296,40 @@ export default function Worklist({
     setFilters({ ...filters, statuses: [] });
   }
 
+  /*
+   * Nor a callback date, and for the same reason — see `viewsFor`.
+   *
+   * The rail's Callback date group is gone in New, so a range chosen in Called
+   * has to go with it rather than sit there narrowing a queue with no control
+   * to clear it. All three fields are cleared together: `callbackFrom` and
+   * `callbackTo` are only read while `callback` is `custom`, and leaving them
+   * behind would restore a half-remembered range on the way back to Called.
+   */
+  if (workState === "new" && filters.callback !== "all") {
+    setFilters({ ...filters, callback: "all", callbackFrom: null, callbackTo: null });
+  }
+
+  /*
+   * A queue that cannot answer the current tab falls back to All leads.
+   *
+   * Switching Called → New while standing on Needs callback would otherwise
+   * leave `view` pointing at a scope with no tab to leave it by — the same
+   * dead end the filters above are avoiding, one control up.
+   */
+  const views = viewsFor(workState);
+  if (!views.includes(view)) setView("all");
+
+  /*
+   * Any change to *what* is being looked at returns to page one. Page 4 of an
+   * unfiltered list has nothing to do with page 4 of a search, and landing on
+   * an empty page after typing is the classic way a paginated table looks
+   * broken. Done during render rather than in an effect so the reset and the
+   * criteria change are one update, and the fetch below is made once.
+   *
+   * The sort counts as a change of criteria for the same reason. Re-ordering
+   * by business name and staying on page 4 lands an agent in the middle of the
+   * alphabet, which is not where anyone means to be after clicking a heading.
+   */
   const criteriaKey = JSON.stringify([section, workState, view, appliedFilters, sort, today]);
   const [lastCriteria, setLastCriteria] = useState(criteriaKey);
   if (lastCriteria !== criteriaKey) {
@@ -794,6 +817,7 @@ export default function Worklist({
 
             <ViewTabs
               view={view}
+              views={views}
               counts={counts}
               onChange={setView}
               breakdownOpen={breakdownOpen}

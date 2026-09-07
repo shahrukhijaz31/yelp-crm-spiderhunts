@@ -105,6 +105,19 @@ export default function FilterPanel({
    */
   const canFilterByStatus = workState !== "new";
 
+  /*
+   * Nor by callback date, in the New queue, for the reason in `viewsFor`: a
+   * lead nobody has worked has no callback to range over, so every option here
+   * but "Any callback state" empties the list and the two callback tabs it
+   * duplicates are gone from that queue too.
+   *
+   * A separate flag from the one above even though both currently read the
+   * same queue. They are two different rules about two different columns, and
+   * collapsing them into one boolean would make the next change to either of
+   * them look like a change to both.
+   */
+  const canFilterByCallback = workState !== "new";
+
   function toggleStatus(status: CallStatus) {
     const next = filters.statuses.includes(status)
       ? filters.statuses.filter((candidate) => candidate !== status)
@@ -206,7 +219,18 @@ export default function FilterPanel({
 
       {/* `gap-x-6` rather than 8: two of these columns hold wrapping labels,
           and 16px of the gutter is better spent on the words. */}
-      <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_minmax(190px,1fr)_210px] xl:gap-y-4">
+      {/* Three tracks rather than four once Callback date is gone, so the
+          remaining groups spread into the width instead of leaving a 210px
+          hole where the dropped column used to be. Both variants are written
+          out in full: Tailwind reads class names as literals and would not
+          generate one assembled at runtime. */}
+      <div
+        className={`grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:gap-y-4 ${
+          canFilterByCallback
+            ? "xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_minmax(190px,1fr)_210px]"
+            : "xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_minmax(190px,1fr)]"
+        }`}
+      >
       {/* --- Status: multi-select ------------------------------------- */}
       <Group
         title={canFilterByStatus ? "Status" : "Source"}
@@ -392,65 +416,67 @@ export default function FilterPanel({
       </Group>
 
       {/* --- Callback date range -------------------------------------- */}
-      <Group
-        title="Callback date"
-        action={
-          filters.callback !== "all" && (
-            <Reset
-              onClick={() =>
-                onChange({
-                  ...filters,
-                  callback: "all",
-                  callbackFrom: null,
-                  callbackTo: null,
-                })
-              }
-            />
-          )
-        }
-      >
-        {/* One column: these labels are sentences, and truncating a date range
-            option is worse than the extra height. */}
-        <div className="flex flex-col gap-y-0.5">
-          {CALLBACK_ORDER.map((range) => (
-            <label
-              key={range}
-              className="flex cursor-pointer items-center gap-2.5 py-1 text-ui text-fg-2 transition-colors hover:text-fg"
-            >
-              <input
-                type="radio"
-                name="callback-range"
-                checked={filters.callback === range}
-                onChange={() => onChange({ ...filters, callback: range })}
-                className="h-3.5 w-3.5 shrink-0 accent-accent"
+      {canFilterByCallback && (
+        <Group
+          title="Callback date"
+          action={
+            filters.callback !== "all" && (
+              <Reset
+                onClick={() =>
+                  onChange({
+                    ...filters,
+                    callback: "all",
+                    callbackFrom: null,
+                    callbackTo: null,
+                  })
+                }
               />
-              <span className="min-w-0 flex-1 leading-snug">
-                {CALLBACK_RANGE_LABELS[range]}
-              </span>
-            </label>
-          ))}
-        </div>
-
-        {/* Stacked, not side by side: two native date inputs need ~290px and
-            this column is 230px, so a row would overflow the panel. */}
-        {filters.callback === "custom" && (
-          <div className="mt-2.5 flex flex-col gap-1.5 border-l-2 border-accent-line pl-2.5">
-            <DateBound
-              label="From"
-              value={filters.callbackFrom}
-              onChange={(callbackFrom) => onChange({ ...filters, callbackFrom })}
-            />
-            <DateBound
-              label="To"
-              value={filters.callbackTo}
-              onChange={(callbackTo) => onChange({ ...filters, callbackTo })}
-            />
-            <p className="text-caption leading-snug text-fg-3">
-              Leave either side empty for an open-ended range.
-            </p>
+            )
+          }
+        >
+          {/* One column: these labels are sentences, and truncating a date range
+              option is worse than the extra height. */}
+          <div className="flex flex-col gap-y-0.5">
+            {CALLBACK_ORDER.map((range) => (
+              <label
+                key={range}
+                className="flex cursor-pointer items-center gap-2.5 py-1 text-ui text-fg-2 transition-colors hover:text-fg"
+              >
+                <input
+                  type="radio"
+                  name="callback-range"
+                  checked={filters.callback === range}
+                  onChange={() => onChange({ ...filters, callback: range })}
+                  className="h-3.5 w-3.5 shrink-0 accent-accent"
+                />
+                <span className="min-w-0 flex-1 leading-snug">
+                  {CALLBACK_RANGE_LABELS[range]}
+                </span>
+              </label>
+            ))}
           </div>
-        )}
-      </Group>
+
+          {/* Stacked, not side by side: two native date inputs need ~290px and
+              this column is 230px, so a row would overflow the panel. */}
+          {filters.callback === "custom" && (
+            <div className="mt-2.5 flex flex-col gap-1.5 border-l-2 border-accent-line pl-2.5">
+              <DateBound
+                label="From"
+                value={filters.callbackFrom}
+                onChange={(callbackFrom) => onChange({ ...filters, callbackFrom })}
+              />
+              <DateBound
+                label="To"
+                value={filters.callbackTo}
+                onChange={(callbackTo) => onChange({ ...filters, callbackTo })}
+              />
+              <p className="text-caption leading-snug text-fg-3">
+                Leave either side empty for an open-ended range.
+              </p>
+            </div>
+          )}
+        </Group>
+      )}
       </div>
     </div>
   );
