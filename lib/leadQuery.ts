@@ -7,7 +7,14 @@ import {
   type LeadFilters,
 } from "./filters";
 import { LEAD_COUNTRIES, UNKNOWN_LOCATION } from "./leadLocation";
-import { CALL_STATUSES, LEAD_SOURCES, type CallStatus, type LeadSource } from "./types";
+import {
+  CALL_STATUSES,
+  LEAD_SOURCES,
+  MESSAGE_STATUSES,
+  type CallStatus,
+  type LeadSource,
+  type MessageStatus,
+} from "./types";
 import { WORKLIST_VIEWS, type WorklistView } from "./views";
 import {
   DEFAULT_WORK_STATE,
@@ -184,6 +191,9 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   if (text) params.set("q", text.slice(0, MAX_QUERY_LENGTH));
 
   for (const status of filters.statuses) params.append("status", status);
+  // Repeated per value like `status`, and named `message` rather than
+  // `messageStatus` to sit at the same length as its neighbours in the URL.
+  for (const status of filters.messageStatuses) params.append("message", status);
   // Repeated, like `status` and `category`: the three are multi-select lists
   // and a comma-joined value would have to be split back apart by a second
   // convention that could disagree with this one.
@@ -276,6 +286,29 @@ export function parseLeadSearchParams(
 
   const section = readOneOf(params.get("section"), LEAD_SECTIONS, DEFAULT_LEAD_SECTION);
 
+  const workState = readOneOf(params.get("work"), LEAD_WORK_STATES, DEFAULT_WORK_STATE);
+
+  /*
+   * The message filter is read only where the rail offers it.
+   *
+   * Same rule, and the same reason, as `demo` below: the New queue draws no
+   * message-status control (see `FilterPanel`), so a hand-edited `?work=new&
+   * message=sms_sent` would narrow that screen with nothing on it to say why or
+   * to clear it. Dropped rather than applied, so the URL cannot ask for a state
+   * the screen cannot show.
+   *
+   * Export is unaffected — it filters the whole table in the browser and never
+   * comes through here.
+   */
+  const messageStatuses =
+    workState === "new"
+      ? []
+      : params
+          .getAll("message")
+          .filter((value): value is MessageStatus =>
+            (MESSAGE_STATUSES as readonly string[]).includes(value),
+          );
+
   /*
    * The demo filter is read only in the demo section.
    *
@@ -295,6 +328,7 @@ export function parseLeadSearchParams(
     ...EMPTY_FILTERS,
     query: (params.get("q") ?? "").slice(0, MAX_QUERY_LENGTH),
     statuses,
+    messageStatuses,
     sources,
     categories,
     countries,
@@ -308,7 +342,7 @@ export function parseLeadSearchParams(
 
   return {
     section,
-    workState: readOneOf(params.get("work"), LEAD_WORK_STATES, DEFAULT_WORK_STATE),
+    workState,
     view: readOneOf(params.get("view"), WORKLIST_VIEWS, "all"),
     filters,
     sort: {

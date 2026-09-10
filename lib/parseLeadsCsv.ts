@@ -280,6 +280,7 @@ export function parseLeadsCsv(
       ...parseAddressLocation(cleanText(row.address)),
       // Agent-owned fields always start empty on import.
       status: "not_called",
+      messageStatus: "not_messaged",
       notes: "",
       callbackDate: null,
       meetingTime: null,

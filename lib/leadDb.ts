@@ -10,11 +10,13 @@ import { prisma } from "./prisma";
 import {
   CALL_STATUSES,
   LEAD_SOURCES,
+  MESSAGE_STATUSES,
   isCalled,
   type CallStatus,
   type Lead,
   type LeadEditableFields,
   type LeadSource,
+  type MessageStatus,
 } from "./types";
 import type { LeadWorkCounts, LeadWorkState } from "./workState";
 
@@ -171,6 +173,16 @@ function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
   // --- status: empty means "all statuses", never "none" ---
   if (filters.statuses.length > 0) {
     clauses.push(Prisma.sql`l.status::text IN (${Prisma.join(filters.statuses)})`);
+  }
+
+  // --- message status: the same "empty means all" rule, over the second enum.
+  //     Cast to text like the others so the bound parameters stay strings and
+  //     an unknown value is a query that matches nothing rather than a
+  //     Postgres enum-cast error ---
+  if (filters.messageStatuses.length > 0) {
+    clauses.push(
+      Prisma.sql`l.message_status::text IN (${Prisma.join(filters.messageStatuses)})`,
+    );
   }
 
   // --- source: empty means "every directory", never "none" — same rule as
@@ -588,8 +600,15 @@ export async function leadStats(today: string): Promise<LeadStats> {
   // One transaction, so the figures describe the same instant. A status total
   // that had counted a lead the callback totals had not would show up as a
   // stat bar that does not add up.
-  const [groups, sourceGroups, total, callbackDueToday, callbackOverdue, missingWebsite] =
-    await prisma.$transaction([
+  const [
+    groups,
+    sourceGroups,
+    messageGroups,
+    total,
+    callbackDueToday,
+    callbackOverdue,
+    missingWebsite,
+  ] = await prisma.$transaction([
       // Raw rather than `groupBy` only because `groupBy`'s inferred result type
       // is widened past usefulness by `$transaction`'s tuple; the statement is
       // the one `groupBy` would have written.
@@ -601,6 +620,11 @@ export async function leadStats(today: string): Promise<LeadStats> {
       // totals on the same screen.
       prisma.$queryRaw<{ source: LeadSource; count: number }[]>(
         Prisma.sql`SELECT source::text AS source, count(*)::int AS count FROM leads GROUP BY source`,
+      ),
+      // Three rows at most, and in the same transaction for the same reason as
+      // the two breakdowns above it.
+      prisma.$queryRaw<{ status: MessageStatus; count: number }[]>(
+        Prisma.sql`SELECT message_status::text AS status, count(*)::int AS count FROM leads GROUP BY message_status`,
       ),
       prisma.lead.count(),
       prisma.lead.count({ where: { callbackDate: todayDate } }),
@@ -622,6 +646,13 @@ export async function leadStats(today: string): Promise<LeadStats> {
   ) as Record<LeadSource, number>;
   for (const group of sourceGroups) bySource[group.source] += group.count;
 
+  // Seeded at zero on the same terms as `bySource`: a message status nobody
+  // has used yet is an option reading "0", not an option that is missing.
+  const byMessageStatus = Object.fromEntries(
+    MESSAGE_STATUSES.map((status) => [status, 0]),
+  ) as Record<MessageStatus, number>;
+  for (const group of messageGroups) byMessageStatus[group.status] += group.count;
+
   // `isCalled` is "anything but not_called", so the not-called count *is* the
   // uncalled total and there is nothing to add up.
   const notCalled = byStatus.not_called;
@@ -631,6 +662,7 @@ export async function leadStats(today: string): Promise<LeadStats> {
     called: total - notCalled,
     notCalled,
     byStatus,
+    byMessageStatus,
     bySource,
     callbackDueToday,
     callbackOverdue,
@@ -750,6 +782,7 @@ export async function updateLeadFields(
   // `{ status }` cannot blank out someone's notes.
   const data: Record<string, unknown> = {};
   if ("status" in changes) data.status = changes.status;
+  if ("messageStatus" in changes) data.messageStatus = changes.messageStatus;
   if ("notes" in changes) data.notes = changes.notes;
   if ("callbackDate" in changes) data.callbackDate = fromIsoDate(changes.callbackDate ?? null);
   if ("meetingTime" in changes) data.meetingTime = changes.meetingTime;
@@ -923,6 +956,11 @@ function isCallStatus(value: unknown): value is CallStatus {
   return typeof value === "string" && (CALL_STATUSES as readonly string[]).includes(value);
 }
 
+/** The same guard for `messageStatus`, which reaches a second Postgres enum. */
+function isMessageStatus(value: unknown): value is MessageStatus {
+  return typeof value === "string" && (MESSAGE_STATUSES as readonly string[]).includes(value);
+}
+
 /** `YYYY-MM-DD` and nothing else — this string reaches a date column. */
 function isIsoDate(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -955,6 +993,15 @@ export function parseLeadEdits(body: unknown): Partial<LeadEditableFields> {
       throw new LeadEditError(`Unknown status: ${JSON.stringify(input.status)}.`);
     }
     edits.status = input.status;
+  }
+
+  if ("messageStatus" in input) {
+    if (!isMessageStatus(input.messageStatus)) {
+      throw new LeadEditError(
+        `Unknown messageStatus: ${JSON.stringify(input.messageStatus)}.`,
+      );
+    }
+    edits.messageStatus = input.messageStatus;
   }
 
   for (const key of ["notes", "meetingNotes"] as const) {

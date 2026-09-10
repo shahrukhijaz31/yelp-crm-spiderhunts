@@ -280,7 +280,7 @@ export default function Worklist({
   );
 
   /*
-   * The New queue cannot be narrowed by call status, so it does not carry one.
+   * The New queue offers neither status filter, so it does not carry one.
    *
    * The control is gone from the rail there (see `FilterPanel`), and this is
    * the other half of that: a selection made in Called must not survive the
@@ -292,8 +292,14 @@ export default function Worklist({
    * so the drop and the criteria change are one update and the fetch under
    * them is made once.
    */
-  if (workState === "new" && filters.statuses.length > 0) {
-    setFilters({ ...filters, statuses: [] });
+  if (
+    workState === "new" &&
+    (filters.statuses.length > 0 || filters.messageStatuses.length > 0)
+  ) {
+    // Both status filters leave together, because both controls leave together
+    // — see `canFilterByMessage` in `FilterPanel` for why the message one is
+    // hidden here even though a New lead can genuinely have been messaged.
+    setFilters({ ...filters, statuses: [], messageStatuses: [] });
   }
 
   /*

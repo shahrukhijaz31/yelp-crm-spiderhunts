@@ -19,11 +19,15 @@ import {
   CALL_STATUSES,
   CALL_STATUS_DOTS,
   CALL_STATUS_LABELS,
+  MESSAGE_STATUSES,
+  MESSAGE_STATUS_DOTS,
+  MESSAGE_STATUS_LABELS,
   LEAD_SOURCES,
   LEAD_SOURCE_DOTS,
   LEAD_SOURCE_LABELS,
   type CallStatus,
   type LeadSource,
+  type MessageStatus,
 } from "@/lib/types";
 import type { LeadWorkState } from "@/lib/workState";
 
@@ -106,6 +110,23 @@ export default function FilterPanel({
   const canFilterByStatus = workState !== "new";
 
   /*
+   * Message status is offered on the same screens as the call status, and it is
+   * worth being clear that this is a *choice* rather than the same argument.
+   *
+   * A New lead genuinely can have been messaged — sending a WhatsApp is not a
+   * call, so it does not stamp `first_called_at` and does not move the lead out
+   * of that queue (see `lib/types.ts`). So unlike the eight status checkboxes
+   * above, these three would not be dead controls there.
+   *
+   * They are still not offered. New is the queue an agent works *down*, in
+   * order, and every control on that rail is there to pick the next lead to
+   * ring; "who have we already texted" is a question about work already done,
+   * which is what Called is for. Keeping the two status filters on exactly the
+   * same screens also means one rule to explain rather than two.
+   */
+  const canFilterByMessage = workState !== "new";
+
+  /*
    * Nor by callback date, in the New queue, for the reason in `viewsFor`: a
    * lead nobody has worked has no callback to range over, so every option here
    * but "Any callback state" empties the list and the two callback tabs it
@@ -117,6 +138,13 @@ export default function FilterPanel({
    * them look like a change to both.
    */
   const canFilterByCallback = workState !== "new";
+
+  function toggleMessageStatus(status: MessageStatus) {
+    const next = filters.messageStatuses.includes(status)
+      ? filters.messageStatuses.filter((candidate) => candidate !== status)
+      : [...filters.messageStatuses, status];
+    onChange({ ...filters, messageStatuses: next });
+  }
 
   function toggleStatus(status: CallStatus) {
     const next = filters.statuses.includes(status)
@@ -269,6 +297,50 @@ export default function FilterPanel({
                 </span>
               </Check>
             ))}
+          </div>
+        )}
+
+        {/*
+          * --- Message ---------------------------------------------------
+          *
+          * Under the call status and above Source, because that is the order
+          * the questions are asked in: what happened on the phone, then what
+          * happened on the thread, then where the lead came from. Three
+          * checkboxes do not earn a column of their own, and putting them here
+          * keeps "what have we done about this lead" in one place.
+          */}
+        {canFilterByMessage && (
+          <div className="mt-4">
+            <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+              <h3 className="eyebrow">Message</h3>
+              {filters.messageStatuses.length > 0 && (
+                <span className="ml-auto">
+                  <Reset onClick={() => onChange({ ...filters, messageStatuses: [] })} />
+                </span>
+              )}
+            </div>
+            <div className="flex flex-col gap-y-0.5">
+              {MESSAGE_STATUSES.map((status) => (
+                <Check
+                  key={status}
+                  checked={filters.messageStatuses.includes(status)}
+                  onChange={() => toggleMessageStatus(status)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${MESSAGE_STATUS_DOTS[status]}`}
+                  />
+                  <span className="min-w-0 flex-1 leading-snug">
+                    {MESSAGE_STATUS_LABELS[status]}
+                  </span>
+                  {/* Counted over the whole table, like every other figure on
+                      this rail — not over the queue the rail is narrowing. */}
+                  <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                    {stats.byMessageStatus[status]}
+                  </span>
+                </Check>
+              ))}
+            </div>
           </div>
         )}
 

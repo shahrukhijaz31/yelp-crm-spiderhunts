@@ -91,6 +91,61 @@ export function isCalled(status: CallStatus): boolean {
 }
 
 /**
+ * Where this lead stands on the *messaging* thread, which is a different
+ * question from where it stands on the phone.
+ *
+ * The two are deliberately separate fields rather than more entries in
+ * `CALL_STATUSES`. A lead is very often both — rung and got voicemail, then
+ * sent a WhatsApp — and folding that into one dropdown would mean the agent
+ * choosing which half of the truth to keep. It also means the New/Called split,
+ * `first_called_at` and every per-agent call figure keep meaning exactly what
+ * they meant before: a message is not a call.
+ *
+ * Three values, and only three: nothing sent, and the two channels the
+ * workspace can actually send from — the phone number is an SMS, the WhatsApp
+ * button is a WhatsApp. This records *what we did*, not what came back. What a
+ * lead said in reply is a conversation, and it belongs in the notes and in the
+ * call status the reply leads to, not in a dropdown that would have to guess at
+ * the difference between "no reply yet" and "no reply, give up".
+ *
+ * Recording which channel matters because the two do not behave the same: a
+ * WhatsApp shows delivery and is read on the same phone the agent rang, an SMS
+ * is fired blind.
+ */
+export const MESSAGE_STATUSES = ["not_messaged", "sms_sent", "whatsapp_sent"] as const;
+
+export type MessageStatus = (typeof MESSAGE_STATUSES)[number];
+
+export const MESSAGE_STATUS_LABELS: Record<MessageStatus, string> = {
+  not_messaged: "Not messaged",
+  sms_sent: "SMS sent",
+  whatsapp_sent: "WhatsApp sent",
+};
+
+/**
+ * Message-status colour, drawn from the same palette as {@link
+ * CALL_STATUS_STYLES} and under the same rule: never red, because red is the
+ * primary action and anything time-critical.
+ *
+ * "Nothing has happened yet" is the same neutral it is in the call control, so
+ * an untouched lead reads the same in both. The two channels take two hues that
+ * are distinct from each other at a glance, which is the only thing this chip
+ * has to say once something *has* been sent.
+ */
+export const MESSAGE_STATUS_STYLES: Record<MessageStatus, string> = {
+  not_messaged: "border-line-2 bg-transparent text-st-neutral",
+  sms_sent: "border-st-sky-line bg-st-sky-bg text-st-sky",
+  whatsapp_sent: "border-st-teal-line bg-st-teal-bg text-st-teal",
+};
+
+/** Solid dot colour, used inside the chips and the picker's option rows. */
+export const MESSAGE_STATUS_DOTS: Record<MessageStatus, string> = {
+  not_messaged: "bg-fg-4",
+  sms_sent: "bg-st-sky",
+  whatsapp_sent: "bg-st-teal",
+};
+
+/**
  * Which directory a lead was scraped out of.
  *
  * The portal started as a front end for one Yelp scraper, so "where did this
@@ -241,6 +296,12 @@ export interface Lead {
 
   // --- Agent-owned fields ---
   status: CallStatus;
+  /**
+   * Where the messaging thread stands. Independent of {@link Lead.status} — a
+   * lead can be un-called and already messaged, or rung and never messaged.
+   * See {@link MESSAGE_STATUSES}.
+   */
+  messageStatus: MessageStatus;
   notes: string;
   /** ISO `YYYY-MM-DD`, or null when no callback is scheduled. */
   callbackDate: string | null;
@@ -265,6 +326,7 @@ export interface Lead {
 export type LeadEditableFields = Pick<
   Lead,
   | "status"
+  | "messageStatus"
   | "notes"
   | "callbackDate"
   | "meetingTime"

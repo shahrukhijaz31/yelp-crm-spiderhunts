@@ -91,6 +91,7 @@ function lead(overrides: Partial<Lead>): Lead {
     url: null,
     source: "yelp",
     status: "not_called",
+    messageStatus: "not_messaged",
     firstCalledAt: null,
     notes: "",
     callbackDate: null,

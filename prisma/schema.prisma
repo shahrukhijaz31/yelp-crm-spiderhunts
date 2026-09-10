@@ -40,6 +40,24 @@ enum CallStatus {
   @@map("call_status")
 }
 
+/// Mirrors the `MessageStatus` union in `lib/types.ts`, on the same terms as
+/// `CallStatus`: snake_case keys that are stored as-is, human labels kept in
+/// `MESSAGE_STATUS_LABELS` so renaming one is not a migration, and declared in
+/// the order the TS list declares them (an enum's declaration order is its sort
+/// order in Postgres).
+///
+/// A second enum rather than more values on `call_status`, because a call and a
+/// message are separate things that happen to the same lead and both have to be
+/// answerable at once. Folding them together would also change what
+/// `first_called_at` and every per-agent call figure count.
+enum MessageStatus {
+  not_messaged
+  sms_sent
+  whatsapp_sent
+
+  @@map("message_status")
+}
+
 /// Which directory a lead was scraped out of. Mirrors `LEAD_SOURCES` in
 /// `lib/types.ts`, and like `CallStatus` the human labels ("Google Maps") live
 /// there rather than here, so renaming what the badge says is not a migration.
@@ -107,6 +125,12 @@ model Lead {
 
   // --- Agent-owned fields ---
   status        CallStatus @default(not_called)
+  /// Where the messaging thread stands, independent of `status`.
+  ///
+  /// Deliberately *not* wired into the New/Called split: `firstCalledAt` is
+  /// stamped by a call outcome and nothing else, so sending a WhatsApp does not
+  /// take a lead out of the queue of leads nobody has rung.
+  messageStatus MessageStatus @default(not_messaged) @map("message_status")
   /// When this lead was first *worked* — stamped the moment an agent saves a
   /// call outcome, and never cleared or moved afterwards.
   ///

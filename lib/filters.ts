@@ -3,9 +3,11 @@ import { callbackState, normalisePhone, todayIso } from "./leadUtils";
 import {
   CALL_STATUS_LABELS,
   LEAD_SOURCE_LABELS,
+  MESSAGE_STATUS_LABELS,
   type CallStatus,
   type Lead,
   type LeadSource,
+  type MessageStatus,
 } from "./types";
 
 /**
@@ -77,6 +79,16 @@ export interface LeadFilters {
   /** Empty means "all statuses" rather than "none". */
   statuses: CallStatus[];
   /**
+   * Which message statuses to show, on the same "empty means all" rule.
+   *
+   * Only the Called queue and Export ever set it. A New lead can have been
+   * messaged — sending a WhatsApp is not a call and does not move a lead out of
+   * that queue — but the rail there is deliberately about what an agent can act
+   * on before the first call, and the screen that offers this control is the
+   * one that offers the call-status filter beside it. See `FilterPanel`.
+   */
+  messageStatuses: MessageStatus[];
+  /**
    * Which directories to show. Empty means all of them, exactly like
    * `statuses` — and with two sources that is the same set as ticking both, so
    * the panel's Reset and "untick everything" land on one state rather than
@@ -112,6 +124,7 @@ export interface LeadFilters {
 export const EMPTY_FILTERS: LeadFilters = {
   query: "",
   statuses: [],
+  messageStatuses: [],
   sources: [],
   categories: [],
   countries: [],
@@ -277,6 +290,12 @@ export function matchesFilters(
   if (filters.statuses.length > 0 && !filters.statuses.includes(lead.status)) {
     return false;
   }
+  if (
+    filters.messageStatuses.length > 0 &&
+    !filters.messageStatuses.includes(lead.messageStatus)
+  ) {
+    return false;
+  }
   if (filters.sources.length > 0 && !filters.sources.includes(lead.source)) {
     return false;
   }
@@ -322,6 +341,22 @@ export function describeActiveFilters(filters: LeadFilters): FilterChip[] {
       next: {
         ...filters,
         statuses: filters.statuses.filter((candidate) => candidate !== status),
+      },
+    });
+  }
+
+  for (const status of filters.messageStatuses) {
+    chips.push({
+      // Namespaced apart from the call-status chips above: the two vocabularies
+      // are disjoint today, and a shared `status:` prefix would make that a
+      // requirement rather than a coincidence.
+      id: `message:${status}`,
+      label: MESSAGE_STATUS_LABELS[status],
+      next: {
+        ...filters,
+        messageStatuses: filters.messageStatuses.filter(
+          (candidate) => candidate !== status,
+        ),
       },
     });
   }

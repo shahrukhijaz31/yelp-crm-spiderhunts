@@ -1,6 +1,6 @@
 import { parseAddressLocation } from "./leadLocation";
 import { todayIso } from "./leadUtils";
-import type { CallStatus, Lead, LeadSource } from "./types";
+import type { CallStatus, Lead, LeadSource, MessageStatus } from "./types";
 
 /**
  * Sample data. No longer part of any request path — the app reads Postgres now
@@ -23,6 +23,7 @@ interface MockSeed {
   rating: number | null;
   owner: string | null;
   status?: CallStatus;
+  messageStatus?: MessageStatus;
   notes?: string;
   /** Days from today for the callback date; omit for no callback. */
   callbackInDays?: number;
@@ -485,6 +486,7 @@ export function getMockLeads(): Lead[] {
       // shows the Location filter behaving exactly as production does.
       ...parseAddressLocation(seed.address),
       status: seed.status ?? "not_called",
+      messageStatus: seed.messageStatus ?? "not_messaged",
       notes: seed.notes ?? "",
       callbackDate:
         seed.callbackInDays === undefined ? null : isoOffsetDays(seed.callbackInDays),

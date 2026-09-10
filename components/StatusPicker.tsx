@@ -4,14 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Check, ChevronDown } from "lucide-react";
 
-import {
-  CALL_STATUSES,
-  CALL_STATUS_DOTS,
-  CALL_STATUS_LABELS,
-  CALL_STATUS_STYLES,
-  type CallStatus,
-} from "@/lib/types";
-
 /**
  * The workspace's status control.
  *
@@ -25,13 +17,18 @@ import {
  *
  * So this one is drawn: a full-width trigger wearing the status's own hue, and
  * a listbox where every option carries its dot. The colour vocabulary is
- * `lib/types.ts`'s, unchanged and imported rather than restated, so a status
+ * `lib/types.ts`'s, unchanged and handed in rather than restated, so a status
  * looks the same here as it does in a row, on a meeting card and in the stat
  * legend.
  *
  * **The options and the values are exactly the worklist's.** `CALL_STATUSES` in
  * declaration order, `CALL_STATUS_LABELS` for the text. Nothing about what a
- * status *means* lives in this file — it draws a closed set it is handed.
+ * status *means* lives in this file — it draws a closed set it is handed. That
+ * is why it is generic: the workspace has a second such control (the message
+ * status), and it is the same listbox over a different vocabulary rather than a
+ * second copy of the keyboard handling below drifting away from this one. The
+ * options, the labels and the colours are all props; this file owns behaviour
+ * and nothing else.
  *
  * Choosing a value **stages** it. Same rule as the row: nothing is written
  * until the agent presses Save, and `pending` marks the trigger until they do.
@@ -42,22 +39,43 @@ import {
  * Escape and a click outside to abandon, and focus returned to the trigger
  * whichever way it closes.
  */
-export default function StatusPicker({
+export default function StatusPicker<T extends string>({
   value,
   committed,
   onChange,
+  options,
+  labels,
+  styles,
+  dots,
+  label,
+  /**
+   * Prefix for the option `id`s, so two pickers on the same screen cannot mint
+   * the same `aria-activedescendant` and point a screen reader at the wrong
+   * list.
+   */
+  idPrefix = "status",
 }: {
   /** The staged value — what the control shows. */
-  value: CallStatus;
+  value: T;
   /** What is actually saved. Shown as "was …" while the two differ. */
-  committed: CallStatus;
-  onChange: (status: CallStatus) => void;
+  committed: T;
+  onChange: (status: T) => void;
+  /** The closed set, in the order it should be read down. */
+  options: readonly T[];
+  labels: Record<T, string>;
+  /** Chip border/background/text triple, worn by the trigger. */
+  styles: Record<T, string>;
+  /** Solid dot colour for the option rows. */
+  dots: Record<T, string>;
+  /** What this control is choosing, for the trigger and the listbox. */
+  label: string;
+  idPrefix?: string;
 }) {
   const reduced = useReducedMotion();
   const [open, setOpen] = useState(false);
   // Which option the keyboard is on. Seeded from the current value so opening
   // with the keyboard starts on the status the lead already has.
-  const [active, setActive] = useState(() => CALL_STATUSES.indexOf(value));
+  const [active, setActive] = useState(() => options.indexOf(value));
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -81,7 +99,7 @@ export default function StatusPicker({
   }, [open]);
 
   function openList() {
-    setActive(Math.max(0, CALL_STATUSES.indexOf(value)));
+    setActive(Math.max(0, options.indexOf(value)));
     setOpen(true);
   }
 
@@ -93,7 +111,7 @@ export default function StatusPicker({
     if (refocus) triggerRef.current?.focus();
   }
 
-  function choose(status: CallStatus) {
+  function choose(status: T) {
     onChange(status);
     close();
   }
@@ -119,7 +137,7 @@ export default function StatusPicker({
         break;
       case "ArrowDown":
         event.preventDefault();
-        setActive((index) => Math.min(CALL_STATUSES.length - 1, index + 1));
+        setActive((index) => Math.min(options.length - 1, index + 1));
         break;
       case "ArrowUp":
         event.preventDefault();
@@ -131,12 +149,12 @@ export default function StatusPicker({
         break;
       case "End":
         event.preventDefault();
-        setActive(CALL_STATUSES.length - 1);
+        setActive(options.length - 1);
         break;
       case "Enter":
       case " ": {
         event.preventDefault();
-        const status = CALL_STATUSES[active];
+        const status = options[active];
         if (status) choose(status);
         break;
       }
@@ -152,15 +170,15 @@ export default function StatusPicker({
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`Call status: ${CALL_STATUS_LABELS[value]}`}
+        aria-label={`${label}: ${labels[value]}`}
         onClick={() => (open ? close({ refocus: false }) : openList())}
-        className={`status-trigger ${CALL_STATUS_STYLES[value]} ${
+        className={`status-trigger ${styles[value]} ${
           pending ? "status-trigger-pending" : ""
         }`}
       >
         <span aria-hidden="true" className="chip-dot" />
         <span className="min-w-0 flex-1 truncate text-left">
-          {CALL_STATUS_LABELS[value]}
+          {labels[value]}
         </span>
         <ChevronDown
           className={`h-4 w-4 shrink-0 opacity-60 transition-transform duration-200 ${
@@ -175,8 +193,8 @@ export default function StatusPicker({
         {open && (
           <motion.ul
             role="listbox"
-            aria-label="Call status"
-            aria-activedescendant={`status-option-${CALL_STATUSES[active] ?? value}`}
+            aria-label={label}
+            aria-activedescendant={`${idPrefix}-option-${options[active] ?? value}`}
             tabIndex={-1}
             initial={reduced ? false : { opacity: 0, y: -4, scale: 0.985 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -184,12 +202,12 @@ export default function StatusPicker({
             transition={{ duration: reduced ? 0 : 0.16, ease: [0.22, 0.61, 0.36, 1] }}
             className="panel-float absolute left-0 right-0 top-[calc(100%+6px)] z-30 max-h-[19rem] overflow-y-auto p-1"
           >
-            {CALL_STATUSES.map((status, index) => {
+            {options.map((status, index) => {
               const selected = status === value;
               return (
                 <li key={status}>
                   <button
-                    id={`status-option-${status}`}
+                    id={`${idPrefix}-option-${status}`}
                     type="button"
                     role="option"
                     aria-selected={selected}
@@ -202,10 +220,10 @@ export default function StatusPicker({
                   >
                     <span
                       aria-hidden="true"
-                      className={`h-2 w-2 shrink-0 rounded-full ${CALL_STATUS_DOTS[status]}`}
+                      className={`h-2 w-2 shrink-0 rounded-full ${dots[status]}`}
                     />
                     <span className="min-w-0 flex-1 truncate text-left">
-                      {CALL_STATUS_LABELS[status]}
+                      {labels[status]}
                     </span>
                     {selected && (
                       <Check

@@ -60,6 +60,7 @@ export function toLead(row: LeadRow): Lead {
     country: row.country,
     city: row.city,
     status: row.status,
+    messageStatus: row.messageStatus,
     notes: row.notes,
     callbackDate: toIsoDate(row.callbackDate),
     meetingTime: row.meetingTime,
@@ -116,6 +117,12 @@ export function toCreateData(
      * the ones some source deliberately said were already handled.
      */
     firstCalledAt: isCalled(lead.status) ? new Date() : null,
+    /*
+     * Carried through like any other agent-owned field, and pointedly *not*
+     * fed into `firstCalledAt` above: a message is not a call, so a row
+     * arriving as "SMS sent" is still a lead nobody has rung.
+     */
+    messageStatus: lead.messageStatus,
     notes: lead.notes,
     callbackDate: fromIsoDate(lead.callbackDate),
     meetingTime: lead.meetingTime,

@@ -39,9 +39,16 @@ import type { DemoSummary } from "@/lib/demoWebsiteRules";
 import type { LeadSection } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import {
+  CALL_STATUSES,
+  CALL_STATUS_DOTS,
   CALL_STATUS_LABELS,
+  CALL_STATUS_STYLES,
   LEAD_SOURCE_LABELS,
   LEAD_SOURCE_STYLES,
+  MESSAGE_STATUSES,
+  MESSAGE_STATUS_DOTS,
+  MESSAGE_STATUS_LABELS,
+  MESSAGE_STATUS_STYLES,
   type Lead,
   type LeadEditableFields,
 } from "@/lib/types";
@@ -123,6 +130,7 @@ const SAVED_FEEDBACK_MS = 2600;
 /** The fields a draft may carry, and what the save bar calls each of them. */
 const FIELD_LABELS: Record<keyof LeadEditableFields, string> = {
   status: "Status",
+  messageStatus: "Message status",
   notes: "Notes",
   callbackDate: "Meeting",
   meetingTime: "Meeting",
@@ -634,12 +642,68 @@ export default function LeadWorkspace({
                   value={shown.status}
                   committed={lead.status}
                   onChange={(status) => stage({ status })}
+                  options={CALL_STATUSES}
+                  labels={CALL_STATUS_LABELS}
+                  styles={CALL_STATUS_STYLES}
+                  dots={CALL_STATUS_DOTS}
+                  label="Call status"
+                  idPrefix="call-status"
                 />
               </div>
 
               <p className="mt-2 text-meta leading-relaxed text-fg-4">
                 Saving an outcome for the first time moves this lead out of the
                 New queue for good.
+              </p>
+            </section>
+          </div>
+
+          {/* --- message status ---
+            *
+            * Its own block, directly under the call, because it is the second
+            * half of "what have we done about this lead" and an agent reads the
+            * two together before deciding what to do next.
+            *
+            * Separate from the call status rather than folded into it: the
+            * lead above was rung and got voicemail *and* was sent a WhatsApp,
+            * and one dropdown could only have recorded one of those. Saving
+            * this alone is bookkeeping — it does not move the lead out of the
+            * New queue and it is not counted as a call, which is `isCalled`'s
+            * rule on the server and not something this screen decides.
+            */}
+          <div className="ws-block-wrap">
+            <section aria-labelledby="ws-message" className="ws-block">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 id="ws-message" className="eyebrow">
+                  Message status
+                </h2>
+                {draft?.messageStatus !== undefined && (
+                  <span className="text-meta text-fg-3">
+                    Currently saved as{" "}
+                    <span className="text-fg-2">
+                      {MESSAGE_STATUS_LABELS[lead.messageStatus]}
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-2.5 max-w-sm">
+                <StatusPicker
+                  value={shown.messageStatus}
+                  committed={lead.messageStatus}
+                  onChange={(messageStatus) => stage({ messageStatus })}
+                  options={MESSAGE_STATUSES}
+                  labels={MESSAGE_STATUS_LABELS}
+                  styles={MESSAGE_STATUS_STYLES}
+                  dots={MESSAGE_STATUS_DOTS}
+                  label="Message status"
+                  idPrefix="message-status"
+                />
+              </div>
+
+              <p className="mt-2 text-meta leading-relaxed text-fg-4">
+                Records the SMS or WhatsApp thread, separately from the call.
+                It does not move the lead out of the New queue.
               </p>
             </section>
           </div>
