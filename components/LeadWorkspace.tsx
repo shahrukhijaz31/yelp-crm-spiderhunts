@@ -620,92 +620,109 @@ export default function LeadWorkspace({
           aria-label="Lead workspace"
           className="panel divide-y divide-line overflow-hidden"
         >
-          {/* --- status --- */}
-          <div className="ws-block-wrap">
-            <section aria-labelledby="ws-status" className="ws-block">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 id="ws-status" className="eyebrow">
-                  Lead status
-                </h2>
-                {/* Named rather than implied: an agent about to commit a
-                    status should be able to read what they are replacing. */}
-                {draft?.status !== undefined && (
-                  <span className="text-meta text-fg-3">
-                    Currently saved as{" "}
-                    <span className="text-fg-2">{CALL_STATUS_LABELS[lead.status]}</span>
-                  </span>
-                )}
-              </div>
-
-              <div className="mt-2.5 max-w-sm">
-                <StatusPicker
-                  value={shown.status}
-                  committed={lead.status}
-                  onChange={(status) => stage({ status })}
-                  options={CALL_STATUSES}
-                  labels={CALL_STATUS_LABELS}
-                  styles={CALL_STATUS_STYLES}
-                  dots={CALL_STATUS_DOTS}
-                  label="Call status"
-                  idPrefix="call-status"
-                />
-              </div>
-
-              <p className="mt-2 text-meta leading-relaxed text-fg-4">
-                Saving an outcome for the first time moves this lead out of the
-                New queue for good.
-              </p>
-            </section>
-          </div>
-
-          {/* --- message status ---
+          {/* --- status and message: one row, two questions ---------------
             *
-            * Its own block, directly under the call, because it is the second
-            * half of "what have we done about this lead" and an agent reads the
-            * two together before deciding what to do next.
+            * Side by side rather than stacked, because they are the same
+            * question asked of two channels — what happened on the phone, and
+            * what happened on the thread — and an agent reads them together
+            * before deciding what to do next. Stacked, they also left the
+            * picker capped at `max-w-sm` in a column half again as wide, so
+            * two thirds of the row was blank space either way.
             *
-            * Separate from the call status rather than folded into it: the
-            * lead above was rung and got voicemail *and* was sent a WhatsApp,
-            * and one dropdown could only have recorded one of those. Saving
-            * this alone is bookkeeping — it does not move the lead out of the
-            * New queue and it is not counted as a call, which is `isCalled`'s
-            * rule on the server and not something this screen decides.
+            * Still two `<section>`s with their own headings, not one control
+            * pair: they stage independently, they save independently, and only
+            * the left one moves a lead out of the New queue.
+            *
+            * One column below `sm`, where two 24rem triggers cannot both fit
+            * and the status labels ("Called - Owner not available") would wrap
+            * to three lines each.
             */}
           <div className="ws-block-wrap">
-            <section aria-labelledby="ws-message" className="ws-block">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 id="ws-message" className="eyebrow">
-                  Message status
-                </h2>
-                {draft?.messageStatus !== undefined && (
-                  <span className="text-meta text-fg-3">
-                    Currently saved as{" "}
-                    <span className="text-fg-2">
-                      {MESSAGE_STATUS_LABELS[lead.messageStatus]}
+            <div className="grid grid-cols-1 gap-y-5 sm:grid-cols-2 sm:gap-y-0 sm:divide-x sm:divide-line">
+              <section aria-labelledby="ws-status" className="ws-block sm:pr-5">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <h2 id="ws-status" className="eyebrow">
+                    Lead status
+                  </h2>
+                  {/* Named rather than implied: an agent about to commit a
+                      status should be able to read what they are replacing.
+                      Shortened from "Currently saved as" now that it shares a
+                      line with the heading in half the width. */}
+                  {draft?.status !== undefined && (
+                    <span className="text-meta text-fg-3">
+                      was{" "}
+                      <span className="text-fg-2">{CALL_STATUS_LABELS[lead.status]}</span>
                     </span>
-                  </span>
-                )}
-              </div>
+                  )}
+                </div>
 
-              <div className="mt-2.5 max-w-sm">
-                <StatusPicker
-                  value={shown.messageStatus}
-                  committed={lead.messageStatus}
-                  onChange={(messageStatus) => stage({ messageStatus })}
-                  options={MESSAGE_STATUSES}
-                  labels={MESSAGE_STATUS_LABELS}
-                  styles={MESSAGE_STATUS_STYLES}
-                  dots={MESSAGE_STATUS_DOTS}
-                  label="Message status"
-                  idPrefix="message-status"
-                />
-              </div>
+                {/* No `max-w-sm`: the column is now the constraint, and the
+                    trigger fills it. */}
+                <div className="mt-2.5">
+                  <StatusPicker
+                    value={shown.status}
+                    committed={lead.status}
+                    onChange={(status) => stage({ status })}
+                    options={CALL_STATUSES}
+                    labels={CALL_STATUS_LABELS}
+                    styles={CALL_STATUS_STYLES}
+                    dots={CALL_STATUS_DOTS}
+                    label="Call status"
+                    idPrefix="call-status"
+                  />
+                </div>
 
-              <p className="mt-2 text-meta leading-relaxed text-fg-4">
-                Records the SMS or WhatsApp thread, separately from the call.
-                It does not move the lead out of the New queue.
-              </p>
-            </section>
+                <p className="mt-2 text-meta leading-relaxed text-fg-4">
+                  Saving an outcome for the first time moves this lead out of
+                  the New queue for good.
+                </p>
+              </section>
+
+              {/*
+                * The message thread, beside the call rather than under it.
+                *
+                * Separate from the call status and not folded into it: a lead
+                * is very often both — rung and got voicemail, then sent a
+                * WhatsApp — and one dropdown could only have recorded one of
+                * those. Saving this alone is bookkeeping: it does not move the
+                * lead out of the New queue and is not counted as a call, which
+                * is `isCalled`'s rule on the server and not this screen's.
+                */}
+              <section aria-labelledby="ws-message" className="ws-block sm:pl-5">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <h2 id="ws-message" className="eyebrow">
+                    Message status
+                  </h2>
+                  {draft?.messageStatus !== undefined && (
+                    <span className="text-meta text-fg-3">
+                      was{" "}
+                      <span className="text-fg-2">
+                        {MESSAGE_STATUS_LABELS[lead.messageStatus]}
+                      </span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="mt-2.5">
+                  <StatusPicker
+                    value={shown.messageStatus}
+                    committed={lead.messageStatus}
+                    onChange={(messageStatus) => stage({ messageStatus })}
+                    options={MESSAGE_STATUSES}
+                    labels={MESSAGE_STATUS_LABELS}
+                    styles={MESSAGE_STATUS_STYLES}
+                    dots={MESSAGE_STATUS_DOTS}
+                    label="Message status"
+                    idPrefix="message-status"
+                  />
+                </div>
+
+                <p className="mt-2 text-meta leading-relaxed text-fg-4">
+                  The SMS or WhatsApp thread, recorded apart from the call. It
+                  does not move the lead out of New.
+                </p>
+              </section>
+            </div>
           </div>
 
           {/* --- meeting --- */}
