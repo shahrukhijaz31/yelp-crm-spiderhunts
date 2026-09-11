@@ -131,6 +131,7 @@ const SAVED_FEEDBACK_MS = 2600;
 const FIELD_LABELS: Record<keyof LeadEditableFields, string> = {
   status: "Status",
   messageStatus: "Message status",
+  onWhatsapp: "On WhatsApp",
   notes: "Notes",
   callbackDate: "Meeting",
   meetingTime: "Meeting",
@@ -716,6 +717,28 @@ export default function LeadWorkspace({
                     idPrefix="message-status"
                   />
                 </div>
+
+                {/* Ticked by hand once the WhatsApp link has shown the number
+                    has an account. Stages like everything else here. Disabled
+                    for a lead with no phone, unless it is already ticked and
+                    needs clearing. */}
+                <label
+                  className={`mt-3 flex w-fit items-center gap-2 rounded-md px-1 py-0.5 text-ui text-fg-2 ${
+                    !lead.phone && !shown.onWhatsapp
+                      ? "cursor-not-allowed opacity-50"
+                      : "cursor-pointer hover:text-fg"
+                  } ${draft?.onWhatsapp !== undefined ? "bg-warning-bg/40" : ""}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={shown.onWhatsapp}
+                    disabled={!lead.phone && !shown.onWhatsapp}
+                    onChange={(event) => stage({ onWhatsapp: event.target.checked })}
+                    className="h-3.5 w-3.5 shrink-0 accent-accent"
+                  />
+                  <WhatsAppGlyph />
+                  On WhatsApp
+                </label>
 
                 <p className="mt-2 text-meta leading-relaxed text-fg-4">
                   The SMS or WhatsApp thread, recorded apart from the call. It

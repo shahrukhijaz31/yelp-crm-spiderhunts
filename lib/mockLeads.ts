@@ -487,6 +487,7 @@ export function getMockLeads(): Lead[] {
       ...parseAddressLocation(seed.address),
       status: seed.status ?? "not_called",
       messageStatus: seed.messageStatus ?? "not_messaged",
+      onWhatsapp: false,
       notes: seed.notes ?? "",
       callbackDate:
         seed.callbackInDays === undefined ? null : isoOffsetDays(seed.callbackInDays),

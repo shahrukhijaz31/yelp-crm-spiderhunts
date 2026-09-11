@@ -61,6 +61,7 @@ export function toLead(row: LeadRow): Lead {
     city: row.city,
     status: row.status,
     messageStatus: row.messageStatus,
+    onWhatsapp: row.onWhatsapp,
     notes: row.notes,
     callbackDate: toIsoDate(row.callbackDate),
     meetingTime: row.meetingTime,
@@ -123,6 +124,7 @@ export function toCreateData(
      * arriving as "SMS sent" is still a lead nobody has rung.
      */
     messageStatus: lead.messageStatus,
+    onWhatsapp: lead.onWhatsapp,
     notes: lead.notes,
     callbackDate: fromIsoDate(lead.callbackDate),
     meetingTime: lead.meetingTime,

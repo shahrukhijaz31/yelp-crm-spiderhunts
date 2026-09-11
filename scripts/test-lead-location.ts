@@ -81,6 +81,7 @@ function lead(overrides: Partial<Lead>): Lead {
     city: "San Francisco",
     status: "not_called",
     messageStatus: "not_messaged",
+    onWhatsapp: false,
     notes: "",
     callbackDate: null,
     meetingTime: null,

@@ -131,6 +131,9 @@ model Lead {
   /// stamped by a call outcome and nothing else, so sending a WhatsApp does not
   /// take a lead out of the queue of leads nobody has rung.
   messageStatus MessageStatus @default(not_messaged) @map("message_status")
+  /// Whether an agent has confirmed this number has a WhatsApp account. False
+  /// until someone checks, so false means "not confirmed", not "confirmed absent".
+  onWhatsapp    Boolean       @default(false) @map("on_whatsapp")
   /// When this lead was first *worked* — stamped the moment an agent saves a
   /// call outcome, and never cleared or moved afterwards.
   ///

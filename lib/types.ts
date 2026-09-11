@@ -302,6 +302,11 @@ export interface Lead {
    * See {@link MESSAGE_STATUSES}.
    */
   messageStatus: MessageStatus;
+  /**
+   * An agent has confirmed this number has a WhatsApp account. False until
+   * someone checks, so it reads "not confirmed", not "not on WhatsApp".
+   */
+  onWhatsapp: boolean;
   notes: string;
   /** ISO `YYYY-MM-DD`, or null when no callback is scheduled. */
   callbackDate: string | null;
@@ -327,6 +332,7 @@ export type LeadEditableFields = Pick<
   Lead,
   | "status"
   | "messageStatus"
+  | "onWhatsapp"
   | "notes"
   | "callbackDate"
   | "meetingTime"

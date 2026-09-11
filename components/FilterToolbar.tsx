@@ -14,6 +14,7 @@ import {
 } from "@/lib/filters";
 import type { LeadStats } from "@/lib/leadUtils";
 import type { LeadWorkState } from "@/lib/workState";
+import type { LeadQueueFacets } from "@/lib/leadDb";
 
 /**
  * The command bar: instant search, the filter expander, the active-filter chips
@@ -35,6 +36,7 @@ export default function FilterToolbar({
   categories,
   countries,
   stats,
+  facets,
   shown,
   open,
   onToggleOpen,
@@ -47,6 +49,8 @@ export default function FilterToolbar({
   categories: CategoryOption[];
   countries: CountryOption[];
   stats: LeadStats;
+  /** Passed straight through: the checkbox counts for the queue on screen. */
+  facets?: LeadQueueFacets;
   shown: number;
   open: boolean;
   onToggleOpen: () => void;
@@ -234,6 +238,7 @@ export default function FilterToolbar({
                 categories={categories}
                 countries={countries}
                 stats={stats}
+                facets={facets}
                 section={section}
                 workState={workState}
                 demoCounts={demoCounts}

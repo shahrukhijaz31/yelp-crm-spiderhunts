@@ -3,7 +3,7 @@ import Worklist from "@/components/Worklist";
 import { requireModule } from "@/lib/authz";
 import { demoFilterCounts, demoSummariesFor } from "@/lib/demoWebsites";
 import { EMPTY_FILTERS } from "@/lib/filters";
-import { leadCategories, leadCountries, listLeadsPage } from "@/lib/leadDb";
+import { leadCategories, leadCountries, leadQueueFacets, listLeadsPage } from "@/lib/leadDb";
 import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
 import { DEFAULT_WORK_STATE } from "@/lib/workState";
@@ -69,13 +69,15 @@ export default async function DemoWebsitesPage(props: PageProps<"/demo-websites"
   // metadata is keyed by the ids `listLeadsPage` just chose, so it cannot start
   // until that has answered; the filter panel's category and location lists are
   // independent and ride along.
-  const [demos, categories, countries, demoCounts] = await Promise.all([
+  const [demos, categories, countries, demoCounts, queueFacets] = await Promise.all([
     demoSummariesFor(result.leads.map((lead) => lead.id)),
     leadCategories(),
     leadCountries(),
     // The numbers on the demo filter buttons, so the panel opens with them
     // rather than filling in after a round trip.
     demoFilterCounts(),
+    // The filter rail's checkbox counts for the queue the screen opens on.
+    leadQueueFacets(DEFAULT_WORK_STATE),
   ]);
 
   return (
@@ -92,6 +94,7 @@ export default async function DemoWebsitesPage(props: PageProps<"/demo-websites"
       initialCountries={countries}
       initialDemos={demos}
       initialDemoCounts={demoCounts}
+      initialQueueFacets={queueFacets}
       serverToday={today}
     />
   );

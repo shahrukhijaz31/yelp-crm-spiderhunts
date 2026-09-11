@@ -98,7 +98,7 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
     // function the aggregate mirrors, so a field added to `LeadStats` cannot be
     // missing from this branch.
     access.leads ? leadStats(today) : computeStats([], today),
-    access.leads ? leadWorkCounts() : { new: 0, called: 0 },
+    access.leads ? leadWorkCounts() : { new: 0, called: 0, sms: 0 },
     tracked ? getWorkClock(user.id) : null,
   ]);
 

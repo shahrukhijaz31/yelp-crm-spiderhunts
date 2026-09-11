@@ -13,6 +13,7 @@ import {
   Gauge,
   Globe,
   Inbox,
+  MessageSquare,
   Monitor,
   PhoneOutgoing,
   Settings,
@@ -125,6 +126,7 @@ interface NavItem {
 const QUEUE_ICONS: Record<LeadWorkState, LucideIcon> = {
   new: Inbox,
   called: PhoneOutgoing,
+  sms: MessageSquare,
 };
 
 /** The workspaces an agent moves between all day. Order is a day's work. */

@@ -92,6 +92,7 @@ function lead(overrides: Partial<Lead>): Lead {
     source: "yelp",
     status: "not_called",
     messageStatus: "not_messaged",
+    onWhatsapp: false,
     firstCalledAt: null,
     notes: "",
     callbackDate: null,

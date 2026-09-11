@@ -142,20 +142,33 @@ function likeEscape(value: string): string {
  * order and mean the same things. `Prisma.empty` when nothing is constrained,
  * so the "All leads" tab with no filters is a plain scan and not `WHERE true`.
  */
+/**
+ * The rows in one queue, against the `leads l` alias.
+ *
+ * New and Called are one column, two halves of the table, no overlap and no
+ * gap. SMS Sent cuts across both: it reads the message status and ignores
+ * `first_called_at`, so a texted lead nobody has rung is in New and here at
+ * once. Shared by the page query and {@link leadQueueFacets}, so the list and
+ * the counts beside its filters cannot disagree about what a queue holds.
+ */
+function workStateSql(workState: LeadWorkState): Prisma.Sql {
+  if (workState === "sms") {
+    return Prisma.sql`l.message_status IN ('sms_sent', 'whatsapp_sent')`;
+  }
+  return workState === "called"
+    ? Prisma.sql`l.first_called_at IS NOT NULL`
+    : Prisma.sql`l.first_called_at IS NULL`;
+}
+
 function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
   const { workState, view, filters, today } = query;
   const clauses: Prisma.Sql[] = [];
 
   // --- the queue (lib/workState.ts) ---
   // The outermost narrowing, and the only one with no equivalent in
-  // `matchesFilters`: New and Called are a property of the row, not of what the
-  // agent has ticked. One column, two halves of the table, no overlap and no
-  // gap — every lead is in exactly one of them.
-  clauses.push(
-    workState === "called"
-      ? Prisma.sql`l.first_called_at IS NOT NULL`
-      : Prisma.sql`l.first_called_at IS NULL`,
-  );
+  // `matchesFilters`: the queue is a property of the row, not of what the agent
+  // has ticked.
+  clauses.push(workStateSql(workState));
 
   // --- the tab (lib/views.ts) ---
   // `callback_date <= today` covers "due today" and "overdue" in one comparison;
@@ -401,7 +414,8 @@ function sortExpression(key: Exclude<LeadSortKey, "default">): Prisma.Sql {
  * Called is a record rather than a queue, and the question asked of it is "what
  * did I just do", so it leads with the most recently worked: `updated_at`, the
  * column that already tracks exactly that, rather than a second timestamp that
- * would have to be kept in step by hand.
+ * would have to be kept in step by hand. SMS Sent is read the same way and
+ * takes the same order.
  *
  * A heading click overrides both. An explicit sort is the agent saying what
  * they want the order to be, and it means the same thing in either queue.
@@ -409,7 +423,7 @@ function sortExpression(key: Exclude<LeadSortKey, "default">): Prisma.Sql {
 function leadOrderSql(sort: LeadSort, workState: LeadWorkState): Prisma.Sql {
   const stable = Prisma.sql`l.created_at ASC, l.id ASC`;
   if (sort.key === "default") {
-    return workState === "called"
+    return workState === "called" || workState === "sms"
       ? Prisma.sql`l.updated_at DESC, ${stable}`
       : stable;
   }
@@ -670,6 +684,53 @@ export async function leadStats(today: string): Promise<LeadStats> {
   };
 }
 
+/** The filter rail's per-option counts, for one queue. */
+export type LeadQueueFacets = Pick<LeadStats, "byStatus" | "byMessageStatus" | "bySource">;
+
+/**
+ * How many leads in one queue sit behind each Status, Message and Source
+ * checkbox.
+ *
+ * Scoped to the queue, unlike {@link leadStats}: those figures describe the
+ * workspace and feed the headline strip and the reports, but a number beside a
+ * checkbox is read as "tick this and you get this many". Counted over the whole
+ * table, Called offered "WhatsApp sent · 1" for a lead that was only in New, and
+ * ticking it showed nothing.
+ *
+ * Still not narrowed by the filters themselves, so ticking one option does not
+ * turn every other option's count to zero.
+ */
+export async function leadQueueFacets(workState: LeadWorkState): Promise<LeadQueueFacets> {
+  const queue = workStateSql(workState);
+
+  // One transaction, so the three breakdowns describe the same instant.
+  const [statusRows, messageRows, sourceRows] = await prisma.$transaction([
+    prisma.$queryRaw<{ key: CallStatus; count: number }[]>(
+      Prisma.sql`SELECT l.status::text AS key, count(*)::int AS count FROM leads l WHERE ${queue} GROUP BY l.status`,
+    ),
+    prisma.$queryRaw<{ key: MessageStatus; count: number }[]>(
+      Prisma.sql`SELECT l.message_status::text AS key, count(*)::int AS count FROM leads l WHERE ${queue} GROUP BY l.message_status`,
+    ),
+    prisma.$queryRaw<{ key: LeadSource; count: number }[]>(
+      Prisma.sql`SELECT l.source::text AS key, count(*)::int AS count FROM leads l WHERE ${queue} GROUP BY l.source`,
+    ),
+  ]);
+
+  // Seeded at zero, like `leadStats`: an option nobody in this queue has is an
+  // option reading "0", not an option that is missing.
+  function tally<K extends string>(keys: readonly K[], rows: { key: K; count: number }[]) {
+    const counts = Object.fromEntries(keys.map((key) => [key, 0])) as Record<K, number>;
+    for (const row of rows) counts[row.key] += row.count;
+    return counts;
+  }
+
+  return {
+    byStatus: tally(CALL_STATUSES, statusRows),
+    byMessageStatus: tally(MESSAGE_STATUSES, messageRows),
+    bySource: tally(LEAD_SOURCES, sourceRows),
+  };
+}
+
 /**
  * The New and Called totals behind the tab badges.
  *
@@ -687,16 +748,23 @@ export async function leadStats(today: string): Promise<LeadStats> {
  * counts in bigint and `JSON.stringify` refuses to serialise one.
  */
 export async function leadWorkCounts(): Promise<LeadWorkCounts> {
-  const [row] = await prisma.$queryRaw<{ fresh: number; called: number }[]>(
+  const [row] = await prisma.$queryRaw<
+    { fresh: number; called: number; messaged: number }[]
+  >(
     Prisma.sql`
       SELECT
         count(*) FILTER (WHERE first_called_at IS NULL)::int     AS fresh,
-        count(*) FILTER (WHERE first_called_at IS NOT NULL)::int AS called
+        count(*) FILTER (WHERE first_called_at IS NOT NULL)::int AS called,
+        count(*) FILTER (WHERE message_status IN ('sms_sent', 'whatsapp_sent'))::int AS messaged
       FROM leads
     `,
   );
 
-  return { new: row?.fresh ?? 0, called: row?.called ?? 0 };
+  return {
+    new: row?.fresh ?? 0,
+    called: row?.called ?? 0,
+    sms: row?.messaged ?? 0,
+  };
 }
 
 /**
@@ -783,6 +851,7 @@ export async function updateLeadFields(
   const data: Record<string, unknown> = {};
   if ("status" in changes) data.status = changes.status;
   if ("messageStatus" in changes) data.messageStatus = changes.messageStatus;
+  if ("onWhatsapp" in changes) data.onWhatsapp = changes.onWhatsapp;
   if ("notes" in changes) data.notes = changes.notes;
   if ("callbackDate" in changes) data.callbackDate = fromIsoDate(changes.callbackDate ?? null);
   if ("meetingTime" in changes) data.meetingTime = changes.meetingTime;
@@ -1002,6 +1071,13 @@ export function parseLeadEdits(body: unknown): Partial<LeadEditableFields> {
       );
     }
     edits.messageStatus = input.messageStatus;
+  }
+
+  if ("onWhatsapp" in input) {
+    if (typeof input.onWhatsapp !== "boolean") {
+      throw new LeadEditError("onWhatsapp must be true or false.");
+    }
+    edits.onWhatsapp = input.onWhatsapp;
   }
 
   for (const key of ["notes", "meetingNotes"] as const) {

@@ -30,6 +30,7 @@ import {
   type MessageStatus,
 } from "@/lib/types";
 import type { LeadWorkState } from "@/lib/workState";
+import type { LeadQueueFacets } from "@/lib/leadDb";
 
 const CALLBACK_ORDER: CallbackRange[] = [
   "all",
@@ -73,6 +74,7 @@ export default function FilterPanel({
   categories,
   countries,
   stats,
+  facets,
   section = "leads",
   demoCounts,
   workState,
@@ -82,6 +84,12 @@ export default function FilterPanel({
   categories: CategoryOption[];
   countries: CountryOption[];
   stats: LeadStats;
+  /**
+   * The Status, Message and Source counts for the queue being narrowed. Absent
+   * on Export, and for a moment after a queue switch, when the workspace-wide
+   * figures in `stats` are shown instead.
+   */
+  facets?: LeadQueueFacets;
   /** The demo band is drawn for the Demo Websites view only. */
   section?: "leads" | "demo";
   demoCounts?: DemoCounts;
@@ -138,6 +146,10 @@ export default function FilterPanel({
    * them look like a change to both.
    */
   const canFilterByCallback = workState !== "new";
+
+  // The number beside each checkbox is what ticking it would show, so it is
+  // counted over the queue on screen when there is one.
+  const counts = facets ?? stats;
 
   function toggleMessageStatus(status: MessageStatus) {
     const next = filters.messageStatuses.includes(status)
@@ -293,7 +305,7 @@ export default function FilterPanel({
                     filter by. Two lines is a cheaper price than an ellipsis. */}
                 <span className="min-w-0 flex-1 leading-snug">{CALL_STATUS_LABELS[status]}</span>
                 <span className="tnum shrink-0 font-mono text-meta text-fg-3">
-                  {stats.byStatus[status]}
+                  {counts.byStatus[status]}
                 </span>
               </Check>
             ))}
@@ -333,10 +345,8 @@ export default function FilterPanel({
                   <span className="min-w-0 flex-1 leading-snug">
                     {MESSAGE_STATUS_LABELS[status]}
                   </span>
-                  {/* Counted over the whole table, like every other figure on
-                      this rail — not over the queue the rail is narrowing. */}
                   <span className="tnum shrink-0 font-mono text-meta text-fg-3">
-                    {stats.byMessageStatus[status]}
+                    {counts.byMessageStatus[status]}
                   </span>
                 </Check>
               ))}
@@ -387,7 +397,7 @@ export default function FilterPanel({
                   {LEAD_SOURCE_LABELS[source]}
                 </span>
                 <span className="tnum shrink-0 font-mono text-meta text-fg-3">
-                  {stats.bySource[source]}
+                  {counts.bySource[source]}
                 </span>
               </Check>
             ))}

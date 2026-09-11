@@ -1,6 +1,12 @@
 import { apiModule } from "@/lib/authz";
 import { demoFilterCounts, demoSummariesFor } from "@/lib/demoWebsites";
-import { leadCategories, leadStats, leadWorkCounts, listLeadsPage } from "@/lib/leadDb";
+import {
+  leadCategories,
+  leadQueueFacets,
+  leadStats,
+  leadWorkCounts,
+  listLeadsPage,
+} from "@/lib/leadDb";
 import { todayIso } from "@/lib/leadUtils";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
 import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
@@ -35,6 +41,8 @@ import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
  *   stats       workspace-wide counts (see `leadStats`) — unfiltered by design
  *   workCounts  how many leads are New and how many Called (`lib/workState.ts`),
  *               likewise unfiltered — these are the tab badges
+ *   queueFacets the counts beside the Status, Message and Source checkboxes,
+ *               over the requested queue (`?work=`) but not the filters
  *   categories  only when `?categories=1`, because the list changes with an
  *               import and not with a keystroke
  *   demos       only when `?section=demo` — the demo image and link belonging
@@ -128,10 +136,11 @@ export async function GET(request: Request): Promise<Response> {
     // `workCounts` rides along with `stats` — including on the `?rows=0`
     // request, so saving a call outcome moves the New and Called badges on the
     // same tick as the headline figures rather than a page load later.
-    const [page, stats, workCounts, categories] = await Promise.all([
+    const [page, stats, workCounts, queueFacets, categories] = await Promise.all([
       wantRows ? listLeadsPage(query) : Promise.resolve(null),
       leadStats(query.today),
       leadWorkCounts(),
+      leadQueueFacets(query.workState),
       wantCategories ? leadCategories() : Promise.resolve(null),
     ]);
 
@@ -179,6 +188,7 @@ export async function GET(request: Request): Promise<Response> {
           : {}),
         stats,
         workCounts,
+        queueFacets,
         ...(demos ? { demos } : {}),
         ...(demoCounts ? { demoCounts } : {}),
         ...(categories ? { categories } : {}),

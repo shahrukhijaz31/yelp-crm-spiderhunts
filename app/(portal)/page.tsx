@@ -5,7 +5,7 @@ import Worklist from "@/components/Worklist";
 import { requireModule } from "@/lib/authz";
 import { landingPathFor } from "@/lib/modules";
 import { EMPTY_FILTERS } from "@/lib/filters";
-import { leadCategories, leadCountries, listLeadsPage } from "@/lib/leadDb";
+import { leadCategories, leadCountries, leadQueueFacets, listLeadsPage } from "@/lib/leadDb";
 import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
 import { DEFAULT_WORK_STATE } from "@/lib/workState";
@@ -92,9 +92,12 @@ export default async function Home(props: PageProps<"/">) {
   // The location lists are read on the same terms and for the same reason: the
   // countries and towns in the table change with an import, not with a
   // keystroke. Concurrent, because neither aggregate depends on the other.
-  const [categories, countries] = await Promise.all([
+  // The filter rail's checkbox counts for the queue the screen opens on, so the
+  // first paint does not show workspace-wide numbers under the New queue.
+  const [categories, countries, queueFacets] = await Promise.all([
     leadCategories(),
     leadCountries(),
+    leadQueueFacets(DEFAULT_WORK_STATE),
   ]);
 
   return (
@@ -108,6 +111,7 @@ export default async function Home(props: PageProps<"/">) {
       }}
       initialCategories={categories}
       initialCountries={countries}
+      initialQueueFacets={queueFacets}
       serverToday={today}
     />
   );

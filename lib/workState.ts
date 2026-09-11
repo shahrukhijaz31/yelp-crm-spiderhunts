@@ -24,7 +24,14 @@
  * No Prisma and no React here: imported by a client component, a server
  * component and a route handler alike.
  */
-export const LEAD_WORK_STATES = ["new", "called"] as const;
+/**
+ * `sms` is the odd one out: not a half of the New/Called split but a slice
+ * across it. It holds every lead whose message status is SMS sent or WhatsApp
+ * sent, whether or not anyone has rung it yet — so a texted lead that has not
+ * been called is in New *and* SMS Sent, and stays in New until a call outcome
+ * is saved, exactly as it would have without the message.
+ */
+export const LEAD_WORK_STATES = ["new", "called", "sms"] as const;
 
 export type LeadWorkState = (typeof LEAD_WORK_STATES)[number];
 
@@ -40,17 +47,20 @@ export const DEFAULT_WORK_STATE: LeadWorkState = "new";
 export const LEAD_WORK_STATE_LABELS: Record<LeadWorkState, string> = {
   new: "New",
   called: "Called",
+  sms: "SMS Sent",
 };
 
 /** Shown beside the control so the current queue is never ambiguous. */
 export const LEAD_WORK_STATE_HINTS: Record<LeadWorkState, string> = {
   new: "Never called — work these top to bottom.",
   called: "Worked at least once, most recently worked first.",
+  sms: "Sent an SMS or WhatsApp, called or not — most recently worked first.",
 };
 
 /**
- * How many leads sit in each queue. Every lead is in exactly one, so the two
- * always add up to the size of the table.
+ * How many leads sit in each queue. Every lead is in exactly one of New and
+ * Called, so those two add up to the size of the table; SMS Sent overlaps both
+ * and is not part of that sum.
  *
  * Declared here rather than next to the query that produces it (`leadWorkCounts`
  * in `lib/leadDb.ts`) so the client component drawing the badges can name the

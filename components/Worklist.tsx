@@ -43,6 +43,7 @@ import {
 } from "@/lib/leadQuery";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
+import type { LeadQueueFacets } from "@/lib/leadDb";
 import { WORKLIST_VIEW_HINTS, viewsFor, type WorklistView } from "@/lib/views";
 import {
   DEFAULT_WORK_STATE,
@@ -135,6 +136,7 @@ export default function Worklist({
   initialCountries,
   initialDemos,
   initialDemoCounts,
+  initialQueueFacets,
   section = "leads",
   serverToday,
 }: {
@@ -149,6 +151,8 @@ export default function Worklist({
   initialDemos?: DemoSummaryMap;
   /** The demo filter's counts for the first paint. Demo view only. */
   initialDemoCounts?: DemoCounts;
+  /** The filter rail's counts for the default queue, for the first paint. */
+  initialQueueFacets?: LeadQueueFacets;
   /**
    * Which of the two views this is.
    *
@@ -235,6 +239,22 @@ export default function Worklist({
    * the page and is replaced by each response.
    */
   const [demoCounts, setDemoCounts] = useState<DemoCounts | undefined>(initialDemoCounts);
+
+  /**
+   * The counts beside the Status, Message and Source checkboxes, over the queue
+   * on screen rather than the whole workspace (see `leadQueueFacets`).
+   *
+   * Tagged with the queue they were counted for. Switching queue fires a new
+   * request, and until it answers the rail falls back to the workspace-wide
+   * `stats` rather than showing the previous queue's numbers under the new
+   * queue's name.
+   */
+  const [queueFacets, setQueueFacets] = useState<{
+    workState: LeadWorkState;
+    facets: LeadQueueFacets;
+  } | null>(
+    initialQueueFacets ? { workState: DEFAULT_WORK_STATE, facets: initialQueueFacets } : null,
+  );
 
   /*
    * Which lead is open over this list, and where in the list it was.
@@ -400,6 +420,7 @@ export default function Worklist({
           leads: Lead[];
           stats: LeadStats;
           workCounts: LeadWorkCounts;
+          queueFacets?: LeadQueueFacets;
           demos?: DemoSummaryMap;
           demoCounts?: DemoCounts;
         };
@@ -445,6 +466,9 @@ export default function Worklist({
         if (data.page !== request.page) setPage(data.page);
         setStats(data.stats);
         if (data.workCounts) setWorkCounts(data.workCounts);
+        if (data.queueFacets) {
+          setQueueFacets({ workState: request.workState, facets: data.queueFacets });
+        }
         setError(null);
       } catch (caught) {
         // An aborted request is this component superseding itself, not a
@@ -577,20 +601,30 @@ export default function Worklist({
   const refreshStats = useCallback(() => {
     if (statsTimer.current) clearTimeout(statsTimer.current);
     statsTimer.current = setTimeout(() => {
-      // The counts ignore the tab and the filters, so the only thing this
-      // request carries is the agent's date — which decides what "overdue" and
-      // "due today" mean.
+      // The counts ignore the tab and the filters, so this request carries the
+      // agent's date — which decides what "overdue" and "due today" mean — and
+      // the queue, which is what the filter rail's counts are scoped to.
       const params = new URLSearchParams({ rows: "0", today });
+      if (workState !== DEFAULT_WORK_STATE) params.set("work", workState);
       void fetch(`/api/leads?${params}`)
         .then((response) => (response.ok ? response.json() : null))
-        .then((data: { stats: LeadStats; workCounts: LeadWorkCounts } | null) => {
-          if (!data) return;
-          setStats(data.stats);
-          if (data.workCounts) setWorkCounts(data.workCounts);
-        })
+        .then(
+          (
+            data: {
+              stats: LeadStats;
+              workCounts: LeadWorkCounts;
+              queueFacets?: LeadQueueFacets;
+            } | null,
+          ) => {
+            if (!data) return;
+            setStats(data.stats);
+            if (data.workCounts) setWorkCounts(data.workCounts);
+            if (data.queueFacets) setQueueFacets({ workState, facets: data.queueFacets });
+          },
+        )
         .catch((caught) => console.error("Refreshing lead counts failed:", caught));
     }, STATS_REFRESH_DEBOUNCE_MS);
-  }, [today, setStats, setWorkCounts]);
+  }, [today, workState, setStats, setWorkCounts]);
 
   useEffect(() => {
     function onReturn() {
@@ -813,7 +847,11 @@ export default function Worklist({
               <span
                 aria-hidden="true"
                 className={`queue-dot ${
-                  workState === "new" ? "bg-st-sky" : "bg-fg-4"
+                  workState === "new"
+                    ? "bg-st-sky"
+                    : workState === "sms"
+                      ? "bg-st-teal"
+                      : "bg-fg-4"
                 }`}
               />
               {LEAD_WORK_STATE_LABELS[workState]}
@@ -854,6 +892,7 @@ export default function Worklist({
             categories={initialCategories}
             countries={initialCountries}
             stats={stats}
+            facets={queueFacets?.workState === workState ? queueFacets.facets : undefined}
             shown={meta.total}
             open={filtersOpen}
             onToggleOpen={() => setFiltersOpen((open) => !open)}
