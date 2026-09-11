@@ -16,6 +16,17 @@ import { normalisePhone } from "./leadUtils";
  */
 const DEFAULT_COUNTRY_CODE = "1";
 
+/**
+ * Assumed for a number written with a national `0` trunk prefix, as UK numbers
+ * are (`07756 202414`, `020 7946 0000`). No country code starts with `0`, so
+ * such a number can never be passed through as-is: `wa.me/07756202414` just
+ * opens WhatsApp without a chat. The `0` is dropped and `44` put in its place.
+ */
+const TRUNK_PREFIX_COUNTRY_CODE = "44";
+
+/** A UK national number with its trunk `0`: `0` + 10 digits. */
+const TRUNK_PREFIXED_DIGITS = 11;
+
 /** Shortest plausible international number (country code + subscriber). */
 const MIN_INTERNATIONAL_DIGITS = 8;
 
@@ -40,14 +51,23 @@ export function whatsappNumber(phone: string | null): string | null {
   const explicitlyInternational = trimmed.startsWith("+") || digits.startsWith("00");
   const bare = digits.startsWith("00") ? digits.slice(2) : digits;
 
-  const resolved =
-    explicitlyInternational || bare.length > 10
-      ? bare
-      : bare.length === 10
-        ? // A bare NANP number: area code present, country code implied.
-          DEFAULT_COUNTRY_CODE + bare
-        : // 7-9 digits with no country code — local, and not recoverable.
-          null;
+  const resolved = explicitlyInternational
+    ? // `+44 (0)7756 202414` keeps the trunk `0` after the country code.
+      bare.startsWith(TRUNK_PREFIX_COUNTRY_CODE + "0")
+      ? TRUNK_PREFIX_COUNTRY_CODE + bare.slice(TRUNK_PREFIX_COUNTRY_CODE.length + 1)
+      : bare
+    : bare.startsWith("0")
+      ? bare.length === TRUNK_PREFIXED_DIGITS
+        ? TRUNK_PREFIX_COUNTRY_CODE + bare.slice(1)
+        : // Trunk-prefixed, but not a UK length — the country is a guess.
+          null
+      : bare.length > 10
+        ? bare
+        : bare.length === 10
+          ? // A bare NANP number: area code present, country code implied.
+            DEFAULT_COUNTRY_CODE + bare
+          : // 7-9 digits with no country code — local, and not recoverable.
+            null;
 
   if (!resolved) return null;
   if (
