@@ -34,7 +34,7 @@ import {
  *
  *   PRIMARY    business name (`text-cell`, medium, full-contrast ink) and
  *              phone (`text-num`, mono, full-contrast ink)
- *   SECONDARY  address, website (`text-ui`, fg-2) then category (fg-3)
+ *   SECONDARY  website (`text-ui`, fg-2) then category (fg-3)
  *   TERTIARY   rating and owner (`text-meta`, quietest step still read)
  *
  * Status and the booked date stay, as **chips rather than controls**. Dropping
@@ -198,10 +198,6 @@ export default function LeadRow({
         </span>
       </td>
 
-      <td className="truncate px-3 py-2 text-ui text-fg-2" title={lead.address}>
-        {lead.address || <Flag>No address</Flag>}
-      </td>
-
       <td className="truncate px-3 py-2 text-ui text-fg-3">
         {lead.categories.length > 0 ? (
           <span title={lead.categories.join(", ")}>
@@ -257,6 +253,14 @@ export default function LeadRow({
           is what the lead's own page is for. */}
       <td className="border-l border-line px-3 py-2">
         <StatusChip status={lead.status} />
+      </td>
+
+      {/* The workspace's Yes / No answer, read-only here. An em dash rather
+          than a "Not checked" chip for the usual case: most of the list has
+          never been checked, and a column of chips saying so would out-shout
+          the handful of rows that carry a real answer. */}
+      <td className="px-3 py-2">
+        <OnWhatsappChip value={lead.onWhatsapp} />
       </td>
 
       {/* The one action left in a read-only row, and it is deliberately the
@@ -380,6 +384,35 @@ export default function LeadRow({
         )}
       </td>
     </tr>
+  );
+}
+
+/**
+ * Whether an agent has checked this number for a WhatsApp account.
+ *
+ * Three states, and the third is the common one: null is "nobody has looked",
+ * and it is drawn as the same em dash every other empty cell in this table
+ * uses rather than as a chip of its own. Only an answer someone actually gave
+ * gets a pill — green for yes, steel for a confirmed no, the same two hues the
+ * status chips use for "went well" and "nothing doing".
+ */
+function OnWhatsappChip({ value }: { value: boolean | null }) {
+  if (value === null) {
+    return <span className="text-fg-4">—</span>;
+  }
+
+  return (
+    <span
+      className={`chip border ${
+        value
+          ? "border-st-green-line bg-st-green-bg text-st-green"
+          : "border-st-steel-line bg-st-steel-bg text-st-steel"
+      }`}
+      title={value ? "On WhatsApp" : "Not on WhatsApp"}
+    >
+      <span aria-hidden="true" className="chip-dot" />
+      {value ? "Yes" : "No"}
+    </span>
   );
 }
 

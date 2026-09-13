@@ -12,7 +12,7 @@ import type { Lead } from "@/lib/types";
 /**
  * Fixed column widths. With `table-fixed` every row is exactly one line tall,
  * so the list keeps a steady vertical rhythm instead of jumping around as
- * business names and addresses wrap — which is what makes 30 rows scannable.
+ * business names and categories wrap — which is what makes 30 rows scannable.
  *
  * **Three columns left this table.** Status, Callback/meeting and Notes were
  * editing surfaces — a dropdown, a booking dialog, a textarea and a Save bar,
@@ -35,7 +35,7 @@ import type { Lead } from "@/lib/types";
 interface Column {
   label: string;
   width: string;
-  /** Present on the four scraped columns a header click can order by. */
+  /** Present on the scraped columns a header click can order by. */
   sortKey?: LeadSortKey;
 }
 
@@ -44,20 +44,22 @@ const COLUMNS: Column[] = [
   // name is what an agent is scanning for *and* the link into the lead's
   // workspace, so it gets both the room for a longer name before truncation
   // and a permanent seat on screen.
-  { label: "Business", width: "23%", sortKey: "name" },
+  { label: "Business", width: "27%", sortKey: "name" },
   // Wider than the number needs: it also carries the WhatsApp glyph, and the
   // cell never wraps, so a tight column would clip one or the other.
-  { label: "Phone", width: "13%", sortKey: "phone" },
-  { label: "Address", width: "17%", sortKey: "address" },
+  { label: "Phone", width: "14%", sortKey: "phone" },
   // Truncates by design and carries the full value in a title tooltip.
-  { label: "Category", width: "10%", sortKey: "category" },
-  { label: "Website", width: "13%" },
+  { label: "Category", width: "12%", sortKey: "category" },
+  { label: "Website", width: "16%" },
   // Sized against their longest content: "Not interested" as a chip, and a
   // date with a time beside it.
   { label: "Status", width: "11%" },
+  // Yes / No / not-yet-checked, and never anything longer, so it needs only
+  // enough room for the widest of the three plus the column heading.
+  { label: "WhatsApp", width: "7%" },
   // One 28px glyph, so this is the narrowest column in the table by some way —
   // the quick upload is an action beside the status, not a feature of the list,
-  // and giving it a chip's worth of room would say otherwise. The four scraped
+  // and giving it a chip's worth of room would say otherwise. The scraped
   // columns each gave up a point to pay for it rather than the table growing.
   { label: "Audio", width: "5%" },
   { label: "Booked", width: "8%" },
@@ -80,15 +82,15 @@ const COLUMNS: Column[] = [
  *
  * The ten columns are paid for out of the eight, a point or two each, rather
  * than by widening the table: the worklist already scrolls sideways below
- * 1180px and adding to that would push the business name off a laptop.
+ * 1100px and adding to that would push the business name off a laptop.
  */
 const DEMO_COLUMNS: Column[] = [
-  { label: "Business", width: "19%", sortKey: "name" },
+  { label: "Business", width: "22%", sortKey: "name" },
   { label: "Phone", width: "11%", sortKey: "phone" },
-  { label: "Address", width: "13%", sortKey: "address" },
-  { label: "Category", width: "8%", sortKey: "category" },
-  { label: "Website", width: "9%" },
+  { label: "Category", width: "9%", sortKey: "category" },
+  { label: "Website", width: "10%" },
   { label: "Status", width: "9%" },
+  { label: "WhatsApp", width: "7%" },
   // Narrow: a 28px control and a 36px thumbnail, the same footprint the Audio
   // column had, because it is the same kind of thing — one action beside the
   // row rather than a feature of the list.
@@ -100,7 +102,7 @@ const DEMO_COLUMNS: Column[] = [
   // order of preference.
   { label: "Demo link 1", width: "9%" },
   { label: "Demo link 2", width: "9%" },
-  { label: "Booked", width: "6%" },
+  { label: "Booked", width: "7%" },
 ];
 
 /**
@@ -180,9 +182,11 @@ export default function LeadTable({
     // rows scroll — the toolbar and the pager stay put, which is what makes a
     // long list feel like a window onto data rather than a long page.
     <div className="min-h-0 flex-1 overflow-auto">
-      {/* 60px more than before, which is what the Audio column needs to hold a
-          28px control between the same 12px gutters every other cell uses. */}
-      <table className="lead-table lead-table-frozen w-full min-w-[1180px] table-fixed border-collapse">
+      {/* 80px narrower than it was, which is what dropping Address bought back
+          net of the WhatsApp column — the point of dropping it. Still wide
+          enough for the Audio column to hold a 28px control between the same
+          12px gutters every other cell uses. */}
+      <table className="lead-table lead-table-frozen w-full min-w-[1100px] table-fixed border-collapse">
         <colgroup>
           {columns.map((column) => (
             <col key={column.label} style={{ width: column.width }} />
