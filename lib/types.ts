@@ -303,10 +303,10 @@ export interface Lead {
    */
   messageStatus: MessageStatus;
   /**
-   * An agent has confirmed this number has a WhatsApp account. False until
-   * someone checks, so it reads "not confirmed", not "not on WhatsApp".
+   * Whether an agent has checked this number for a WhatsApp account: true for
+   * yes, false for confirmed no account, null until someone checks.
    */
-  onWhatsapp: boolean;
+  onWhatsapp: boolean | null;
   notes: string;
   /** ISO `YYYY-MM-DD`, or null when no callback is scheduled. */
   callbackDate: string | null;

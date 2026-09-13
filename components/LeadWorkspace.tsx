@@ -718,27 +718,50 @@ export default function LeadWorkspace({
                   />
                 </div>
 
-                {/* Ticked by hand once the WhatsApp link has shown the number
-                    has an account. Stages like everything else here. Disabled
-                    for a lead with no phone, unless it is already ticked and
-                    needs clearing. */}
-                <label
-                  className={`mt-3 flex w-fit items-center gap-2 rounded-md px-1 py-0.5 text-ui text-fg-2 ${
-                    !lead.phone && !shown.onWhatsapp
-                      ? "cursor-not-allowed opacity-50"
-                      : "cursor-pointer hover:text-fg"
-                  } ${draft?.onWhatsapp !== undefined ? "bg-warning-bg/40" : ""}`}
+                {/* Answered by hand once the WhatsApp link has shown whether
+                    the number has an account. Neither option is lit until
+                    someone checks, and pressing the lit one again clears it
+                    back to unchecked. Stages like everything else here.
+                    Disabled for a lead with no phone, unless it already
+                    carries an answer that needs clearing. */}
+                <div
+                  role="group"
+                  aria-labelledby="ws-on-whatsapp"
+                  className={`mt-3 flex w-fit flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md px-1 py-0.5 ${
+                    draft?.onWhatsapp !== undefined ? "bg-warning-bg/40" : ""
+                  }`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={shown.onWhatsapp}
-                    disabled={!lead.phone && !shown.onWhatsapp}
-                    onChange={(event) => stage({ onWhatsapp: event.target.checked })}
-                    className="h-3.5 w-3.5 shrink-0 accent-accent"
-                  />
-                  <WhatsAppGlyph />
-                  On WhatsApp
-                </label>
+                  <span id="ws-on-whatsapp" className="flex items-center gap-2 text-ui text-fg-2">
+                    <WhatsAppGlyph />
+                    On WhatsApp
+                  </span>
+                  <div className="flex gap-1.5">
+                    {(
+                      [
+                        [true, "Yes"],
+                        [false, "No"],
+                      ] as const
+                    ).map(([value, label]) => {
+                      const active = shown.onWhatsapp === value;
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          aria-pressed={active}
+                          disabled={!lead.phone && shown.onWhatsapp === null}
+                          onClick={() => stage({ onWhatsapp: active ? null : value })}
+                          className={`rounded-md border px-2.5 py-1 text-caption transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                            active
+                              ? "border-accent-line bg-accent-soft font-medium text-accent"
+                              : "border-line bg-surface text-fg-2 hover:border-line-2 hover:text-fg"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 <p className="mt-2 text-meta leading-relaxed text-fg-4">
                   The SMS or WhatsApp thread, recorded apart from the call. It

@@ -1074,8 +1074,8 @@ export function parseLeadEdits(body: unknown): Partial<LeadEditableFields> {
   }
 
   if ("onWhatsapp" in input) {
-    if (typeof input.onWhatsapp !== "boolean") {
-      throw new LeadEditError("onWhatsapp must be true or false.");
+    if (typeof input.onWhatsapp !== "boolean" && input.onWhatsapp !== null) {
+      throw new LeadEditError("onWhatsapp must be true, false or null.");
     }
     edits.onWhatsapp = input.onWhatsapp;
   }

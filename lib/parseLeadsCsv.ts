@@ -281,7 +281,7 @@ export function parseLeadsCsv(
       // Agent-owned fields always start empty on import.
       status: "not_called",
       messageStatus: "not_messaged",
-      onWhatsapp: false,
+      onWhatsapp: null,
       notes: "",
       callbackDate: null,
       meetingTime: null,
