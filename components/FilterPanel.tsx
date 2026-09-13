@@ -25,9 +25,13 @@ import {
   LEAD_SOURCES,
   LEAD_SOURCE_DOTS,
   LEAD_SOURCE_LABELS,
+  WHATSAPP_ANSWERS,
+  WHATSAPP_ANSWER_DOTS,
+  WHATSAPP_ANSWER_LABELS,
   type CallStatus,
   type LeadSource,
   type MessageStatus,
+  type WhatsappAnswer,
 } from "@/lib/types";
 import type { LeadWorkState } from "@/lib/workState";
 import type { LeadQueueFacets } from "@/lib/leadDb";
@@ -170,6 +174,13 @@ export default function FilterPanel({
       ? filters.sources.filter((candidate) => candidate !== source)
       : [...filters.sources, source];
     onChange({ ...filters, sources: next });
+  }
+
+  function toggleWhatsapp(answer: WhatsappAnswer) {
+    const next = filters.whatsapp.includes(answer)
+      ? filters.whatsapp.filter((candidate) => candidate !== answer)
+      : [...filters.whatsapp, answer];
+    onChange({ ...filters, whatsapp: next });
   }
 
   function toggleCategory(name: string) {
@@ -495,6 +506,45 @@ export default function FilterPanel({
             ))}
           </div>
         )}
+
+        {/*
+          * --- WhatsApp ---------------------------------------------------
+          *
+          * Under Location rather than a column of its own, for the reason
+          * Source sits under Status: three checkboxes are not a column's worth.
+          * Offered in every queue — whether a number has WhatsApp is known
+          * before the first call as much as after it.
+          */}
+        <div className="mt-4">
+          <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+            <h3 className="eyebrow">WhatsApp</h3>
+            {filters.whatsapp.length > 0 && (
+              <span className="ml-auto">
+                <Reset onClick={() => onChange({ ...filters, whatsapp: [] })} />
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-y-0.5">
+            {WHATSAPP_ANSWERS.map((answer) => (
+              <Check
+                key={answer}
+                checked={filters.whatsapp.includes(answer)}
+                onChange={() => toggleWhatsapp(answer)}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${WHATSAPP_ANSWER_DOTS[answer]}`}
+                />
+                <span className="min-w-0 flex-1 leading-snug">
+                  {WHATSAPP_ANSWER_LABELS[answer]}
+                </span>
+                <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                  {counts.byWhatsapp[answer].toLocaleString()}
+                </span>
+              </Check>
+            ))}
+          </div>
+        </div>
       </Group>
 
       {/* --- Callback date range -------------------------------------- */}

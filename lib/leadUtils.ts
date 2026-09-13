@@ -2,11 +2,14 @@ import {
   CALL_STATUSES,
   LEAD_SOURCES,
   MESSAGE_STATUSES,
+  WHATSAPP_ANSWERS,
   isCalled,
+  whatsappAnswer,
   type CallStatus,
   type Lead,
   type LeadSource,
   type MessageStatus,
+  type WhatsappAnswer,
 } from "./types";
 
 /** Today's date as `YYYY-MM-DD` in the agent's local timezone. */
@@ -55,6 +58,8 @@ export interface LeadStats {
    * without a click.
    */
   bySource: Record<LeadSource, number>;
+  /** How many leads have each On WhatsApp answer, for the filter panel. */
+  byWhatsapp: Record<WhatsappAnswer, number>;
   callbackDueToday: number;
   callbackOverdue: number;
   /*
@@ -75,6 +80,9 @@ export function computeStats(leads: Lead[], today = todayIso()): LeadStats {
   const bySource = Object.fromEntries(
     LEAD_SOURCES.map((source) => [source, 0]),
   ) as Record<LeadSource, number>;
+  const byWhatsapp = Object.fromEntries(
+    WHATSAPP_ANSWERS.map((answer) => [answer, 0]),
+  ) as Record<WhatsappAnswer, number>;
 
   let called = 0;
   let callbackDueToday = 0;
@@ -85,6 +93,7 @@ export function computeStats(leads: Lead[], today = todayIso()): LeadStats {
     byStatus[lead.status] += 1;
     byMessageStatus[lead.messageStatus] += 1;
     bySource[lead.source] += 1;
+    byWhatsapp[whatsappAnswer(lead.onWhatsapp)] += 1;
     if (isCalled(lead.status)) called += 1;
     if (!lead.website) missingWebsite += 1;
 
@@ -100,6 +109,7 @@ export function computeStats(leads: Lead[], today = todayIso()): LeadStats {
     byStatus,
     byMessageStatus,
     bySource,
+    byWhatsapp,
     callbackDueToday,
     callbackOverdue,
     missingWebsite,

@@ -248,10 +248,10 @@ export default function LeadRow({
       </td>
 
       {/* --- what the agent already decided ---------------------------------
-          Both read-only, and to the right of one vertical hairline: scraped
-          facts on the left, the workspace's answer on the right. Editing them
+          Both read-only: scraped facts on the left, the workspace's answer on
+          the right. Editing them
           is what the lead's own page is for. */}
-      <td className="border-l border-line px-3 py-2">
+      <td className="px-3 py-2">
         <StatusChip status={lead.status} />
       </td>
 

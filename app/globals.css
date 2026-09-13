@@ -2029,6 +2029,20 @@ select option {
      left the frozen column the one stripe-less column in a banded table. */
 }
 
+/* A hairline between every column. The frozen cell's shadow above already
+   draws the first one, so these start at the third column rather than doubling
+   it. The header uses an inset shadow instead of a border for the same reason
+   its bottom rule does: a sticky `border-collapse` cell drops its borders. */
+.lead-table-frozen tbody td:nth-child(n + 3) {
+  border-left: 1px solid var(--c-line);
+}
+
+.lead-table-frozen thead th:nth-child(n + 3) {
+  box-shadow:
+    inset 1px 0 0 0 var(--c-line),
+    0 1px 0 0 var(--c-line);
+}
+
 /* The header's frozen cell has to restate the rail fill, because the rule
    above sets `background` and would otherwise leave one heading on `surface`
    while the seven beside it are on `rail`. */

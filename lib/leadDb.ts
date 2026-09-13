@@ -11,12 +11,14 @@ import {
   CALL_STATUSES,
   LEAD_SOURCES,
   MESSAGE_STATUSES,
+  WHATSAPP_ANSWERS,
   isCalled,
   type CallStatus,
   type Lead,
   type LeadEditableFields,
   type LeadSource,
   type MessageStatus,
+  type WhatsappAnswer,
 } from "./types";
 import type { LeadWorkCounts, LeadWorkState } from "./workState";
 
@@ -209,6 +211,18 @@ function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
     clauses.push(
       Prisma.sql`l.categories && ARRAY[${Prisma.join(filters.categories)}]::text[]`,
     );
+  }
+
+  // --- On WhatsApp: yes / no are the boolean, unknown is its NULL ---
+  if (filters.whatsapp.length > 0) {
+    const arms = filters.whatsapp.map((answer) =>
+      answer === "yes"
+        ? Prisma.sql`l.on_whatsapp = true`
+        : answer === "no"
+          ? Prisma.sql`l.on_whatsapp = false`
+          : Prisma.sql`l.on_whatsapp IS NULL`,
+    );
+    clauses.push(Prisma.sql`(${Prisma.join(arms, " OR ")})`);
   }
 
   /* --- country (lib/leadLocation.ts) ---
@@ -618,6 +632,7 @@ export async function leadStats(today: string): Promise<LeadStats> {
     groups,
     sourceGroups,
     messageGroups,
+    whatsappGroups,
     total,
     callbackDueToday,
     callbackOverdue,
@@ -639,6 +654,9 @@ export async function leadStats(today: string): Promise<LeadStats> {
       // the two breakdowns above it.
       prisma.$queryRaw<{ status: MessageStatus; count: number }[]>(
         Prisma.sql`SELECT message_status::text AS status, count(*)::int AS count FROM leads GROUP BY message_status`,
+      ),
+      prisma.$queryRaw<{ key: WhatsappAnswer; count: number }[]>(
+        Prisma.sql`SELECT ${WHATSAPP_ANSWER_SQL} AS key, count(*)::int AS count FROM leads l GROUP BY 1`,
       ),
       prisma.lead.count(),
       prisma.lead.count({ where: { callbackDate: todayDate } }),
@@ -667,6 +685,11 @@ export async function leadStats(today: string): Promise<LeadStats> {
   ) as Record<MessageStatus, number>;
   for (const group of messageGroups) byMessageStatus[group.status] += group.count;
 
+  const byWhatsapp = Object.fromEntries(
+    WHATSAPP_ANSWERS.map((answer) => [answer, 0]),
+  ) as Record<WhatsappAnswer, number>;
+  for (const group of whatsappGroups) byWhatsapp[group.key] += group.count;
+
   // `isCalled` is "anything but not_called", so the not-called count *is* the
   // uncalled total and there is nothing to add up.
   const notCalled = byStatus.not_called;
@@ -678,6 +701,7 @@ export async function leadStats(today: string): Promise<LeadStats> {
     byStatus,
     byMessageStatus,
     bySource,
+    byWhatsapp,
     callbackDueToday,
     callbackOverdue,
     missingWebsite,
@@ -685,7 +709,13 @@ export async function leadStats(today: string): Promise<LeadStats> {
 }
 
 /** The filter rail's per-option counts, for one queue. */
-export type LeadQueueFacets = Pick<LeadStats, "byStatus" | "byMessageStatus" | "bySource">;
+export type LeadQueueFacets = Pick<
+  LeadStats,
+  "byStatus" | "byMessageStatus" | "bySource" | "byWhatsapp"
+>;
+
+/** `on_whatsapp` as a {@link WhatsappAnswer}, for grouping. */
+const WHATSAPP_ANSWER_SQL = Prisma.sql`CASE WHEN l.on_whatsapp IS NULL THEN 'unknown' WHEN l.on_whatsapp THEN 'yes' ELSE 'no' END`;
 
 /**
  * How many leads in one queue sit behind each Status, Message and Source
@@ -704,7 +734,7 @@ export async function leadQueueFacets(workState: LeadWorkState): Promise<LeadQue
   const queue = workStateSql(workState);
 
   // One transaction, so the three breakdowns describe the same instant.
-  const [statusRows, messageRows, sourceRows] = await prisma.$transaction([
+  const [statusRows, messageRows, sourceRows, whatsappRows] = await prisma.$transaction([
     prisma.$queryRaw<{ key: CallStatus; count: number }[]>(
       Prisma.sql`SELECT l.status::text AS key, count(*)::int AS count FROM leads l WHERE ${queue} GROUP BY l.status`,
     ),
@@ -713,6 +743,9 @@ export async function leadQueueFacets(workState: LeadWorkState): Promise<LeadQue
     ),
     prisma.$queryRaw<{ key: LeadSource; count: number }[]>(
       Prisma.sql`SELECT l.source::text AS key, count(*)::int AS count FROM leads l WHERE ${queue} GROUP BY l.source`,
+    ),
+    prisma.$queryRaw<{ key: WhatsappAnswer; count: number }[]>(
+      Prisma.sql`SELECT ${WHATSAPP_ANSWER_SQL} AS key, count(*)::int AS count FROM leads l WHERE ${queue} GROUP BY 1`,
     ),
   ]);
 
@@ -728,6 +761,7 @@ export async function leadQueueFacets(workState: LeadWorkState): Promise<LeadQue
     byStatus: tally(CALL_STATUSES, statusRows),
     byMessageStatus: tally(MESSAGE_STATUSES, messageRows),
     bySource: tally(LEAD_SOURCES, sourceRows),
+    byWhatsapp: tally(WHATSAPP_ANSWERS, whatsappRows),
   };
 }
 

@@ -14,6 +14,8 @@ import {
   type CallStatus,
   type LeadSource,
   type MessageStatus,
+  WHATSAPP_ANSWERS,
+  type WhatsappAnswer,
 } from "./types";
 import { WORKLIST_VIEWS, type WorklistView } from "./views";
 import {
@@ -201,6 +203,7 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   for (const category of filters.categories) params.append("category", category);
   // Location, repeated per value like the three lists above it.
   for (const country of filters.countries) params.append("country", country);
+  for (const answer of filters.whatsapp) params.append("whatsapp", answer);
 
   // Demo content. Written whatever the section — the demo view is the only
   // thing that sets it, and a URL it produced must survive a copy-paste.
@@ -284,6 +287,12 @@ export function parseLeadSearchParams(
       (value) => value === UNKNOWN_LOCATION || LEAD_COUNTRIES.includes(value),
     );
 
+  const whatsapp = params
+    .getAll("whatsapp")
+    .filter((value): value is WhatsappAnswer =>
+      (WHATSAPP_ANSWERS as readonly string[]).includes(value),
+    );
+
   const section = readOneOf(params.get("section"), LEAD_SECTIONS, DEFAULT_LEAD_SECTION);
 
   const workState = readOneOf(params.get("work"), LEAD_WORK_STATES, DEFAULT_WORK_STATE);
@@ -332,6 +341,7 @@ export function parseLeadSearchParams(
     sources,
     categories,
     countries,
+    whatsapp,
     callback,
     callbackFrom: isIsoDate(callbackFrom) ? callbackFrom : null,
     callbackTo: isIsoDate(callbackTo) ? callbackTo : null,

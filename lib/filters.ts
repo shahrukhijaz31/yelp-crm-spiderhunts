@@ -4,10 +4,13 @@ import {
   CALL_STATUS_LABELS,
   LEAD_SOURCE_LABELS,
   MESSAGE_STATUS_LABELS,
+  WHATSAPP_ANSWER_LABELS,
+  whatsappAnswer,
   type CallStatus,
   type Lead,
   type LeadSource,
   type MessageStatus,
+  type WhatsappAnswer,
 } from "./types";
 
 /**
@@ -108,6 +111,12 @@ export interface LeadFilters {
    * being shown leads the parser could not place.
    */
   countries: string[];
+  /**
+   * The On WhatsApp answer, on the same "empty means all" rule. Offered in
+   * every queue and section: whether a number has WhatsApp is known before the
+   * first call as much as after it.
+   */
+  whatsapp: WhatsappAnswer[];
   callback: CallbackRange;
   /** Inclusive ISO bounds, only read when `callback` is `custom`. */
   callbackFrom: string | null;
@@ -128,6 +137,7 @@ export const EMPTY_FILTERS: LeadFilters = {
   sources: [],
   categories: [],
   countries: [],
+  whatsapp: [],
   callback: "all",
   callbackFrom: null,
   callbackTo: null,
@@ -306,6 +316,12 @@ export function matchesFilters(
     return false;
   }
   if (!matchesLocation(lead.country, filters.countries)) return false;
+  if (
+    filters.whatsapp.length > 0 &&
+    !filters.whatsapp.includes(whatsappAnswer(lead.onWhatsapp))
+  ) {
+    return false;
+  }
   if (!matchesCallback(lead, filters, today, bounds.start, bounds.end)) return false;
   return matchesQuery(lead, filters.query);
 }
@@ -392,6 +408,17 @@ export function describeActiveFilters(filters: LeadFilters): FilterChip[] {
       next: {
         ...filters,
         countries: filters.countries.filter((candidate) => candidate !== country),
+      },
+    });
+  }
+
+  for (const answer of filters.whatsapp) {
+    chips.push({
+      id: `whatsapp:${answer}`,
+      label: WHATSAPP_ANSWER_LABELS[answer],
+      next: {
+        ...filters,
+        whatsapp: filters.whatsapp.filter((candidate) => candidate !== answer),
       },
     });
   }

@@ -213,15 +213,10 @@ export default function LeadTable({
                 // sticky `border-collapse` cell drops its borders in several
                 // browsers.
                 //
-                // The working columns are no longer tinted. A block of
-                // differently-coloured cells running down a table is the
-                // clearest "admin template" tell there is, and it was doing a
-                // job that one vertical hairline before Status does more
-                // quietly: separating what the scraper knows from what the
-                // agent decides.
+                // The column hairlines are drawn there too, for every column.
                 className={`col-head py-2.5 text-left ${
                   index === 0 ? "pl-[18px] pr-3" : "px-3"
-                } ${column.label === "Status" ? "border-l border-line" : ""}`}
+                }`}
               >
                 {column.sortKey ? (
                   <button

@@ -146,6 +146,31 @@ export const MESSAGE_STATUS_DOTS: Record<MessageStatus, string> = {
 };
 
 /**
+ * The On WhatsApp answer as a filter value. The column is a nullable boolean,
+ * and `unknown` is its null — nobody has checked the number yet.
+ */
+export const WHATSAPP_ANSWERS = ["yes", "no", "unknown"] as const;
+
+export type WhatsappAnswer = (typeof WHATSAPP_ANSWERS)[number];
+
+export const WHATSAPP_ANSWER_LABELS: Record<WhatsappAnswer, string> = {
+  yes: "On WhatsApp",
+  no: "Not on WhatsApp",
+  unknown: "Not checked",
+};
+
+/** Same hues as the chip in the WhatsApp column. */
+export const WHATSAPP_ANSWER_DOTS: Record<WhatsappAnswer, string> = {
+  yes: "bg-st-green",
+  no: "bg-st-steel",
+  unknown: "bg-fg-4",
+};
+
+export function whatsappAnswer(value: boolean | null): WhatsappAnswer {
+  return value === null ? "unknown" : value ? "yes" : "no";
+}
+
+/**
  * Which directory a lead was scraped out of.
  *
  * The portal started as a front end for one Yelp scraper, so "where did this
