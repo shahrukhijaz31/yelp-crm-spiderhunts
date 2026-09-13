@@ -12,7 +12,7 @@ import {
   type ProductivityReport,
   type ProductivityTotals,
 } from "./productivityRules";
-import { HAD_INPUT, WEIGHTED_ACTIVITY_SQL } from "./timeTracking";
+import { hadInputSql, WEIGHTED_ACTIVITY_SQL } from "./timeTracking";
 import { NOW_UTC_SQL, OPEN_SESSION_END_SQL, utc } from "./workSessions";
 
 /**
@@ -59,7 +59,7 @@ import { NOW_UTC_SQL, OPEN_SESSION_END_SQL, utc } from "./workSessions";
 
 /*
  * `NOW_UTC_SQL`, `utc()` and `OPEN_SESSION_END_SQL` come from
- * `lib/workSessions.ts`; `HAD_INPUT` and `WEIGHTED_ACTIVITY_SQL` from
+ * `lib/workSessions.ts`; `hadInputSql` and `WEIGHTED_ACTIVITY_SQL` from
  * `lib/timeTracking.ts`. Every one of them is imported rather than restated, so
  * this report cannot drift into disagreeing with the time dashboard about when a
  * stale shift ended or how active an agent was.
@@ -307,7 +307,7 @@ async function activityAggregate(
   const rows = await prisma.$queryRaw<ActivityRow[]>(Prisma.sql`
     SELECT
       ai.user_id,
-      coalesce(sum(ai.duration_seconds) FILTER (WHERE ${HAD_INPUT}), 0)::int AS active_seconds,
+      coalesce(sum(ai.duration_seconds) FILTER (WHERE ${hadInputSql()}), 0)::int AS active_seconds,
       ${WEIGHTED_ACTIVITY_SQL}                                               AS activity_percentage
     FROM activity_intervals ai
     JOIN users u ON u.id = ai.user_id AND ${AGENTS_ONLY}

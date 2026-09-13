@@ -48,8 +48,8 @@ import {
  * So, for any window:
  *
  *   tracked   = overlap of the window with the agent's work sessions
- *   active    = duration of the intervals in the window that had at least one
- *               keyboard or mouse event
+ *   active    = duration of the intervals in the window with a keyboard or
+ *               mouse event inside the idle threshold (see `hadInputSql`)
  *   idle      = tracked − active
  *
  * `idle` therefore includes time no interval covered at all — a stretch when
@@ -90,13 +90,36 @@ import {
  */
 
 /**
- * An interval is "active" when it saw at least one event of either kind.
+ * An interval is "active" when the agent had input within the idle threshold:
+ * an event in the interval itself, or in an earlier interval of the same shift
+ * that ended less than `ACTIVITY_IDLE_THRESHOLD_SECONDS` before this one began.
+ *
+ * This is the Monitor's own rule. The Monitor shows "Working" until the
+ * threshold passes with no input, so an agent reading a lead's notes or on a
+ * call for a couple of minutes is working on both screens. Counting only
+ * minutes that happened to contain a key press made the portal report as idle
+ * time the Monitor was showing as active, and the two had to agree.
+ *
+ * Only gaps *inside* the threshold are covered. Past it the agent is idle on
+ * both screens, and time no interval covered at all is still idle.
  *
  * Exported so `lib/productivity.ts` measures activity with this expression
  * rather than a second copy of it. Both assume the interval table is aliased
- * `ai`, which every query in both files does.
+ * `ai`, which every query in both files does. A function rather than a
+ * constant because the threshold is read at call time, like every policy value.
  */
-export const HAD_INPUT = Prisma.sql`(ai.keyboard_activity_count + ai.mouse_activity_count) > 0`;
+export function hadInputSql(): Prisma.Sql {
+  const thresholdSeconds = inactivityThresholdSeconds();
+
+  return Prisma.sql`EXISTS (
+    SELECT 1
+    FROM activity_intervals recent
+    WHERE recent.work_session_id = ai.work_session_id
+      AND recent.started_at <= ai.started_at
+      AND recent.ended_at > ai.started_at - ${thresholdSeconds} * interval '1 second'
+      AND (recent.keyboard_activity_count + recent.mouse_activity_count) > 0
+  )`;
+}
 
 /**
  * The duration-weighted mean activity percentage, as SQL.
@@ -104,7 +127,7 @@ export const HAD_INPUT = Prisma.sql`(ai.keyboard_activity_count + ai.mouse_activ
  * Weighted by duration for the reason `weightedActivity` gives: intervals are
  * not all the same length, and an unweighted mean would let a 10-second one
  * count as much as a full minute. Exported for the same reason
- * {@link HAD_INPUT} is: the productivity report needs the identical figure, and
+ * {@link hadInputSql} is: the productivity report needs the identical figure, and
  * a second definition of "the activity percentage" is exactly the kind of thing
  * that drifts and then makes two admin screens disagree about one agent. Null — not zero — when there is nothing to
  * average, so "never tracked" and "tracked and idle" stay distinguishable all
@@ -190,7 +213,7 @@ async function intervalTotals(
     SELECT
       ai.user_id,
       coalesce(sum(ai.duration_seconds), 0)::int                          AS observed_seconds,
-      coalesce(sum(ai.duration_seconds) FILTER (WHERE ${HAD_INPUT}), 0)::int AS active_seconds,
+      coalesce(sum(ai.duration_seconds) FILTER (WHERE ${hadInputSql()}), 0)::int AS active_seconds,
       ${WEIGHTED_ACTIVITY_SQL}                                            AS activity_percentage,
       max(ai.ended_at)                                                    AS last_activity_at
     FROM activity_intervals ai
@@ -392,7 +415,7 @@ async function recentSessions(
     FROM work_sessions ws
     LEFT JOIN LATERAL (
       SELECT
-        sum(ai.duration_seconds) FILTER (WHERE ${HAD_INPUT})::int AS active_seconds,
+        sum(ai.duration_seconds) FILTER (WHERE ${hadInputSql()})::int AS active_seconds,
         ${WEIGHTED_ACTIVITY_SQL} AS activity_percentage
       FROM activity_intervals ai
       WHERE ai.work_session_id = ws.id
@@ -766,7 +789,7 @@ export async function timesheet(
       SELECT
         ai.user_id,
         d.day_start,
-        sum(ai.duration_seconds) FILTER (WHERE ${HAD_INPUT})::int AS active_seconds,
+        sum(ai.duration_seconds) FILTER (WHERE ${hadInputSql()})::int AS active_seconds,
         ${WEIGHTED_ACTIVITY_SQL}                                  AS activity_percentage
       FROM days d
       JOIN activity_intervals ai
