@@ -1,5 +1,4 @@
 import type { Role } from "./access";
-import { todayIso } from "./leadUtils";
 
 /**
  * The vocabulary of performance reporting: the shapes, the date presets, the
@@ -60,12 +59,12 @@ export const RANGE_LABELS: Record<RangeKey, string> = {
 
 export interface DateRange {
   /**
-   * Inclusive start instant — local midnight of the first day, except for
+   * Inclusive start instant — the start of the first working day, except for
    * `last10h`, which is a rolling window and starts ten hours before now.
    */
   from: Date;
   /**
-   * Exclusive end instant — local midnight after the last day, except for
+   * Exclusive end instant — the start of the working day after the last, except for
    * `last10h`, where it is the instant the range was resolved.
    */
   to: Date;
@@ -78,22 +77,40 @@ export interface DateRange {
   days: number;
 }
 
-/** Local midnight at the start of `YYYY-MM-DD`. */
-function startOfDay(iso: string): Date {
+/**
+ * When a working day begins: 11:00 in Pakistan, which is 06:00 UTC.
+ *
+ * Not midnight, and not the server's clock. Agents work evening and night
+ * shifts from Pakistan, and the server runs on Europe/Berlin, whose midnight
+ * is 03:00 there — so a calendar day reset every agent's "worked today" in the
+ * middle of their shift. Late morning is the one hour nobody is on the clock.
+ *
+ * A fixed UTC hour rather than a timezone lookup because Pakistan has no
+ * daylight saving: 11:00 there is 06:00 UTC all year, so every day is exactly
+ * 24 hours and the SQL can bucket by subtracting a constant.
+ */
+export const WORKDAY_START_UTC_HOURS = 6;
+const WORKDAY_START_MS = WORKDAY_START_UTC_HOURS * 3_600_000;
+
+/** The instant the working day `YYYY-MM-DD` begins. */
+export function workdayStart(iso: string): Date {
   const [year, month, day] = iso.split("-").map(Number);
-  return new Date(year, (month ?? 1) - 1, day ?? 1, 0, 0, 0, 0);
+  return new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1) + WORKDAY_START_MS);
 }
 
-/** The `YYYY-MM-DD` a Date falls on in the server's own timezone. */
-function localDay(date: Date): string {
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+/** The working day, as `YYYY-MM-DD`, that an instant belongs to. */
+export function workdayOf(date: Date): string {
+  return new Date(date.getTime() - WORKDAY_START_MS).toISOString().slice(0, 10);
+}
+
+/** The working day in progress right now. */
+export function todayWorkday(now = new Date()): string {
+  return workdayOf(now);
 }
 
 export function addDays(iso: string, delta: number): string {
-  const date = startOfDay(iso);
-  date.setDate(date.getDate() + delta);
-  return localDay(date);
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(Date.UTC(year, (month ?? 1) - 1, (day ?? 1) + delta)).toISOString().slice(0, 10);
 }
 
 function isIsoDay(value: unknown): value is string {
@@ -103,10 +120,10 @@ function isIsoDay(value: unknown): value is string {
 /**
  * Turn a preset (or a pair of dates) into a half-open instant range.
  *
- * Days are the *server's* days, the same ones `todayIso()` produces for the
- * worklist's callback highlighting — so "today" means the same thing on the
- * report as it does on the call list, which is the only way the two can be read
- * side by side.
+ * Days are working days ({@link workdayStart}), running from 11:00 to 11:00
+ * Pakistan time, so a night shift lands on one day instead of being cut in two.
+ * The counter in the top bar uses the same boundary, which is what lets its
+ * "today" and this one be read side by side.
  *
  * `last10h` is the exception to all of that, and deliberately so: it is a
  * rolling window off `now`, not a run of days, because a shift that starts in
@@ -130,7 +147,7 @@ export function resolveRange(
   key: string | null | undefined,
   fromParam?: string | null,
   toParam?: string | null,
-  today = todayIso(),
+  today = todayWorkday(),
   now = new Date(),
 ): DateRange {
   const rangeKey: RangeKey = (RANGE_KEYS as readonly string[]).includes(key ?? "")
@@ -142,8 +159,8 @@ export function resolveRange(
   // rounding them to midnight is precisely the thing it exists to avoid.
   if (rangeKey === "last10h") {
     const from = new Date(now.getTime() - SHIFT_WINDOW_HOURS * 3_600_000);
-    const fromDay = localDay(from);
-    const toDay = localDay(now);
+    const fromDay = workdayOf(from);
+    const toDay = workdayOf(now);
     return {
       from,
       to: now,
@@ -188,8 +205,8 @@ export function resolveRange(
       break;
   }
 
-  const from = startOfDay(fromDay);
-  const to = startOfDay(addDays(toDay, 1));
+  const from = workdayStart(fromDay);
+  const to = workdayStart(addDays(toDay, 1));
   const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86_400_000));
 
   const label =
@@ -281,7 +298,7 @@ export interface AgentWorkTime {
   userId: string;
   name: string;
   role: Role;
-  /** Local midnight to now. */
+  /** Start of the working day to now. */
   todaySeconds: number;
   /** The last 7 days including today. */
   weekSeconds: number;
@@ -328,7 +345,7 @@ export interface PersonalPerformance {
   week: PerformanceMetrics;
   /** The seven days behind the chart on `/my-performance`. */
   daily: ActivityDay[];
-  /** The server's today, so the client formats the same day the server counted. */
+  /** The working day, so the client formats the same day the server counted. */
   todayIso: string;
 }
 
@@ -467,6 +484,6 @@ export interface WorkClock {
   completedSecondsToday: number;
   /** The server's clock at the moment this was read, for skew correction. */
   serverNow: string;
-  /** Local midnight, so the client clamps a shift that began yesterday. */
+  /** Start of the working day, so the client clamps a shift that began in the previous one. */
   todayStart: string;
 }

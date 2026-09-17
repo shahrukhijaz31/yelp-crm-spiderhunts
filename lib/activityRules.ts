@@ -416,7 +416,7 @@ export interface TeamTimePayload {
 export interface TimesheetRow {
   userId: string;
   name: string;
-  /** `YYYY-MM-DD`, in the server's timezone. */
+  /** `YYYY-MM-DD`, the working day (11:00 to 11:00 Pakistan time). */
   day: string;
   /** The first shift start that day, or null when nothing was worked. */
   firstStartedAt: string | null;

@@ -737,16 +737,13 @@ export async function timesheet(
   >(Prisma.sql`
     WITH days AS (
       /*
-       * One row per local day in the range, as the naive-UTC instant that local
-       * midnight actually is (see the note on utc() in lib/workSessions.ts).
+       * One row per working day in the range, as the naive-UTC instant that
+       * day starts at (see workdayStart in lib/performanceRules.ts and the note
+       * on utc() in lib/workSessions.ts).
        *
-       * The ordinal matters as much as the instant. Labelling a day with
-       * to_char(day_start) would print the UTC date of a local-midnight
-       * boundary, which east of Greenwich is the *previous* day -- a shift
-       * worked at 1pm on the 12th would appear on the timesheet under the 11th.
-       * So the day is identified by its position in the series and the label is
-       * derived in TypeScript from range.fromDay, which is exact across a
-       * daylight-saving change rather than approximately right.
+       * The ordinal matters as much as the instant. The day is identified by
+       * its position in the series and the label is derived in TypeScript from
+       * range.fromDay, so the label can never disagree with the boundary.
        */
       SELECT
         day_start,

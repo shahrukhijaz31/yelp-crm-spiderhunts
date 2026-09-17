@@ -269,9 +269,9 @@ export function WorkSessionProvider({
     const currentSessionSeconds =
       startedMs === null ? null : Math.max(0, Math.floor((serverNowMs - startedMs) / 1000));
 
-    // The running session's contribution to *today* — clamped at midnight, so a
-    // shift that began yesterday evening adds only the part after it and the
-    // total means "worked today" rather than "worked since I signed in".
+    // The running session's contribution to *today* — clamped at the start of
+    // the working day (11:00 Pakistan time), so the total means "worked today"
+    // rather than "worked since I signed in".
     const todayStartMs = new Date(clock.todayStart).getTime();
     const countFromMs = startedMs === null ? null : Math.max(startedMs, todayStartMs);
     const openSecondsToday =

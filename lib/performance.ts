@@ -1,8 +1,9 @@
 import type { Role } from "./access";
 import { Prisma } from "./generated/prisma/client";
-import { todayIso } from "./leadUtils";
 import {
   addDays,
+  todayWorkday,
+  WORKDAY_START_UTC_HOURS,
   resolveRange,
   ZERO_METRICS,
   type ActivityDay,
@@ -153,15 +154,13 @@ async function activeSecondsAggregate(
 }
 
 /**
- * Activity per calendar day, for the chart.
+ * Activity per working day, for the chart.
  *
- * Bucketed by shifting the stored UTC instant into the server's local day —
- * the same day boundaries {@link resolveRange} uses, so a bar labelled "today"
- * holds exactly what the "Today" preset counts. The offset is taken once, from
- * the middle of the range, so a window that straddles a daylight-saving change
- * can place up to an hour of activity in the neighbouring bar; that is the only
- * inaccuracy anywhere in this module, it is bounded, and it is preferred to
- * carrying a timezone database into a bar chart.
+ * Bucketed by moving the stored UTC instant back to the start of its working
+ * day ({@link WORKDAY_START_UTC_HOURS}) and taking the date — the same day
+ * boundaries {@link resolveRange} uses, so a bar labelled "today" holds exactly
+ * what the "Today" preset counts. The boundary is a fixed UTC hour, so there is
+ * no daylight-saving drift to correct for.
  *
  * Days with nothing in them are filled in afterwards. A chart that silently
  * omits the quiet days is a chart that lies about the shape of a week.
@@ -171,17 +170,12 @@ async function activityByDay(
   userId: string | null,
 ): Promise<ActivityDay[]> {
   const scope = userId ? Prisma.sql`AND a.user_id = ${userId}` : Prisma.empty;
-  // `getTimezoneOffset` counts minutes *behind* UTC, so east of Greenwich is
-  // negative; negating it gives "minutes to add to UTC to get local".
-  const offsetMinutes = -new Date(
-    (range.from.getTime() + range.to.getTime()) / 2,
-  ).getTimezoneOffset();
 
   const rows = await prisma.$queryRaw<
     { day: string; calls: number; leads_worked: number; meetings: number }[]
   >(Prisma.sql`
     SELECT
-      to_char(a.created_at + (${offsetMinutes}::int * interval '1 minute'), 'YYYY-MM-DD') AS day,
+      to_char(a.created_at - (${WORKDAY_START_UTC_HOURS}::int * interval '1 hour'), 'YYYY-MM-DD') AS day,
       count(*) FILTER (WHERE a.kind = 'call_logged')::int                  AS calls,
       count(DISTINCT a.lead_id) FILTER (WHERE a.kind = 'call_logged')::int AS leads_worked,
       count(*) FILTER (WHERE a.kind = 'meeting_booked')::int               AS meetings
@@ -382,7 +376,7 @@ export async function personalPerformance(
  */
 export async function personalPerformanceSummary(
   userId: string,
-  today = todayIso(),
+  today = todayWorkday(),
 ): Promise<PersonalPerformance> {
   const todayRange = resolveRange("today", null, null, today);
   const weekRange = resolveRange("last7", null, null, today);

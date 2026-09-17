@@ -804,8 +804,11 @@ async function main(): Promise<void> {
   );
   check("…and in under three seconds", elapsed < 3000, `${elapsed}ms`);
 
+  // `last7`, not `today`: the shift began six hours ago, so between 06:00 and
+  // 12:00 UTC part of it sits in the previous working day and `today` would
+  // hold fewer than the 500 rows the cap is being tested against.
   const bulkTimeline = await get(
-    `/api/reports/app-usage/timeline?range=today&agent=${alice.id}`,
+    `/api/reports/app-usage/timeline?range=last7&agent=${alice.id}`,
     adminCookie,
   );
   check(

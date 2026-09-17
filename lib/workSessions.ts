@@ -1,5 +1,5 @@
 import { Prisma } from "./generated/prisma/client";
-import { HEARTBEAT_SECONDS, type WorkClock } from "./performanceRules";
+import { HEARTBEAT_SECONDS, todayWorkday, workdayStart, type WorkClock } from "./performanceRules";
 import { prisma } from "./prisma";
 
 /**
@@ -392,9 +392,10 @@ export async function getActiveWorkSession(
  * must not, and it does not, because it is a sum over every session that
  * started today rather than a property of the one in progress.
  *
- * Both halves are clamped to today, so a night shift that began yesterday
- * evening contributes only the part after midnight and the figure means
- * "worked today" rather than "worked since I last signed in".
+ * Both halves are clamped to the working day, which starts at 11:00 Pakistan
+ * time ({@link workdayStart}) rather than midnight — so a night shift is never
+ * cut in two, and the figure still means "worked today" rather than "worked
+ * since I last signed in".
  *
  * Two queries, deliberately not one:
  *
@@ -437,15 +438,13 @@ export async function getWorkClock(userId: string): Promise<WorkClock> {
 }
 
 /**
- * Local midnight, on the server's clock.
+ * The start of the working day in progress.
  *
- * The same day boundary `todayIso()` and the reports use, so "today" means one
- * thing across the whole application — the figure in the top bar and the figure
- * on the admin report are the same day or the pair is untrustworthy.
+ * The same day boundary the reports use, so the figure in the top bar and the
+ * figure on the admin report are the same day or the pair is untrustworthy.
  */
 function startOfToday(): Date {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  return workdayStart(todayWorkday());
 }
 
 /**
