@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
 import {
   DEFAULT_WORK_STATE,
@@ -36,6 +36,12 @@ import {
 interface LeadQueueValue {
   workState: LeadWorkState;
   setWorkState: (next: LeadWorkState) => void;
+  /**
+   * Whether an agent has picked a queue since this page loaded. The worklist
+   * reads it when it mounts: a queue chosen in the sidebar on the way in wins
+   * over the one it remembers from before a reload.
+   */
+  wasQueueChosen: () => boolean;
   /** How many leads are in each queue, workspace-wide. */
   counts: LeadWorkCounts;
   /**
@@ -55,7 +61,13 @@ export function LeadQueueProvider({
   initialCounts: LeadWorkCounts;
   children: React.ReactNode;
 }) {
-  const [workState, setWorkState] = useState<LeadWorkState>(DEFAULT_WORK_STATE);
+  const [workState, setWorkStateValue] = useState<LeadWorkState>(DEFAULT_WORK_STATE);
+  const chosen = useRef(false);
+  const setWorkState = useCallback((next: LeadWorkState) => {
+    chosen.current = true;
+    setWorkStateValue(next);
+  }, []);
+  const wasQueueChosen = useCallback(() => chosen.current, []);
   const [counts, setCountsState] = useState<LeadWorkCounts>(initialCounts);
 
   const setCounts = useCallback((next: LeadWorkCounts) => {
@@ -65,8 +77,8 @@ export function LeadQueueProvider({
   }, []);
 
   const value = useMemo<LeadQueueValue>(
-    () => ({ workState, setWorkState, counts, setCounts }),
-    [workState, counts, setCounts],
+    () => ({ workState, setWorkState, wasQueueChosen, counts, setCounts }),
+    [workState, setWorkState, wasQueueChosen, counts, setCounts],
   );
 
   return <LeadQueueContext.Provider value={value}>{children}</LeadQueueContext.Provider>;

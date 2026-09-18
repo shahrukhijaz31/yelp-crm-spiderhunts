@@ -21,6 +21,7 @@ import MyDayStrip from "./MyDayStrip";
 import Pagination from "./Pagination";
 import ViewTabs from "./ViewTabs";
 import { useLeadQueue } from "./LeadQueueProvider";
+import { loadWorklistPlace, saveWorklistPlace } from "./worklistMemory";
 import { usePortalStats } from "./PortalStatsProvider";
 import type { DemoSummary, DemoSummaryMap } from "@/lib/demoWebsiteRules";
 import {
@@ -178,7 +179,7 @@ export default function Worklist({
   // layout. It starts on the queue the server rendered the first page under.
   // `setWorkCounts` sends the fresh numbers back the other way, so the badges
   // in the rail move when an agent saves an outcome.
-  const { workState, setCounts: setWorkCounts } = useLeadQueue();
+  const { workState, setWorkState, wasQueueChosen, setCounts: setWorkCounts } = useLeadQueue();
 
   const [view, setView] = useState<WorklistView>("all");
   const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS);
@@ -293,7 +294,7 @@ export default function Worklist({
   // Typing is instant — the field, the chips and the Filters badge all follow
   // `filters` — but the *query* waits for a pause. Without this an agent typing
   // a business name fires one request per letter, and the answers race.
-  const query = useDebounced(filters.query, SEARCH_DEBOUNCE_MS);
+  const [query, settleQuery] = useDebounced(filters.query, SEARCH_DEBOUNCE_MS);
   const appliedFilters = useMemo<LeadFilters>(
     () => ({ ...filters, query }),
     [filters, query],
@@ -363,6 +364,52 @@ export default function Worklist({
     setPage(1);
   }
   const effectivePage = lastCriteria === criteriaKey ? page : 1;
+
+  /*
+   * Put the screen back where this tab left it (see `worklistMemory.ts`).
+   *
+   * Once, after the first paint: the server cannot see a tab's session storage,
+   * so it renders the default list and this replaces it with one fetch. Every
+   * piece is set in the same update, and the criteria key is set to match, so
+   * the page-one reset above sees nothing to reset and the remembered page
+   * survives. The search skips its debounce for the same reason — otherwise it
+   * would land 300ms later as a fresh change of criteria and send the agent
+   * back to page one after all.
+   *
+   * A queue picked in the sidebar on the way here wins. Clicking Called from
+   * Meetings means "show me Called", not "show me whatever this tab had".
+   */
+  useEffect(() => {
+    const saved = loadWorklistPlace(section);
+    if (!saved) return;
+    if (wasQueueChosen() && saved.workState !== workState) return;
+    setWorkState(saved.workState);
+    /* eslint-disable react-hooks/set-state-in-effect -- a one-time read of the tab's session storage, which does not exist until after hydration. */
+    setView(saved.view);
+    setFilters(saved.filters);
+    settleQuery(saved.filters.query);
+    setSort(saved.sort);
+    setPageSize(saved.pageSize);
+    setPage(saved.page);
+    setLastCriteria(
+      JSON.stringify([section, saved.workState, saved.view, saved.filters, saved.sort, today]),
+    );
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // Mount only: this reads what the tab remembered, and re-running it on any
+    // later change would undo whatever the agent just did.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Remember every change. The first run is skipped: it holds the defaults the
+  // server rendered, and writing them would erase the place being restored.
+  const placeReady = useRef(false);
+  useEffect(() => {
+    if (!placeReady.current) {
+      placeReady.current = true;
+      return;
+    }
+    saveWorklistPlace(section, { workState, view, filters, sort, page: effectivePage, pageSize });
+  }, [section, workState, view, filters, sort, effectivePage, pageSize]);
 
   // Seeded with the page the server already rendered, which is what stops this
   // screen from fetching on mount the data it was handed.
@@ -993,7 +1040,7 @@ export default function Worklist({
  * considered result; typing is a stream of intermediate states nobody wants an
  * answer to.
  */
-function useDebounced<T>(value: T, delay: number): T {
+function useDebounced<T>(value: T, delay: number): [T, (now: T) => void] {
   const [settled, setSettled] = useState(value);
 
   useEffect(() => {
@@ -1001,5 +1048,7 @@ function useDebounced<T>(value: T, delay: number): T {
     return () => clearTimeout(timer);
   }, [value, delay]);
 
-  return settled;
+  // The setter skips the wait, for a value that is being restored rather than
+  // typed.
+  return [settled, setSettled];
 }
