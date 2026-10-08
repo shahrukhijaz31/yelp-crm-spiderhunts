@@ -75,6 +75,8 @@ export default function LeadOverlay({
   onNext,
   onDemoSaved,
   onSaved,
+  canEditDetails = false,
+  contributorView = false,
 }: {
   leadId: string;
   /** Known from the row that was clicked, so the header paints immediately. */
@@ -97,6 +99,10 @@ export default function LeadOverlay({
   onSaved: (lead: Lead) => void;
   /** A demo image or link saved in the window, for the row behind it. */
   onDemoSaved?: (leadId: string, demo: DemoSummary) => void;
+  /** Offer Edit details — administrators and contributors. */
+  canEditDetails?: boolean;
+  /** A contributor is looking — see the prop of the same name on the workspace. */
+  contributorView?: boolean;
 }) {
   const reduced = useReducedMotion();
 
@@ -316,6 +322,8 @@ export default function LeadOverlay({
             onSaved={onSaved}
             onDemoSaved={onDemoSaved}
             onDirtyChange={setDirty}
+            canEditDetails={canEditDetails}
+            contributorView={contributorView}
           />
         ) : (
           <Placeholder name={leadName} error={error} onClose={onClose} />

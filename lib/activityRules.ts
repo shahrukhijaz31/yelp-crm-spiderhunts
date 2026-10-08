@@ -9,6 +9,7 @@
  * alike. Everything below is pure — input in, a value or a typed error out.
  */
 
+import type { Role } from "./access";
 import { addDays, resolveRange, type DateRange } from "./performanceRules";
 
 /** An expected refusal, carrying the status the route should answer with. */
@@ -338,7 +339,7 @@ export interface EmployeeTimeRow {
   userId: string;
   name: string;
   username: string;
-  role: "ADMIN" | "AGENT";
+  role: Role;
   isActive: boolean;
   online: boolean;
   working: boolean;

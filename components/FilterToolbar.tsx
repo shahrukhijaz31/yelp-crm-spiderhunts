@@ -43,6 +43,7 @@ export default function FilterToolbar({
   section = "leads",
   demoCounts,
   workState,
+  contributor = false,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
@@ -59,6 +60,8 @@ export default function FilterToolbar({
   demoCounts?: DemoCounts;
   /** Also straight through: it decides whether Status is a question worth asking. */
   workState?: LeadWorkState;
+  /** Straight through: a contributor's rail drops Category, Message and WhatsApp. */
+  contributor?: boolean;
 }) {
   const chips = describeActiveFilters(filters);
   const isFiltered = chips.length > 0;
@@ -242,6 +245,7 @@ export default function FilterToolbar({
                 section={section}
                 workState={workState}
                 demoCounts={demoCounts}
+                contributor={contributor}
               />
             </div>
           </motion.div>

@@ -1,4 +1,4 @@
-import { apiModule } from "@/lib/authz";
+import { apiModule, apiRole } from "@/lib/authz";
 import { demoFilterCounts, demoSummariesFor } from "@/lib/demoWebsites";
 import {
   leadCategories,
@@ -6,7 +6,13 @@ import {
   leadStats,
   leadWorkCounts,
   listLeadsPage,
+  parseLeadDetails,
+  parseLeadEdits,
+  createLead,
+  LeadEditError,
+  type NewLeadInput,
 } from "@/lib/leadDb";
+import { leadScopeFor } from "@/lib/leadScope";
 import { todayIso } from "@/lib/leadUtils";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
 import { LEAD_SEARCH_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
@@ -136,12 +142,15 @@ export async function GET(request: Request): Promise<Response> {
     // `workCounts` rides along with `stats` — including on the `?rows=0`
     // request, so saving a call outcome moves the New and Called badges on the
     // same tick as the headline figures rather than a page load later.
+    // Whose leads. A contributor's every figure below is over their own; the
+    // scope comes from the session's role, never from the query string.
+    const scope = leadScopeFor(auth);
     const [page, stats, workCounts, queueFacets, categories] = await Promise.all([
-      wantRows ? listLeadsPage(query) : Promise.resolve(null),
-      leadStats(query.today),
-      leadWorkCounts(),
-      leadQueueFacets(query.workState),
-      wantCategories ? leadCategories() : Promise.resolve(null),
+      wantRows ? listLeadsPage(query, scope) : Promise.resolve(null),
+      leadStats(query.today, scope),
+      leadWorkCounts(scope),
+      leadQueueFacets(query.workState, scope),
+      wantCategories ? leadCategories(scope) : Promise.resolve(null),
     ]);
 
     /*
@@ -203,6 +212,67 @@ export async function GET(request: Request): Promise<Response> {
         error: "database_unavailable",
         message:
           "Could not reach the database. Check that Postgres is running and that DATABASE_URL in .env.local is correct.",
+      },
+      { status: 503 },
+    );
+  }
+}
+
+/**
+ * POST /api/leads — add one lead by hand.
+ *
+ * Administrators and contributors (`canAddLeads`). An agent works the pool
+ * they are given and is refused with the same opaque 403 as anything else.
+ *
+ * The body is the lead's details — `name`, `phone`, `website`, `source` — and,
+ * optionally, a first outcome in the same vocabulary `PATCH /api/leads/:id`
+ * takes: `status`, `notes`, `callbackDate`, `meetingTime` and so on. Both
+ * halves go through the same validators the edit endpoint uses, so the add form
+ * cannot write a value an edit could not.
+ *
+ * The creator is the session's user, never a field in the body: that column is
+ * what scopes the lead to a contributor (`lib/leadScope.ts`), so a body naming
+ * somebody else would be a way to hand them a lead or take one from them.
+ */
+export async function POST(request: Request): Promise<Response> {
+  const auth = await apiRole(["ADMIN", "CONTRIBUTOR"], request);
+  if (auth instanceof Response) return auth;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json(
+      { error: "invalid_json", message: "Request body must be JSON." },
+      { status: 400 },
+    );
+  }
+
+  let input: NewLeadInput;
+  try {
+    input = {
+      ...parseLeadEdits(body),
+      ...(parseLeadDetails(body, "create") as Required<ReturnType<typeof parseLeadDetails>>),
+    };
+  } catch (error) {
+    if (error instanceof LeadEditError) {
+      return Response.json({ error: "invalid_field", message: error.message }, { status: 400 });
+    }
+    throw error;
+  }
+
+  try {
+    const lead = await createLead(input, auth.id);
+    return Response.json(
+      { lead },
+      { status: 201, headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    console.error("POST /api/leads failed:", error);
+    return Response.json(
+      {
+        error: "database_unavailable",
+        message: "Could not reach the database. The lead was not added.",
       },
       { status: 503 },
     );

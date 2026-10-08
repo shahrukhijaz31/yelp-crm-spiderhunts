@@ -1,3 +1,4 @@
+import { TRACKED_ROLES } from "./access";
 import { Prisma } from "./generated/prisma/client";
 import type { DateRange } from "./performanceRules";
 import { prisma } from "./prisma";
@@ -39,8 +40,8 @@ import { NOW_UTC_SQL, OPEN_SESSION_END_SQL, utc } from "./workSessions";
  * ---------------------------------------------------------------------------
  * Administrators are not scored, and it is enforced in SQL
  * ---------------------------------------------------------------------------
- * Every aggregate below joins `users` and filters `u.role = 'AGENT'`, and the
- * row list is built from a query with the same filter. So an administrator does
+ * Every aggregate below joins `users` and filters to the scored roles
+ * (`TRACKED_ROLES`: agents and contributors), and the row list is built from a query with the same filter. So an administrator does
  * not appear with a zero score, or an empty score, or a hidden score — they are
  * absent from the result set before any arithmetic happens, and
  * {@link agentProductivity} answers `null` (a 404 at the route) for an admin id
@@ -65,8 +66,11 @@ import { NOW_UTC_SQL, OPEN_SESSION_END_SQL, utc } from "./workSessions";
  * stale shift ended or how active an agent was.
  */
 
-/** Only agents are scored. Applied in SQL, to every aggregate, without exception. */
-const AGENTS_ONLY = Prisma.sql`u.role = 'AGENT'`;
+/**
+ * Only tracked roles — agents and contributors — are scored. Applied in SQL, to
+ * every aggregate, without exception.
+ */
+const SCORED_ROLES = Prisma.sql`u.role::text IN (${Prisma.join([...TRACKED_ROLES])})`;
 
 /* -------------------------------------------------------------------------- */
 /* Configuration                                                              */
@@ -190,7 +194,7 @@ async function leadWorkAggregate(
           )
         ) AS is_follow_up
       FROM lead_activities a
-      JOIN users u ON u.id = a.user_id AND ${AGENTS_ONLY}
+      JOIN users u ON u.id = a.user_id AND ${SCORED_ROLES}
       WHERE a.created_at >= ${utc(range.from)} AND a.created_at < ${utc(range.to)}
       ${scope}
     )
@@ -274,7 +278,7 @@ async function shiftAggregate(
     JOIN work_sessions ws
       ON ws.started_at < d.day_start + interval '1 day'
      AND coalesce(ws.ended_at, ${NOW_UTC_SQL}) > d.day_start
-    JOIN users u ON u.id = ws.user_id AND ${AGENTS_ONLY}
+    JOIN users u ON u.id = ws.user_id AND ${SCORED_ROLES}
     ${scope}
     GROUP BY ws.user_id
   `);
@@ -310,7 +314,7 @@ async function activityAggregate(
       coalesce(sum(ai.duration_seconds) FILTER (WHERE ${hadInputSql()}), 0)::int AS active_seconds,
       ${WEIGHTED_ACTIVITY_SQL}                                               AS activity_percentage
     FROM activity_intervals ai
-    JOIN users u ON u.id = ai.user_id AND ${AGENTS_ONLY}
+    JOIN users u ON u.id = ai.user_id AND ${SCORED_ROLES}
     WHERE ai.started_at >= ${utc(range.from)} AND ai.started_at < ${utc(range.to)}
     ${scope}
     GROUP BY ai.user_id
@@ -327,7 +331,7 @@ async function activityAggregate(
  * Every agent's figures over a window, scored, unfiltered and unsorted.
  *
  * Five reads, issued concurrently, none of which returns more than one row per
- * agent. Every account with `role = 'AGENT'` is listed, including the ones who
+ * agent. Every agent or contributor account is listed, including the ones who
  * did nothing — an agent with a quiet week is the most useful row on a
  * performance report, and dropping them for having no activity rows would hide
  * exactly that. The same decision `teamPerformance` and `teamTimeTracking`
@@ -343,7 +347,7 @@ async function collectFigures(
       // The role filter is the whole of the "administrators are never scored"
       // rule on this side, and it is a database predicate rather than something
       // dropped later in JavaScript — an admin never enters the result set.
-      where: { role: "AGENT", ...(userId ? { id: userId } : {}) },
+      where: { role: { in: [...TRACKED_ROLES] }, ...(userId ? { id: userId } : {}) },
       select: { id: true, name: true, username: true, isActive: true },
       orderBy: [{ name: "asc" }],
     }),
@@ -351,7 +355,7 @@ async function collectFigures(
     shiftAggregate(range, userId),
     activityAggregate(range, userId),
     prisma.workSession.findMany({
-      where: { endedAt: null, user: { role: "AGENT" }, ...(userId ? { userId } : {}) },
+      where: { endedAt: null, user: { role: { in: [...TRACKED_ROLES] } }, ...(userId ? { userId } : {}) },
       select: { userId: true },
       distinct: ["userId"],
     }),

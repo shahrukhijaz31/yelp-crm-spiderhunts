@@ -18,9 +18,10 @@ import type { Role } from "./access";
  * different feature with a different table, and inventing half of it here
  * would leave a permission model that is neither.
  *
- * It is also not a role. `UserRole` stays exactly two values, ADMIN and AGENT,
- * and no third one was added: an agent with Demo Websites is an agent, and the
- * thing that changed is which screens they are served.
+ * It is also not a role: an agent with Demo Websites is an agent, and the
+ * thing that changed is which screens they are served. The third role,
+ * CONTRIBUTOR, is not a module grant either — it narrows *which leads* rather
+ * than which screens, and its module access is fixed below.
  *
  * ---------------------------------------------------------------------------
  * No imports with a runtime
@@ -77,6 +78,19 @@ export const ADMIN_MODULE_ACCESS: ModuleAccess = Object.freeze({
 });
 
 /**
+ * Contributors, always the same: the Leads workspace (narrowed to their own
+ * leads by `lib/leadScope.ts`) and never Demo Websites.
+ *
+ * Fixed for the same reason an administrator's are: the columns on their row
+ * are never read, so the user list cannot hand a contributor the whole pool
+ * through the Demo Websites view, which is not scoped to a creator.
+ */
+export const CONTRIBUTOR_MODULE_ACCESS: ModuleAccess = Object.freeze({
+  leads: true,
+  demoWebsites: false,
+});
+
+/**
  * What a brand-new agent gets, and what every account that predates Demo
  * Websites kept: the worklist they were already working, and nothing new.
  *
@@ -112,6 +126,7 @@ export interface ModuleAccessColumns {
  */
 export function moduleAccessOf(role: Role, columns: ModuleAccessColumns): ModuleAccess {
   if (role === "ADMIN") return { ...ADMIN_MODULE_ACCESS };
+  if (role === "CONTRIBUTOR") return { ...CONTRIBUTOR_MODULE_ACCESS };
   return {
     leads: columns.canAccessLeads,
     demoWebsites: columns.canAccessDemoWebsites,

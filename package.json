@@ -32,7 +32,8 @@
     "test:security-offline": "tsx scripts/test-security-offline.ts",
     "test:security-live": "tsx scripts/test-security-live.ts",
     "test:capture-health": "tsx scripts/test-capture-health.ts",
-    "test:capture-health-live": "tsx scripts/test-capture-health-live.ts"
+    "test:capture-health-live": "tsx scripts/test-capture-health-live.ts",
+    "test:contributor-leads": "tsx scripts/test-contributor-leads.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

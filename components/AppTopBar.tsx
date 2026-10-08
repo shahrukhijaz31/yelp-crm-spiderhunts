@@ -7,7 +7,7 @@ import SessionTimer from "./SessionTimer";
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
 import { usePortalStats } from "./PortalStatsProvider";
-import type { SessionUser } from "@/lib/access";
+import { isTrackedRole, type SessionUser } from "@/lib/access";
 import { type NavMode } from "@/lib/navPreference";
 
 /**
@@ -213,7 +213,7 @@ export default function AppTopBar({
          * This is a label, not a permission: the work session still exists and
          * still beats, because the heartbeat is what keeps `work_sessions`
          * honest for everyone. Only the readout is role-specific. */}
-        {user.role === "AGENT" && <SessionTimer />}
+        {isTrackedRole(user.role) && <SessionTimer />}
 
         <p className="hidden text-caption text-fg-3 2xl:block">{longDate(today)}</p>
 

@@ -10,11 +10,13 @@ import {
 } from "react";
 
 import { AnimatePresence } from "framer-motion";
+import { Plus } from "lucide-react";
 
 import Breakdown from "./Breakdown";
 import type { DemoCounts } from "./FilterPanel";
 import FilterToolbar from "./FilterToolbar";
 import HeadlineStrip from "./HeadlineStrip";
+import LeadFormDialog from "./LeadFormDialog";
 import LeadOverlay from "./LeadOverlay";
 import LeadTable from "./LeadTable";
 import MyDayStrip from "./MyDayStrip";
@@ -140,6 +142,9 @@ export default function Worklist({
   initialQueueFacets,
   section = "leads",
   serverToday,
+  canAddLeads = false,
+  canEditDetails = false,
+  contributorColumns = false,
 }: {
   initialLeads: Lead[];
   initialMeta: LeadPageMeta;
@@ -170,6 +175,15 @@ export default function Worklist({
    */
   section?: LeadSection;
   serverToday: string;
+  /**
+   * Draw the Add lead button. Administrators and contributors
+   * (`canAddLeads`); `POST /api/leads` checks the role again for itself.
+   */
+  canAddLeads?: boolean;
+  /** Offer Edit details in the lead window. Same roles, same server check. */
+  canEditDetails?: boolean;
+  /** Draw a contributor's columns — see `CONTRIBUTOR_COLUMNS`. */
+  contributorColumns?: boolean;
 }) {
   const demoSection = section === "demo";
   const { stats, setStats } = usePortalStats();
@@ -179,7 +193,14 @@ export default function Worklist({
   // layout. It starts on the queue the server rendered the first page under.
   // `setWorkCounts` sends the fresh numbers back the other way, so the badges
   // in the rail move when an agent saves an outcome.
-  const { workState, setWorkState, wasQueueChosen, setCounts: setWorkCounts } = useLeadQueue();
+  const {
+    workState,
+    setWorkState,
+    wasQueueChosen,
+    setCounts: setWorkCounts,
+    queues,
+    defaultQueue,
+  } = useLeadQueue();
 
   const [view, setView] = useState<WorklistView>("all");
   const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS);
@@ -196,6 +217,13 @@ export default function Worklist({
   // business knowing what they are or where they come from.
   const [dayRevision, setDayRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // The Add lead dialog, and a counter that re-runs the page query once a lead
+  // has been added — the new row has to appear without the agent touching a
+  // filter. See the fetch effect, which forgets its settled key when it moves.
+  const [adding, setAdding] = useState(false);
+  const [reloadRevision, setReloadRevision] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -254,7 +282,7 @@ export default function Worklist({
     workState: LeadWorkState;
     facets: LeadQueueFacets;
   } | null>(
-    initialQueueFacets ? { workState: DEFAULT_WORK_STATE, facets: initialQueueFacets } : null,
+    initialQueueFacets ? { workState: defaultQueue, facets: initialQueueFacets } : null,
   );
 
   /*
@@ -383,6 +411,9 @@ export default function Worklist({
     const saved = loadWorklistPlace(section);
     if (!saved) return;
     if (wasQueueChosen() && saved.workState !== workState) return;
+    // A queue this person is not given (the tab was last used under another
+    // role) is not restored — there would be no rail item to leave it by.
+    if (!queues.includes(saved.workState)) return;
     setWorkState(saved.workState);
     /* eslint-disable react-hooks/set-state-in-effect -- a one-time read of the tab's session storage, which does not exist until after hydration. */
     setView(saved.view);
@@ -416,7 +447,7 @@ export default function Worklist({
   const settledKey = useRef(
     fetchKey(
       section,
-      DEFAULT_WORK_STATE,
+      defaultQueue,
       "all",
       EMPTY_FILTERS,
       DEFAULT_SORT,
@@ -426,7 +457,14 @@ export default function Worklist({
     ),
   );
 
+  const lastReload = useRef(reloadRevision);
+
   useEffect(() => {
+    // A lead was just added: same criteria, new answer, so this is a real fetch.
+    if (lastReload.current !== reloadRevision) {
+      lastReload.current = reloadRevision;
+      settledKey.current = "";
+    }
     const request = {
       section,
       workState,
@@ -545,6 +583,7 @@ export default function Worklist({
     pageSize,
     setStats,
     setWorkCounts,
+    reloadRevision,
   ]);
 
   useEffect(() => {
@@ -653,6 +692,8 @@ export default function Worklist({
       // the queue, which is what the filter rail's counts are scoped to.
       const params = new URLSearchParams({ rows: "0", today });
       if (workState !== DEFAULT_WORK_STATE) params.set("work", workState);
+      // `DEFAULT_WORK_STATE` above is the URL vocabulary's default ("new"), not
+      // this person's — omitting it is what the server reads as "new".
       void fetch(`/api/leads?${params}`)
         .then((response) => (response.ok ? response.json() : null))
         .then(
@@ -920,10 +961,34 @@ export default function Worklist({
               rather than under it: it is a caption for the segment that is
               selected, and putting it on its own row cost a whole band of
               vertical space to say six words. */}
-          <p className="hidden text-caption text-fg-3 xl:block">
-            {WORKLIST_VIEW_HINTS[view]}
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="hidden text-caption text-fg-3 xl:block">
+              {WORKLIST_VIEW_HINTS[view]}
+            </p>
+            {canAddLeads && !demoSection && (
+              <button
+                type="button"
+                onClick={() => {
+                  setNotice(null);
+                  setAdding(true);
+                }}
+                className="ui-btn ui-btn-primary h-8 px-3"
+              >
+                <Plus className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
+                Add lead
+              </button>
+            )}
+          </div>
         </div>
+
+        {notice && (
+          <p
+            role="status"
+            className="border-b border-line bg-recessed px-4 py-2 text-caption text-fg-2"
+          >
+            {notice}
+          </p>
+        )}
 
         {breakdownOpen && (
           <div className="border-b border-line bg-recessed px-4 py-4">
@@ -946,6 +1011,7 @@ export default function Worklist({
             section={section}
             workState={workState}
             demoCounts={demoCounts}
+            contributor={contributorColumns}
           />
         </div>
 
@@ -973,6 +1039,7 @@ export default function Worklist({
             leads={leads}
             today={today}
             section={section}
+            contributor={contributorColumns}
             sort={sort}
             onSort={cycleSort}
             hrefFor={hrefFor}
@@ -1026,9 +1093,23 @@ export default function Worklist({
             onPrev={hasPrev ? goPrev : null}
             onNext={hasNext ? goNext : null}
             onSaved={handleSaved}
+            canEditDetails={canEditDetails}
+            contributorView={contributorColumns}
           />
         )}
       </AnimatePresence>
+
+      {adding && (
+        <LeadFormDialog
+          mode="add"
+          onClose={() => setAdding(false)}
+          onSaved={(lead) => {
+            setNotice(`${lead.name} was added.`);
+            setReloadRevision((current) => current + 1);
+            setDayRevision((current) => current + 1);
+          }}
+        />
+      )}
     </main>
   );
 }

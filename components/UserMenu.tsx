@@ -7,7 +7,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, KeyRound, LogOut, MonitorDown } from "lucide-react";
 
 import { useWorkSession } from "./WorkSessionProvider";
-import { LOGIN_PATH, type SessionUser } from "@/lib/access";
+import { LOGIN_PATH, isTrackedRole, type SessionUser } from "@/lib/access";
 import { formatWorkClock } from "@/lib/performanceRules";
 
 /**
@@ -185,7 +185,7 @@ export default function UserMenu({ user }: { user: SessionUser }) {
            * reader. The session itself is unaffected: this is which figures are
            * drawn, not who gets a `work_sessions` row.
            */}
-          {user.role === "AGENT" && <SessionRow />}
+          {isTrackedRole(user.role) && <SessionRow />}
 
           <Link
             ref={itemRef}
@@ -290,7 +290,11 @@ function SessionRow() {
   );
 }
 
-const ROLE_LABELS = { ADMIN: "Administrator", AGENT: "Agent" } as const;
+const ROLE_LABELS = {
+  ADMIN: "Administrator",
+  AGENT: "Agent",
+  CONTRIBUTOR: "Contributor",
+} as const satisfies Record<SessionUser["role"], string>;
 
 /**
  * Admin is marked in the accent — the app's one signal colour. It is the rarer,

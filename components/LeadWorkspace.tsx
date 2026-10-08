@@ -19,6 +19,7 @@ import {
   Check,
   Globe,
   MapPin,
+  PenLine,
   Phone,
   PhoneOff,
   RotateCcw,
@@ -30,10 +31,12 @@ import BookMeetingDialog from "./BookMeetingDialog";
 import CallRecordingPanel from "./CallRecordingPanel";
 import DemoWebsitePanel from "./DemoWebsitePanel";
 import LeadActivity from "./LeadActivity";
+import LeadFormDialog from "./LeadFormDialog";
 import StatusPicker from "./StatusPicker";
 import { StatusChip } from "./StatusSelect";
 import { callbackState, displayWebsite, websiteHref } from "@/lib/leadUtils";
 import { formatMeetingDay, formatMeetingTime, isMeetingLead } from "@/lib/meetings";
+import type { LeadChangeEntry } from "@/lib/leadChangeRules";
 import type { LeadDetail } from "@/lib/leadDb";
 import type { DemoSummary } from "@/lib/demoWebsiteRules";
 import type { LeadSection } from "@/lib/leadQuery";
@@ -177,6 +180,8 @@ export default function LeadWorkspace({
   onSaved,
   onDemoSaved,
   onDirtyChange,
+  canEditDetails = false,
+  contributorView = false,
 }: {
   detail: LeadDetail;
   initialRecording: RecordingSummary | null;
@@ -213,6 +218,18 @@ export default function LeadWorkspace({
    * agent has just typed.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Offer Edit details — the name, phone, website and source. Administrators,
+   * and contributors on their own leads; the PATCH re-checks the role and an
+   * agent's body has those keys ignored.
+   */
+  canEditDetails?: boolean;
+  /**
+   * A contributor is looking. Hides what their hand-added leads never carry —
+   * category, rating, owner — and the message status, which they do not use.
+   * Display only: the PATCH accepts the same fields whoever sends it.
+   */
+  contributorView?: boolean;
 }) {
   const overlay = nav.variant === "overlay";
   const router = useRouter();
@@ -224,6 +241,11 @@ export default function LeadWorkspace({
   const [lead, setLead] = useState<Lead>(detail.lead);
   const [recording, setRecording] = useState<RecordingSummary | null>(initialRecording);
   const [demo, setDemo] = useState<DemoSummary | null>(initialDemo);
+  // The change history. Replaced by the one every save returns, so the panel
+  // shows the edit just made in the overlay too, where nothing re-renders the
+  // server component behind it.
+  const [changes, setChanges] = useState<LeadChangeEntry[]>(detail.changes);
+  const [editingDetails, setEditingDetails] = useState(false);
 
   /** Pending edits. `null` means clean. */
   const [draft, setDraft] = useState<Partial<LeadEditableFields> | null>(null);
@@ -275,6 +297,26 @@ export default function LeadWorkspace({
     [lead],
   );
 
+  /**
+   * A contributor writes a fresh note per call rather than editing one long
+   * one: the box opens empty, and saving replaces the lead's note with the new
+   * one. Nothing is lost — every saved note is in the Activity history
+   * (`lead_changes`), which is where the previous ones are read.
+   *
+   * Staged directly rather than through `stage`, which drops a value equal to
+   * the saved one — here the comparison is with an empty box, not the old note.
+   */
+  const stageNote = useCallback((text: string) => {
+    setJustSaved(false);
+    setError(null);
+    setDraft((current) => {
+      const next: Partial<LeadEditableFields> = { ...current };
+      if (text.trim() === "") delete next.notes;
+      else next.notes = text;
+      return Object.keys(next).length > 0 ? next : null;
+    });
+  }, []);
+
   const discard = useCallback(() => {
     setDraft(null);
     setError(null);
@@ -300,8 +342,9 @@ export default function LeadWorkspace({
         );
       }
 
-      const payload = (await response.json()) as { lead: Lead };
+      const payload = (await response.json()) as { lead: Lead; changes?: LeadChangeEntry[] };
       setLead(payload.lead);
+      if (payload.changes) setChanges(payload.changes);
       setDraft(null);
       setJustSaved(true);
       if (savedTimer.current) clearTimeout(savedTimer.current);
@@ -509,6 +552,17 @@ export default function LeadWorkspace({
             />
           </a>
         )}
+
+        {canEditDetails && (
+          <button
+            type="button"
+            onClick={() => setEditingDetails(true)}
+            className={`ui-btn ui-btn-ghost px-3 ${overlay ? "h-9" : "h-10"}`}
+          >
+            <PenLine className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden="true" />
+            Edit details
+          </button>
+        )}
       </div>
     </>
   );
@@ -563,17 +617,23 @@ export default function LeadWorkspace({
             {lead.address || null}
           </Fact>
 
-          <Fact label="Category" span>
-            {lead.categories.length > 0 ? lead.categories.join(", ") : null}
-          </Fact>
+          {/* Scraped facts. A contributor's leads are typed in by hand and
+              never have them, so the three empty cells are not drawn. */}
+          {!contributorView && (
+            <>
+              <Fact label="Category" span>
+                {lead.categories.length > 0 ? lead.categories.join(", ") : null}
+              </Fact>
 
-          <Fact label="Rating">
-            {lead.rating !== null ? (
-              <span className="tnum font-mono">{lead.rating.toFixed(1)} / 5</span>
-            ) : null}
-          </Fact>
+              <Fact label="Rating">
+                {lead.rating !== null ? (
+                  <span className="tnum font-mono">{lead.rating.toFixed(1)} / 5</span>
+                ) : null}
+              </Fact>
 
-          <Fact label="Owner">{lead.owner}</Fact>
+              <Fact label="Owner">{lead.owner}</Fact>
+            </>
+          )}
 
           {/*
             * Where this lead came from, and the page it came from.
@@ -639,8 +699,15 @@ export default function LeadWorkspace({
             * to three lines each.
             */}
           <div className="ws-block-wrap">
-            <div className="grid grid-cols-1 gap-y-5 sm:grid-cols-2 sm:gap-y-0 sm:divide-x sm:divide-line">
-              <section aria-labelledby="ws-status" className="ws-block sm:pr-5">
+            <div
+              className={`grid grid-cols-1 gap-y-5 sm:gap-y-0 ${
+                contributorView ? "" : "sm:grid-cols-2 sm:divide-x sm:divide-line"
+              }`}
+            >
+              <section
+                aria-labelledby="ws-status"
+                className={`ws-block ${contributorView ? "" : "sm:pr-5"}`}
+              >
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <h2 id="ws-status" className="eyebrow">
                     Lead status
@@ -689,85 +756,87 @@ export default function LeadWorkspace({
                 * lead out of the New queue and is not counted as a call, which
                 * is `isCalled`'s rule on the server and not this screen's.
                 */}
-              <section aria-labelledby="ws-message" className="ws-block sm:pl-5">
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <h2 id="ws-message" className="eyebrow">
-                    Message status
-                  </h2>
-                  {draft?.messageStatus !== undefined && (
-                    <span className="text-meta text-fg-3">
-                      was{" "}
-                      <span className="text-fg-2">
-                        {MESSAGE_STATUS_LABELS[lead.messageStatus]}
+              {!contributorView && (
+                <section aria-labelledby="ws-message" className="ws-block sm:pl-5">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <h2 id="ws-message" className="eyebrow">
+                      Message status
+                    </h2>
+                    {draft?.messageStatus !== undefined && (
+                      <span className="text-meta text-fg-3">
+                        was{" "}
+                        <span className="text-fg-2">
+                          {MESSAGE_STATUS_LABELS[lead.messageStatus]}
+                        </span>
                       </span>
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-2.5">
-                  <StatusPicker
-                    value={shown.messageStatus}
-                    committed={lead.messageStatus}
-                    onChange={(messageStatus) => stage({ messageStatus })}
-                    options={MESSAGE_STATUSES}
-                    labels={MESSAGE_STATUS_LABELS}
-                    styles={MESSAGE_STATUS_STYLES}
-                    dots={MESSAGE_STATUS_DOTS}
-                    label="Message status"
-                    idPrefix="message-status"
-                  />
-                </div>
-
-                {/* Answered by hand once the WhatsApp link has shown whether
-                    the number has an account. Neither option is lit until
-                    someone checks, and pressing the lit one again clears it
-                    back to unchecked. Stages like everything else here.
-                    Disabled for a lead with no phone, unless it already
-                    carries an answer that needs clearing. */}
-                <div
-                  role="group"
-                  aria-labelledby="ws-on-whatsapp"
-                  className={`mt-3 flex w-fit flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md px-1 py-0.5 ${
-                    draft?.onWhatsapp !== undefined ? "bg-warning-bg/40" : ""
-                  }`}
-                >
-                  <span id="ws-on-whatsapp" className="flex items-center gap-2 text-ui text-fg-2">
-                    <WhatsAppGlyph />
-                    On WhatsApp
-                  </span>
-                  <div className="flex gap-1.5">
-                    {(
-                      [
-                        [true, "Yes"],
-                        [false, "No"],
-                      ] as const
-                    ).map(([value, label]) => {
-                      const active = shown.onWhatsapp === value;
-                      return (
-                        <button
-                          key={label}
-                          type="button"
-                          aria-pressed={active}
-                          disabled={!lead.phone && shown.onWhatsapp === null}
-                          onClick={() => stage({ onWhatsapp: active ? null : value })}
-                          className={`rounded-md border px-2.5 py-1 text-caption transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                            active
-                              ? "border-accent-line bg-accent-soft font-medium text-accent"
-                              : "border-line bg-surface text-fg-2 hover:border-line-2 hover:text-fg"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
+                    )}
                   </div>
-                </div>
 
-                <p className="mt-2 text-meta leading-relaxed text-fg-4">
-                  The SMS or WhatsApp thread, recorded apart from the call. It
-                  does not move the lead out of New.
-                </p>
-              </section>
+                  <div className="mt-2.5">
+                    <StatusPicker
+                      value={shown.messageStatus}
+                      committed={lead.messageStatus}
+                      onChange={(messageStatus) => stage({ messageStatus })}
+                      options={MESSAGE_STATUSES}
+                      labels={MESSAGE_STATUS_LABELS}
+                      styles={MESSAGE_STATUS_STYLES}
+                      dots={MESSAGE_STATUS_DOTS}
+                      label="Message status"
+                      idPrefix="message-status"
+                    />
+                  </div>
+
+                  {/* Answered by hand once the WhatsApp link has shown whether
+                      the number has an account. Neither option is lit until
+                      someone checks, and pressing the lit one again clears it
+                      back to unchecked. Stages like everything else here.
+                      Disabled for a lead with no phone, unless it already
+                      carries an answer that needs clearing. */}
+                  <div
+                    role="group"
+                    aria-labelledby="ws-on-whatsapp"
+                    className={`mt-3 flex w-fit flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md px-1 py-0.5 ${
+                      draft?.onWhatsapp !== undefined ? "bg-warning-bg/40" : ""
+                    }`}
+                  >
+                    <span id="ws-on-whatsapp" className="flex items-center gap-2 text-ui text-fg-2">
+                      <WhatsAppGlyph />
+                      On WhatsApp
+                    </span>
+                    <div className="flex gap-1.5">
+                      {(
+                        [
+                          [true, "Yes"],
+                          [false, "No"],
+                        ] as const
+                      ).map(([value, label]) => {
+                        const active = shown.onWhatsapp === value;
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            aria-pressed={active}
+                            disabled={!lead.phone && shown.onWhatsapp === null}
+                            onClick={() => stage({ onWhatsapp: active ? null : value })}
+                            className={`rounded-md border px-2.5 py-1 text-caption transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                              active
+                                ? "border-accent-line bg-accent-soft font-medium text-accent"
+                                : "border-line bg-surface text-fg-2 hover:border-line-2 hover:text-fg"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <p className="mt-2 text-meta leading-relaxed text-fg-4">
+                    The SMS or WhatsApp thread, recorded apart from the call. It
+                    does not move the lead out of New.
+                  </p>
+                </section>
+              )}
             </div>
           </div>
 
@@ -906,15 +975,25 @@ export default function LeadWorkspace({
                   Call notes
                 </h2>
                 <span className="text-meta text-fg-4">
-                  Saved with the rest of your changes
+                  {contributorView
+                    ? "A new note for this call — earlier ones are in Activity"
+                    : "Saved with the rest of your changes"}
                 </span>
               </div>
 
               <textarea
-                value={shown.notes}
-                onChange={(event) => stage({ notes: event.target.value })}
+                value={contributorView ? (draft?.notes ?? "") : shown.notes}
+                onChange={(event) =>
+                  contributorView
+                    ? stageNote(event.target.value)
+                    : stage({ notes: event.target.value })
+                }
                 rows={6}
-                placeholder="What was said, who to ask for next time, what they asked about…"
+                placeholder={
+                  contributorView
+                    ? undefined
+                    : "What was said, who to ask for next time, what they asked about…"
+                }
                 aria-label={`Call notes for ${lead.name}`}
                 className={`ui-field mt-2.5 h-auto w-full resize-y p-3 leading-relaxed ${
                   draft?.notes !== undefined ? "!border-warning-line !bg-warning-bg/40" : ""
@@ -971,6 +1050,8 @@ export default function LeadWorkspace({
             updatedAt={detail.updatedAt}
             firstCalledAt={detail.firstCalledAt}
             sourceBatch={detail.sourceBatch}
+            addedBy={detail.addedBy}
+            changes={changes}
             // The activity trail names the recording when there is one. The
             // demo view deliberately has nothing audio-shaped on screen, so it
             // is not mentioned there either.
@@ -990,6 +1071,20 @@ export default function LeadWorkspace({
    */
   const bookingDialog = booking ? (
     <BookMeetingDialog lead={shown} onSave={stage} onClose={() => setBooking(false)} />
+  ) : editingDetails ? (
+    <LeadFormDialog
+      mode="edit"
+      lead={lead}
+      onClose={() => setEditingDetails(false)}
+      onSaved={(saved, history) => {
+        // Only the details changed, so a draft in progress on the working
+        // fields is kept rather than thrown away under the person typing it.
+        setLead(saved);
+        if (history) setChanges(history);
+        onSaved?.(saved);
+        if (!overlay) router.refresh();
+      }}
+    />
   ) : null;
 
   /** What the save controls have to say, in one line, in either frame. */

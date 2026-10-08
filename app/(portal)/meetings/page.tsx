@@ -3,6 +3,7 @@ import MeetingsPanel from "@/components/MeetingsPanel";
 import AccessDenied from "@/components/AccessDenied";
 import { requireModule } from "@/lib/authz";
 import { listMeetingLeads } from "@/lib/leadDb";
+import { leadScopeFor } from "@/lib/leadScope";
 import { todayIso } from "@/lib/leadUtils";
 import { listRecordingsFor } from "@/lib/recordings";
 
@@ -56,7 +57,7 @@ export default async function MeetingsPage() {
   const today = todayIso();
   const [recordings, leads] = await Promise.all([
     listRecordingsFor(user),
-    listMeetingLeads(),
+    listMeetingLeads(leadScopeFor(user)),
   ]);
 
   return (

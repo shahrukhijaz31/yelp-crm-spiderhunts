@@ -2,7 +2,10 @@ import { identityKeys } from "./cleanLeads";
 import { weekBounds, type CategoryOption, type CountryOption } from "./filters";
 import { Prisma } from "./generated/prisma/client";
 import { describeLeadActivity, recordLeadActivity } from "./leadActivity";
-import { UNKNOWN_LOCATION, buildTownIndex } from "./leadLocation";
+import { LEAD_CREATED, diffLead, type LeadChangeEntry } from "./leadChangeRules";
+import { listLeadChanges } from "./leadChanges";
+import type { LeadScope } from "./leadScope";
+import { UNKNOWN_LOCATION, buildTownIndex, parseAddressLocation } from "./leadLocation";
 import { fromIsoDate, toCreateData, toLead } from "./leadMapping";
 import type { LeadPageMeta, LeadPageQuery, LeadSort, LeadSortKey } from "./leadQuery";
 import { normalisePhone, type LeadStats } from "./leadUtils";
@@ -15,6 +18,7 @@ import {
   isCalled,
   type CallStatus,
   type Lead,
+  type LeadDetailFields,
   type LeadEditableFields,
   type LeadSource,
   type MessageStatus,
@@ -28,6 +32,31 @@ import type { LeadWorkCounts, LeadWorkState } from "./workState";
  * Row <-> `Lead` conversion lives next door in `lib/leadMapping.ts` (pure, no
  * client), so this file is only the queries and the validation guarding them.
  */
+
+/*
+ * Scope.
+ *
+ * Every read a contributor can reach takes a `LeadScope` (`lib/leadScope.ts`)
+ * and puts it in the query — required rather than optional, so a new caller
+ * has to say "the whole pool" out loud instead of getting it by forgetting.
+ * `null` is the whole pool; a contributor's scope is the leads they added.
+ */
+
+/** The scope as a clause against the `leads l` alias, or null for no clause. */
+function scopeSql(scope: LeadScope): Prisma.Sql | null {
+  return scope ? Prisma.sql`l.created_by_user_id = ${scope.createdById}` : null;
+}
+
+/** `WHERE <scope>`, or nothing — for the aggregates with no other condition. */
+function scopeWhereSql(scope: LeadScope): Prisma.Sql {
+  const clause = scopeSql(scope);
+  return clause ? Prisma.sql`WHERE ${clause}` : Prisma.empty;
+}
+
+/** The scope as a typed-client `where`. */
+function scopeWhere(scope: LeadScope): Prisma.LeadWhereInput {
+  return scope ? { createdById: scope.createdById } : {};
+}
 
 /**
  * Every lead, in a stable order.
@@ -80,9 +109,12 @@ export async function listLeads(): Promise<Lead[]> {
  * fails here but passes it would vanish from the agenda altogether. If the
  * predicate changes, change both.
  */
-export async function listMeetingLeads(): Promise<Lead[]> {
+export async function listMeetingLeads(scope: LeadScope): Promise<Lead[]> {
   const rows = await prisma.lead.findMany({
-    where: { OR: [{ status: "interested" }, { callbackDate: { not: null } }] },
+    where: {
+      ...scopeWhere(scope),
+      OR: [{ status: "interested" }, { callbackDate: { not: null } }],
+    },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
   return rows.map(toLead);
@@ -157,14 +189,20 @@ function workStateSql(workState: LeadWorkState): Prisma.Sql {
   if (workState === "sms") {
     return Prisma.sql`l.message_status IN ('sms_sent', 'whatsapp_sent')`;
   }
+  // Every lead in scope — a contributor's single list.
+  if (workState === "all") return Prisma.sql`TRUE`;
   return workState === "called"
     ? Prisma.sql`l.first_called_at IS NOT NULL`
     : Prisma.sql`l.first_called_at IS NULL`;
 }
 
-function leadFilterSql(query: LeadPageQuery): Prisma.Sql {
+function leadFilterSql(query: LeadPageQuery, scope: LeadScope): Prisma.Sql {
   const { workState, view, filters, today } = query;
   const clauses: Prisma.Sql[] = [];
+
+  // --- whose leads (lib/leadScope.ts) — before anything the caller chose ---
+  const scoped = scopeSql(scope);
+  if (scoped) clauses.push(scoped);
 
   // --- the queue (lib/workState.ts) ---
   // The outermost narrowing, and the only one with no equivalent in
@@ -437,7 +475,7 @@ function sortExpression(key: Exclude<LeadSortKey, "default">): Prisma.Sql {
 function leadOrderSql(sort: LeadSort, workState: LeadWorkState): Prisma.Sql {
   const stable = Prisma.sql`l.created_at ASC, l.id ASC`;
   if (sort.key === "default") {
-    return workState === "called" || workState === "sms"
+    return workState !== "new"
       ? Prisma.sql`l.updated_at DESC, ${stable}`
       : stable;
   }
@@ -469,8 +507,11 @@ export interface LeadPageResult extends LeadPageMeta {
  * `OFFSET` into an unstable order shows some leads twice and hides others
  * entirely.
  */
-export async function listLeadsPage(query: LeadPageQuery): Promise<LeadPageResult> {
-  const where = leadFilterSql(query);
+export async function listLeadsPage(
+  query: LeadPageQuery,
+  scope: LeadScope,
+): Promise<LeadPageResult> {
+  const where = leadFilterSql(query, scope);
   const orderBy = leadOrderSql(query.sort, query.workState);
   const { pageSize } = query;
 
@@ -539,11 +580,22 @@ export interface LeadDetail {
   firstCalledAt: string | null;
   /** Which import the row arrived in, when it came from one. */
   sourceBatch: string | null;
+  /** Who typed it in by hand, when somebody did. */
+  addedBy: { id: string; name: string } | null;
+  /** Every recorded edit, newest first (see `lib/leadChanges.ts`). */
+  changes: LeadChangeEntry[];
 }
 
-/** One lead by id, or null when the id does not name one. */
-export async function getLeadDetail(id: string): Promise<LeadDetail | null> {
-  const row = await prisma.lead.findUnique({ where: { id } });
+/**
+ * One lead by id, or null when the id does not name one *within this scope*.
+ * A contributor asking for somebody else's lead gets the same null as for one
+ * that does not exist.
+ */
+export async function getLeadDetail(id: string, scope: LeadScope): Promise<LeadDetail | null> {
+  const row = await prisma.lead.findFirst({
+    where: { id, ...scopeWhere(scope) },
+    include: { createdBy: { select: { id: true, name: true } } },
+  });
   if (!row) return null;
 
   return {
@@ -552,7 +604,14 @@ export async function getLeadDetail(id: string): Promise<LeadDetail | null> {
     updatedAt: row.updatedAt.toISOString(),
     firstCalledAt: row.firstCalledAt?.toISOString() ?? null,
     sourceBatch: row.sourceBatch,
+    addedBy: row.createdBy,
+    changes: await listLeadChanges(row.id),
   };
+}
+
+/** Whether this id names a lead inside this scope. One indexed lookup. */
+export async function isLeadInScope(id: string, scope: LeadScope): Promise<boolean> {
+  return (await prisma.lead.count({ where: { id, ...scopeWhere(scope) } })) > 0;
 }
 
 /**
@@ -580,8 +639,9 @@ export async function nextLeadId(
   query: LeadPageQuery,
   currentId: string,
   position: number | null,
+  scope: LeadScope,
 ): Promise<string | null> {
-  const where = leadFilterSql(query);
+  const where = leadFilterSql(query, scope);
   const orderBy = leadOrderSql(query.sort, query.workState);
 
   const rows = await prisma.$queryRaw<{ id: string }[]>(
@@ -618,7 +678,7 @@ export async function nextLeadId(
  *
  * `today` is the agent's own date for the reason given in `LeadPageQuery`.
  */
-export async function leadStats(today: string): Promise<LeadStats> {
+export async function leadStats(today: string, scope: LeadScope): Promise<LeadStats> {
   const todayDate = fromIsoDate(today);
   // Callers validate the format, so this is a programming error rather than bad
   // input — and a null here would turn `callbackDate: todayDate` into "callback
@@ -628,6 +688,8 @@ export async function leadStats(today: string): Promise<LeadStats> {
   // One transaction, so the figures describe the same instant. A status total
   // that had counted a lead the callback totals had not would show up as a
   // stat bar that does not add up.
+  const scoped = scopeWhereSql(scope);
+  const owned = scopeWhere(scope);
   const [
     groups,
     sourceGroups,
@@ -642,27 +704,27 @@ export async function leadStats(today: string): Promise<LeadStats> {
       // is widened past usefulness by `$transaction`'s tuple; the statement is
       // the one `groupBy` would have written.
       prisma.$queryRaw<{ status: CallStatus; count: number }[]>(
-        Prisma.sql`SELECT status::text AS status, count(*)::int AS count FROM leads GROUP BY status`,
+        Prisma.sql`SELECT l.status::text AS status, count(*)::int AS count FROM leads l ${scoped} GROUP BY l.status`,
       ),
       // Two rows at most, and inside the same transaction as the status counts
       // so the two breakdowns of the same table cannot add up to two different
       // totals on the same screen.
       prisma.$queryRaw<{ source: LeadSource; count: number }[]>(
-        Prisma.sql`SELECT source::text AS source, count(*)::int AS count FROM leads GROUP BY source`,
+        Prisma.sql`SELECT l.source::text AS source, count(*)::int AS count FROM leads l ${scoped} GROUP BY l.source`,
       ),
       // Three rows at most, and in the same transaction for the same reason as
       // the two breakdowns above it.
       prisma.$queryRaw<{ status: MessageStatus; count: number }[]>(
-        Prisma.sql`SELECT message_status::text AS status, count(*)::int AS count FROM leads GROUP BY message_status`,
+        Prisma.sql`SELECT l.message_status::text AS status, count(*)::int AS count FROM leads l ${scoped} GROUP BY l.message_status`,
       ),
       prisma.$queryRaw<{ key: WhatsappAnswer; count: number }[]>(
-        Prisma.sql`SELECT ${WHATSAPP_ANSWER_SQL} AS key, count(*)::int AS count FROM leads l GROUP BY 1`,
+        Prisma.sql`SELECT ${WHATSAPP_ANSWER_SQL} AS key, count(*)::int AS count FROM leads l ${scoped} GROUP BY 1`,
       ),
-      prisma.lead.count(),
-      prisma.lead.count({ where: { callbackDate: todayDate } }),
-      prisma.lead.count({ where: { callbackDate: { lt: todayDate } } }),
+      prisma.lead.count({ where: owned }),
+      prisma.lead.count({ where: { ...owned, callbackDate: todayDate } }),
+      prisma.lead.count({ where: { ...owned, callbackDate: { lt: todayDate } } }),
       // `!lead.website` again: null and "" are both "no website".
-      prisma.lead.count({ where: { OR: [{ website: null }, { website: "" }] } }),
+      prisma.lead.count({ where: { ...owned, OR: [{ website: null }, { website: "" }] } }),
     ]);
 
   const byStatus = Object.fromEntries(
@@ -730,8 +792,14 @@ const WHATSAPP_ANSWER_SQL = Prisma.sql`CASE WHEN l.on_whatsapp IS NULL THEN 'unk
  * Still not narrowed by the filters themselves, so ticking one option does not
  * turn every other option's count to zero.
  */
-export async function leadQueueFacets(workState: LeadWorkState): Promise<LeadQueueFacets> {
-  const queue = workStateSql(workState);
+export async function leadQueueFacets(
+  workState: LeadWorkState,
+  scope: LeadScope,
+): Promise<LeadQueueFacets> {
+  const scoped = scopeSql(scope);
+  const queue = scoped
+    ? Prisma.sql`${workStateSql(workState)} AND ${scoped}`
+    : workStateSql(workState);
 
   // One transaction, so the three breakdowns describe the same instant.
   const [statusRows, messageRows, sourceRows, whatsappRows] = await prisma.$transaction([
@@ -781,16 +849,17 @@ export async function leadQueueFacets(workState: LeadWorkState): Promise<LeadQue
  * once; `::int` for the same reason it appears in `listLeadsPage` — Postgres
  * counts in bigint and `JSON.stringify` refuses to serialise one.
  */
-export async function leadWorkCounts(): Promise<LeadWorkCounts> {
+export async function leadWorkCounts(scope: LeadScope): Promise<LeadWorkCounts> {
   const [row] = await prisma.$queryRaw<
-    { fresh: number; called: number; messaged: number }[]
+    { fresh: number; called: number; messaged: number; everything: number }[]
   >(
     Prisma.sql`
       SELECT
-        count(*) FILTER (WHERE first_called_at IS NULL)::int     AS fresh,
-        count(*) FILTER (WHERE first_called_at IS NOT NULL)::int AS called,
-        count(*) FILTER (WHERE message_status IN ('sms_sent', 'whatsapp_sent'))::int AS messaged
-      FROM leads
+        count(*) FILTER (WHERE l.first_called_at IS NULL)::int     AS fresh,
+        count(*) FILTER (WHERE l.first_called_at IS NOT NULL)::int AS called,
+        count(*) FILTER (WHERE l.message_status IN ('sms_sent', 'whatsapp_sent'))::int AS messaged,
+        count(*)::int AS everything
+      FROM leads l ${scopeWhereSql(scope)}
     `,
   );
 
@@ -798,6 +867,7 @@ export async function leadWorkCounts(): Promise<LeadWorkCounts> {
     new: row?.fresh ?? 0,
     called: row?.called ?? 0,
     sms: row?.messaged ?? 0,
+    all: row?.everything ?? 0,
   };
 }
 
@@ -816,13 +886,14 @@ export async function leadWorkCounts(): Promise<LeadWorkCounts> {
  * ordering the panel had before, and one Postgres's collation would not
  * necessarily reproduce.
  */
-export async function leadCategories(): Promise<CategoryOption[]> {
+export async function leadCategories(scope: LeadScope): Promise<CategoryOption[]> {
   const rows = await prisma.$queryRaw<{ name: string; count: number }[]>(
     Prisma.sql`
       SELECT c AS name, count(*)::int AS count
       FROM (
         SELECT DISTINCT l.id, c
         FROM leads l, LATERAL unnest(l.categories) AS c
+        ${scopeWhereSql(scope)}
       ) tagged
       GROUP BY c
     `,
@@ -844,12 +915,12 @@ export async function leadCategories(): Promise<CategoryOption[]> {
  * `leads_country_city_idx`: the grouped column is that index's leading one, so
  * this is an index-only scan rather than a walk over the table.
  */
-export async function leadCountries(): Promise<CountryOption[]> {
+export async function leadCountries(scope: LeadScope): Promise<CountryOption[]> {
   const rows = await prisma.$queryRaw<{ country: string | null; count: number }[]>(
     Prisma.sql`
-      SELECT country, count(*)::int AS count
-      FROM leads
-      GROUP BY country
+      SELECT l.country, count(*)::int AS count
+      FROM leads l ${scopeWhereSql(scope)}
+      GROUP BY l.country
     `,
   );
 
@@ -874,11 +945,20 @@ export async function leadCountries(): Promise<CountryOption[]> {
  * Optional so that a caller with no user — a migration, a script, the scraper —
  * can still write a lead without inventing an author for it. Every path a
  * person's work travels does pass one.
+ *
+ * Every field the save actually changes is also written to `lead_changes`, in
+ * the same transaction as the update, so the lead's history cannot miss an edit
+ * that landed or record one that did not.
+ *
+ * The details (`name`, `phone`, `website`, `source`) are accepted here, but the
+ * route only passes them for a role allowed to correct them — see
+ * `canEditLeadDetails`. A lead outside `scope` is "not found".
  */
 export async function updateLeadFields(
   id: string,
-  changes: Partial<LeadEditableFields>,
-  actorId?: string,
+  changes: Partial<LeadEditableFields & LeadDetailFields>,
+  actorId: string | undefined,
+  scope: LeadScope,
 ): Promise<Lead | null> {
   // Only the keys actually present are written, so a PATCH carrying just
   // `{ status }` cannot blank out someone's notes.
@@ -894,14 +974,24 @@ export async function updateLeadFields(
   if ("meetingCompletedAt" in changes) {
     data.meetingCompletedAt = fromIsoDate(changes.meetingCompletedAt ?? null);
   }
+  if ("name" in changes) data.name = changes.name;
+  if ("phone" in changes) data.phone = changes.phone;
+  if ("website" in changes) data.website = changes.website;
+  if ("source" in changes) data.source = changes.source;
+  if ("address" in changes) data.address = changes.address;
+  if ("url" in changes) data.url = changes.url;
 
-  if (Object.keys(data).length === 0) {
-    const existing = await prisma.lead.findUnique({ where: { id } });
-    return existing ? toLead(existing) : null;
-  }
-
-  const row = await prisma.lead.findUnique({ where: { id } });
+  const row = await prisma.lead.findFirst({ where: { id, ...scopeWhere(scope) } });
   if (!row) return null;
+  if (Object.keys(data).length === 0) return toLead(row);
+
+  // Country and town are derived from the address (`lib/leadLocation.ts`), so
+  // a new address re-derives them. Only a *new* one: the edit form always sends
+  // the address, and re-parsing an unchanged scraped address here — without the
+  // town index the importer had — could lose a town it had recognised.
+  if ("address" in data && data.address !== row.address) {
+    Object.assign(data, parseAddressLocation(String(data.address ?? "")));
+  }
 
   /*
    * New -> Called, and only here.
@@ -938,7 +1028,19 @@ export async function updateLeadFields(
     data.firstCalledAt = new Date();
   }
 
-  const saved = toLead(await prisma.lead.update({ where: { id }, data }));
+  const before = toLead(row);
+  const saved = await prisma.$transaction(async (tx) => {
+    const updated = toLead(await tx.lead.update({ where: { id }, data }));
+    // Diffed against what was actually written, not against the request — a
+    // field re-saved with the value it already had is not a change.
+    const history = diffLead(before, updated);
+    if (history.length > 0) {
+      await tx.leadChange.createMany({
+        data: history.map((change) => ({ leadId: id, userId: actorId ?? null, ...change })),
+      });
+    }
+    return updated;
+  });
 
   // Attribution, after the lead is safely written and never in its way. The
   // "before" values come from the row already read above, so classifying the
@@ -947,10 +1049,92 @@ export async function updateLeadFields(
   // they work. A failure inside is logged and swallowed there: reporting must
   // not be the reason a call outcome is lost.
   if (actorId) {
-    await recordLeadActivity(id, actorId, describeLeadActivity(toLead(row), changes));
+    await recordLeadActivity(id, actorId, describeLeadActivity(before, changes));
   }
 
   return saved;
+}
+
+/** What a hand-added lead may carry: the details, and optionally a first outcome. */
+export type NewLeadInput = LeadDetailFields & Partial<LeadEditableFields>;
+
+/**
+ * Add one lead by hand. Administrators and contributors only — the route checks.
+ *
+ * `actorId` is the session's user and becomes `created_by_user_id`, which is
+ * what puts the lead in a contributor's scope. It goes into the shared pool as
+ * well, so an administrator sees it beside the scraped leads.
+ *
+ * The form may already carry a status, call notes or a meeting: a contributor
+ * often adds a lead straight after the first call. Those are written like any
+ * other edit — a called status stamps `first_called_at` (in `toCreateData`), the
+ * acts go to `lead_activities`, and every value set goes to the history after
+ * the "Lead added" row.
+ *
+ * No duplicate check against the pool, unlike `mergeLeads`: a person typing a
+ * lead in is telling us they want it, and refusing it because a scraped row
+ * shares the number would hide a lead from the one person working it.
+ */
+export async function createLead(input: NewLeadInput, actorId: string): Promise<Lead> {
+  const blank: Lead = {
+    id: "",
+    name: input.name,
+    address: input.address,
+    categories: [],
+    phone: input.phone,
+    website: input.website,
+    rating: null,
+    owner: null,
+    url: input.url,
+    source: input.source,
+    country: null,
+    city: null,
+    status: "not_called",
+    messageStatus: "not_messaged",
+    onWhatsapp: null,
+    notes: "",
+    callbackDate: null,
+    meetingTime: null,
+    meetingAttendees: null,
+    meetingNotes: "",
+    meetingCompletedAt: null,
+  };
+
+  // Only the keys the form sent, so an absent field keeps the blank default
+  // rather than becoming `undefined` on its way into the insert.
+  const working: Partial<LeadEditableFields> = {};
+  for (const key of Object.keys(input) as (keyof NewLeadInput)[]) {
+    if (
+      key in blank &&
+      !["name", "phone", "website", "address", "source", "url"].includes(key)
+    ) {
+      (working as Record<string, unknown>)[key] = input[key];
+    }
+  }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const lead = toLead(
+      await tx.lead.create({
+        data: { ...toCreateData({ ...blank, ...working }, null), createdById: actorId },
+      }),
+    );
+    await tx.leadChange.createMany({
+      data: [
+        { leadId: lead.id, userId: actorId, field: LEAD_CREATED, oldValue: null, newValue: lead.name },
+        // The first outcome, if the form carried one. Diffed against the blank
+        // lead with the same details, so only the working fields appear.
+        ...diffLead({ ...blank, id: lead.id }, lead).map((change) => ({
+          leadId: lead.id,
+          userId: actorId,
+          ...change,
+        })),
+      ],
+    });
+    return lead;
+  });
+
+  await recordLeadActivity(created.id, actorId, describeLeadActivity(blank, working));
+  return created;
 }
 
 /*
@@ -1075,6 +1259,105 @@ function isClockTime(value: unknown): value is string {
 }
 
 export class LeadEditError extends Error {}
+
+/** Long enough for any business name; short enough that nobody pastes a page. */
+const NAME_MAX = 200;
+const WEBSITE_MAX = 500;
+const ADDRESS_MAX = 300;
+
+/**
+ * Validate a lead's details out of a request body.
+ *
+ * `create` requires a name, a phone and a source — a hand-added lead with no
+ * number is not something anybody can call. `edit` only checks the keys that
+ * are present, like `parseLeadEdits`, and still refuses to blank the name or
+ * the phone. The website and the address are optional either way.
+ */
+export function parseLeadDetails(
+  body: unknown,
+  mode: "create" | "edit",
+): Partial<LeadDetailFields> {
+  if (typeof body !== "object" || body === null) {
+    throw new LeadEditError("Expected a JSON object.");
+  }
+  const input = body as Record<string, unknown>;
+  const details: Partial<LeadDetailFields> = {};
+
+  if ("name" in input || mode === "create") {
+    const name = typeof input.name === "string" ? input.name.trim() : "";
+    if (!name) throw new LeadEditError("Enter the business name.");
+    if (name.length > NAME_MAX) {
+      throw new LeadEditError(`The name must be at most ${NAME_MAX} characters.`);
+    }
+    details.name = name;
+  }
+
+  if ("phone" in input || mode === "create") {
+    const phone = typeof input.phone === "string" ? input.phone.trim() : "";
+    // Seven digits is the shortest number worth dialling; forty characters
+    // leaves room for a country code, spaces and an extension.
+    if (normalisePhone(phone).length < 7 || phone.length > 40) {
+      throw new LeadEditError("Enter a phone number with at least 7 digits.");
+    }
+    details.phone = phone;
+  }
+
+  if ("website" in input) {
+    if (input.website !== null && typeof input.website !== "string") {
+      throw new LeadEditError("website must be a string or null.");
+    }
+    const website = (input.website ?? "").trim();
+    if (website.length > WEBSITE_MAX) {
+      throw new LeadEditError(`The website must be at most ${WEBSITE_MAX} characters.`);
+    }
+    details.website = website || null;
+  } else if (mode === "create") {
+    details.website = null;
+  }
+
+  // The listing on Yelp or Google the lead was found on. Optional; the
+  // workspace runs it through `websiteHref` before it becomes a link, so a
+  // `javascript:` URL here is drawn as text and never followed.
+  if ("url" in input) {
+    if (input.url !== null && typeof input.url !== "string") {
+      throw new LeadEditError("url must be a string or null.");
+    }
+    const url = (input.url ?? "").trim();
+    if (url.length > WEBSITE_MAX) {
+      throw new LeadEditError(`The source link must be at most ${WEBSITE_MAX} characters.`);
+    }
+    details.url = url || null;
+  } else if (mode === "create") {
+    details.url = null;
+  }
+
+  // Optional. Stored as "" rather than null when absent — the column is never
+  // null (see schema.prisma).
+  if ("address" in input) {
+    if (input.address !== null && typeof input.address !== "string") {
+      throw new LeadEditError("address must be a string or null.");
+    }
+    const address = (input.address ?? "").trim();
+    if (address.length > ADDRESS_MAX) {
+      throw new LeadEditError(`The address must be at most ${ADDRESS_MAX} characters.`);
+    }
+    details.address = address;
+  } else if (mode === "create") {
+    details.address = "";
+  }
+
+  if ("source" in input || mode === "create") {
+    if (
+      typeof input.source !== "string" ||
+      !(LEAD_SOURCES as readonly string[]).includes(input.source)
+    ) {
+      throw new LeadEditError("Choose where the lead came from: Yelp or Google.");
+    }
+    details.source = input.source as LeadSource;
+  }
+
+  return details;
+}
 
 /**
  * Validate a PATCH body into the subset of fields an agent may edit.

@@ -350,6 +350,14 @@ export interface Lead {
   meetingNotes: string;
   /** ISO `YYYY-MM-DD` the meeting was marked done, or null while it is open. */
   meetingCompletedAt: string | null;
+
+  /**
+   * When the row was written, as an ISO instant. Set on every lead read from
+   * the database (`toLead`); absent on one still being parsed out of a CSV,
+   * which has not been written yet. Drawn as "Date added" in a contributor's
+   * list, and never sent back — no endpoint accepts it.
+   */
+  createdAt?: string;
 }
 
 /** The subset of a lead an agent can edit from the list view. */
@@ -364,4 +372,14 @@ export type LeadEditableFields = Pick<
   | "meetingAttendees"
   | "meetingNotes"
   | "meetingCompletedAt"
+>;
+
+/**
+ * The listing's own details — what identifies the business rather than what
+ * somebody did about it. Read-only to agents; an administrator, or a
+ * contributor on a lead they added, may correct them (`lib/leadScope.ts`).
+ */
+export type LeadDetailFields = Pick<
+  Lead,
+  "name" | "phone" | "website" | "address" | "source" | "url"
 >;

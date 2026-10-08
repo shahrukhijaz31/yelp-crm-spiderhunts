@@ -1,4 +1,4 @@
-import type { Role } from "./access";
+import { TRACKED_ROLES, type Role } from "./access";
 import { activityPolicy, inactivityThresholdSeconds } from "./activityPolicy";
 import { openSessionCaptureHealth } from "./captureHealth";
 import { describeCaptureHealth } from "./captureHealthRules";
@@ -900,13 +900,13 @@ export async function timeReport(
 
   const [users, intervals, tracked, sessionCounts, leadWork, shots, openSessions] =
     await Promise.all([
-      // Agents, and only agents — the same filter `lib/productivity.ts` already
-      // applies to its own roster. Administrators no longer accumulate work
+      // Tracked roles only (`TRACKED_ROLES`) — agents and contributors. The same
+      // idea as `lib/productivity.ts`'s roster. Administrators no longer accumulate work
       // sessions at all (`openOrResumeWorkSession`), so without this they would
       // sit in the table as permanent all-zero rows: not a description of
       // anything, and a row that reads as "this person did no work today".
       prisma.user.findMany({
-        where: { role: "AGENT", ...(scope ? { id: scope } : {}) },
+        where: { role: { in: [...TRACKED_ROLES] }, ...(scope ? { id: scope } : {}) },
         select: { id: true, name: true, username: true, role: true },
         orderBy: [{ name: "asc" }],
       }),

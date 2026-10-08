@@ -81,7 +81,9 @@ async function main(): Promise<void> {
     fail("--username must be 3-32 characters: a-z, 0-9, dot, underscore, hyphen.");
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("--email must be a valid address.");
-  if (role !== "ADMIN" && role !== "AGENT") fail("--role must be ADMIN or AGENT.");
+  if (role !== "ADMIN" && role !== "AGENT" && role !== "CONTRIBUTOR") {
+    fail("--role must be ADMIN, AGENT or CONTRIBUTOR.");
+  }
 
   const generated = args.password === undefined;
   const password = args.password ?? generatePassword();

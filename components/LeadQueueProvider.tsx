@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState } fro
 
 import {
   DEFAULT_WORK_STATE,
+  POOL_QUEUES,
   type LeadWorkCounts,
   type LeadWorkState,
 } from "@/lib/workState";
@@ -50,18 +51,26 @@ interface LeadQueueValue {
    * callback, and a write of an equal-but-fresh object would loop.
    */
   setCounts: (next: LeadWorkCounts) => void;
+  /** The queues this person is given, in rail order (`queuesFor`). */
+  queues: readonly LeadWorkState[];
+  /** The one their worklist opens on. */
+  defaultQueue: LeadWorkState;
 }
 
 const LeadQueueContext = createContext<LeadQueueValue | null>(null);
 
 export function LeadQueueProvider({
   initialCounts,
+  queues = POOL_QUEUES,
   children,
 }: {
   initialCounts: LeadWorkCounts;
+  /** From `queuesFor(role)` in the layout. */
+  queues?: readonly LeadWorkState[];
   children: React.ReactNode;
 }) {
-  const [workState, setWorkStateValue] = useState<LeadWorkState>(DEFAULT_WORK_STATE);
+  const defaultQueue = queues[0] ?? DEFAULT_WORK_STATE;
+  const [workState, setWorkStateValue] = useState<LeadWorkState>(defaultQueue);
   const chosen = useRef(false);
   const setWorkState = useCallback((next: LeadWorkState) => {
     chosen.current = true;
@@ -72,13 +81,18 @@ export function LeadQueueProvider({
 
   const setCounts = useCallback((next: LeadWorkCounts) => {
     setCountsState((current) =>
-      current.new === next.new && current.called === next.called ? current : next,
+      current.new === next.new &&
+      current.called === next.called &&
+      current.sms === next.sms &&
+      current.all === next.all
+        ? current
+        : next,
     );
   }, []);
 
   const value = useMemo<LeadQueueValue>(
-    () => ({ workState, setWorkState, wasQueueChosen, counts, setCounts }),
-    [workState, setWorkState, wasQueueChosen, counts, setCounts],
+    () => ({ workState, setWorkState, wasQueueChosen, counts, setCounts, queues, defaultQueue }),
+    [workState, setWorkState, wasQueueChosen, counts, setCounts, queues, defaultQueue],
   );
 
   return <LeadQueueContext.Provider value={value}>{children}</LeadQueueContext.Provider>;

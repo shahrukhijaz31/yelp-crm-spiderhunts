@@ -5,11 +5,14 @@ import AppShell from "@/components/AppShell";
 import { LeadQueueProvider } from "@/components/LeadQueueProvider";
 import { PortalStatsProvider } from "@/components/PortalStatsProvider";
 import { WorkSessionProvider } from "@/components/WorkSessionProvider";
+import { isTrackedRole } from "@/lib/access";
 import { requireUser } from "@/lib/authz";
 import { moduleAccessFor } from "@/lib/moduleAccess";
 import { leadStats, leadWorkCounts } from "@/lib/leadDb";
+import { leadScopeFor } from "@/lib/leadScope";
 import { computeStats, todayIso } from "@/lib/leadUtils";
 import { NAV_MODE_COOKIE, readNavMode } from "@/lib/navPreference";
+import { queuesFor } from "@/lib/workState";
 import { getWorkClock } from "@/lib/workSessions";
 
 /**
@@ -73,7 +76,7 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
   // an administrator's own shift, so reading it here would be two queries per
   // page load for a figure with no reader — and the provider it feeds would go
   // on writing a `work_sessions` row a minute for a shift nobody looks at.
-  const tracked = user.role === "AGENT";
+  const tracked = isTrackedRole(user.role);
 
   /*
    * Which of the two workspaces this account may reach.
@@ -97,8 +100,9 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
     // `computeStats([])` rather than a hand-written zero object: it is the same
     // function the aggregate mirrors, so a field added to `LeadStats` cannot be
     // missing from this branch.
-    access.leads ? leadStats(today) : computeStats([], today),
-    access.leads ? leadWorkCounts() : { new: 0, called: 0, sms: 0 },
+    // Scoped like the worklist: a contributor's badges count their own leads.
+    access.leads ? leadStats(today, leadScopeFor(user)) : computeStats([], today),
+    access.leads ? leadWorkCounts(leadScopeFor(user)) : { new: 0, called: 0, sms: 0, all: 0 },
     tracked ? getWorkClock(user.id) : null,
   ]);
 
@@ -108,7 +112,7 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
     <PortalStatsProvider initialStats={stats}>
       {/* The queue lives out here because the control that changes it is in the
           sidebar and the screen that answers to it is in the route. */}
-      <LeadQueueProvider initialCounts={workCounts}>
+      <LeadQueueProvider initialCounts={workCounts} queues={queuesFor(user.role)}>
         {/* Outside the shell so the heartbeat keeps beating whatever screen is
             on, including the ones that draw no clock at all. Mounted for both
             roles but inert for administrators — see the note on `tracking`. */}

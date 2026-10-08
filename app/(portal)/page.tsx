@@ -6,9 +6,10 @@ import { requireModule } from "@/lib/authz";
 import { landingPathFor } from "@/lib/modules";
 import { EMPTY_FILTERS } from "@/lib/filters";
 import { leadCategories, leadCountries, leadQueueFacets, listLeadsPage } from "@/lib/leadDb";
+import { canAddLeads, leadScopeFor } from "@/lib/leadScope";
 import { DEFAULT_SORT, readPage, readPageSize } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
-import { DEFAULT_WORK_STATE } from "@/lib/workState";
+import { defaultWorkStateFor } from "@/lib/workState";
 
 /**
  * The worklist.
@@ -49,7 +50,7 @@ import { DEFAULT_WORK_STATE } from "@/lib/workState";
  * what they may read.
  */
 export default async function Home(props: PageProps<"/">) {
-  const { access, allowed } = await requireModule("leads");
+  const { user, access, allowed } = await requireModule("leads");
   if (!allowed) {
     const elsewhere = landingPathFor(access);
     if (elsewhere && elsewhere !== "/") redirect(elsewhere);
@@ -58,6 +59,9 @@ export default async function Home(props: PageProps<"/">) {
 
   const params = await props.searchParams;
   const today = todayIso();
+  // A contributor's worklist is the leads they added; everybody else's is the
+  // pool. Every read below takes it — see `lib/leadScope.ts`.
+  const scope = leadScopeFor(user);
 
   const result = await listLeadsPage({
     // The worklist, as opposed to Demo Websites — which is this same query and
@@ -69,7 +73,7 @@ export default async function Home(props: PageProps<"/">) {
     // `Worklist` owns it from the first interaction onwards, and it is seeded
     // with the same default here so the server renders the page the client is
     // about to recognise as the one it already has.
-    workState: DEFAULT_WORK_STATE,
+    workState: defaultWorkStateFor(user.role),
     view: "all",
     filters: EMPTY_FILTERS,
     // The first paint is always the unsorted list, for the same reason the tab
@@ -80,7 +84,7 @@ export default async function Home(props: PageProps<"/">) {
     today,
     page: readPage(one(params.page)),
     pageSize: readPageSize(one(params.pageSize)),
-  });
+  }, scope);
 
   // The full category list, for the filter panel. Read once here rather than
   // with every page: it changes when someone imports a CSV, not when an agent
@@ -95,9 +99,9 @@ export default async function Home(props: PageProps<"/">) {
   // The filter rail's checkbox counts for the queue the screen opens on, so the
   // first paint does not show workspace-wide numbers under the New queue.
   const [categories, countries, queueFacets] = await Promise.all([
-    leadCategories(),
-    leadCountries(),
-    leadQueueFacets(DEFAULT_WORK_STATE),
+    leadCategories(scope),
+    leadCountries(scope),
+    leadQueueFacets(defaultWorkStateFor(user.role), scope),
   ]);
 
   return (
@@ -113,6 +117,9 @@ export default async function Home(props: PageProps<"/">) {
       initialCountries={countries}
       initialQueueFacets={queueFacets}
       serverToday={today}
+      canAddLeads={canAddLeads(user.role)}
+      canEditDetails={canAddLeads(user.role)}
+      contributorColumns={user.role === "CONTRIBUTOR"}
     />
   );
 }

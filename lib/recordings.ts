@@ -1,6 +1,7 @@
 import type { SessionUser } from "./access";
 import { isMeetingLead } from "./meetings";
 import { toLead } from "./leadMapping";
+import { leadScopeFor } from "./leadScope";
 import { prisma } from "./prisma";
 import {
   RecordingError,
@@ -175,9 +176,15 @@ export async function listRecordingsFor(
  * Meetings view asks rather than a copy of it: interested, or a date in the
  * diary. Attaching a call recording to a lead nobody has spoken to is a sign
  * the id came from somewhere other than the agenda.
+ *
+ * Read through the uploader's lead scope (`lib/leadScope.ts`), so a contributor
+ * cannot attach audio to a lead they cannot see — it is "not found" to them.
  */
-async function requireMeeting(leadId: string): Promise<void> {
-  const row = await prisma.lead.findUnique({ where: { id: leadId } });
+async function requireMeeting(leadId: string, user: SessionUser): Promise<void> {
+  const scope = leadScopeFor(user);
+  const row = await prisma.lead.findFirst({
+    where: { id: leadId, ...(scope ? { createdById: scope.createdById } : {}) },
+  });
   if (!row) {
     throw new RecordingError("not_found", "No meeting with that id.", 404);
   }
@@ -218,7 +225,7 @@ export async function saveRecording(params: {
 }): Promise<RecordingSummary> {
   const { leadId, user, bytes } = params;
 
-  await requireMeeting(leadId);
+  await requireMeeting(leadId, user);
 
   const existing = await prisma.meetingRecording.findUnique({
     where: { leadId },

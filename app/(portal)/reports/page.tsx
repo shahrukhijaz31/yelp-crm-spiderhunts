@@ -34,7 +34,7 @@ export default async function ReportsPage() {
   await connection();
 
   const today = todayIso();
-  const stats = await leadStats(today);
+  const stats = await leadStats(today, null);
 
   return (
     <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">

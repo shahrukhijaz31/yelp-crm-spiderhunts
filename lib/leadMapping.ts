@@ -68,6 +68,7 @@ export function toLead(row: LeadRow): Lead {
     meetingAttendees: row.meetingAttendees,
     meetingNotes: row.meetingNotes,
     meetingCompletedAt: toIsoDate(row.meetingCompletedAt),
+    createdAt: row.createdAt.toISOString(),
   };
 }
 

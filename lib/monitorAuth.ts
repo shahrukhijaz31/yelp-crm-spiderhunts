@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import type { Role, SessionUser } from "./access";
+import { TRACKED_ROLES, type Role, type SessionUser } from "./access";
 import { prisma } from "./prisma";
 import { touchMonitorLiveness } from "./workSessions";
 
@@ -69,7 +69,7 @@ const TOKEN_BYTES = 32;
 const TOUCH_AFTER_MS = 60 * 1000;
 
 /** The only role the Monitor admits. See the module note. */
-const MONITOR_ROLES: readonly Role[] = ["AGENT"];
+const MONITOR_ROLES: readonly Role[] = TRACKED_ROLES;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");

@@ -82,6 +82,7 @@ export default function FilterPanel({
   section = "leads",
   demoCounts,
   workState,
+  contributor = false,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
@@ -102,6 +103,12 @@ export default function FilterPanel({
    * Export, which filters the whole table and keeps every control.
    */
   workState?: LeadWorkState;
+  /**
+   * A contributor's rail: no Category, Message or WhatsApp. Their leads are
+   * typed in by hand with no categories, and they do not record either of the
+   * other two (see the workspace's `contributorView`).
+   */
+  contributor?: boolean;
 }) {
   const [categoryQuery, setCategoryQuery] = useState("");
 
@@ -136,7 +143,15 @@ export default function FilterPanel({
    * which is what Called is for. Keeping the two status filters on exactly the
    * same screens also means one rule to explain rather than two.
    */
-  const canFilterByMessage = workState !== "new";
+  const canFilterByMessage = workState !== "new" && !contributor;
+
+  /*
+   * Where Source sits. Under Status normally, where it shares a column because
+   * two checkboxes do not earn one. A contributor's rail has no Category column,
+   * which leaves the last track empty — so there Source takes it as a group of
+   * its own instead.
+   */
+  const sourceApart = contributor && canFilterByStatus;
 
   /*
    * Nor by callback date, in the New queue, for the reason in `viewsFor`: a
@@ -203,6 +218,28 @@ export default function FilterPanel({
 
 
   const demoTotal = stats.total;
+
+  /** The Source checkboxes, drawn under Status or as their own group. */
+  const sourceChecks = (
+    <div className="flex flex-col gap-y-0.5">
+      {LEAD_SOURCES.map((source) => (
+        <Check
+          key={source}
+          checked={filters.sources.includes(source)}
+          onChange={() => toggleSource(source)}
+        >
+          <span
+            aria-hidden="true"
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${LEAD_SOURCE_DOTS[source]}`}
+          />
+          <span className="min-w-0 flex-1 leading-snug">{LEAD_SOURCE_LABELS[source]}</span>
+          <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+            {counts.bySource[source]}
+          </span>
+        </Check>
+      ))}
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -382,86 +419,71 @@ export default function FilterPanel({
         {/* Its own sub-heading only while Status is above it. Alone in the
             column it *is* the group, and a heading repeating the group's own
             title is noise. */}
-        <div className={canFilterByStatus ? "mt-4" : ""}>
-          {canFilterByStatus && (
-            <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
-              <h3 className="eyebrow">Source</h3>
-              {filters.sources.length > 0 && (
-                <span className="ml-auto">
-                  <Reset onClick={() => onChange({ ...filters, sources: [] })} />
-                </span>
-              )}
-            </div>
-          )}
-          <div className="flex flex-col gap-y-0.5">
-            {LEAD_SOURCES.map((source) => (
-              <Check
-                key={source}
-                checked={filters.sources.includes(source)}
-                onChange={() => toggleSource(source)}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${LEAD_SOURCE_DOTS[source]}`}
-                />
-                <span className="min-w-0 flex-1 leading-snug">
-                  {LEAD_SOURCE_LABELS[source]}
-                </span>
-                <span className="tnum shrink-0 font-mono text-meta text-fg-3">
-                  {counts.bySource[source]}
-                </span>
-              </Check>
-            ))}
+        {!sourceApart && (
+          <div className={canFilterByStatus ? "mt-4" : ""}>
+            {canFilterByStatus && (
+              <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+                <h3 className="eyebrow">Source</h3>
+                {filters.sources.length > 0 && (
+                  <span className="ml-auto">
+                    <Reset onClick={() => onChange({ ...filters, sources: [] })} />
+                  </span>
+                )}
+              </div>
+            )}
+            {sourceChecks}
           </div>
-        </div>
+        )}
       </Group>
 
       {/* --- Category / industry: multi-select ------------------------- */}
-      <Group
-        title="Category / industry"
-        action={
-          filters.categories.length > 0 && (
-            <Reset onClick={() => onChange({ ...filters, categories: [] })} />
-          )
-        }
-      >
-        <input
-          type="search"
-          value={categoryQuery}
-          onChange={(event) => setCategoryQuery(event.target.value)}
-          placeholder="Find a category…"
-          aria-label="Find a category"
-          className={`${CONTROL} mb-2 w-full placeholder:text-fg-3`}
-        />
-        {/* Taller than it was: one column shows half as many rows at a time,
-            and a five-row window over a hundred categories is a scrollbar with
-            a list attached. */}
-        <div className="max-h-[232px] overflow-y-auto pr-1">
-          {visibleCategories.length === 0 ? (
-            <p className="py-2 text-ui text-fg-3">No matching category.</p>
-          ) : (
-            <div className="flex flex-col gap-y-0.5">
-              {visibleCategories.map((category) => (
-                <Check
-                  key={category.name}
-                  checked={filters.categories.includes(category.name)}
-                  onChange={() => toggleCategory(category.name)}
-                >
-                  {/* Still truncated — a scraped category can be arbitrarily
-                      long — but never silently: the full name is in the title,
-                      and one column means the common ones now fit outright. */}
-                  <span className="min-w-0 flex-1 truncate" title={category.name}>
-                    {category.name}
-                  </span>
-                  <span className="tnum shrink-0 font-mono text-meta text-fg-3">
-                    {category.count}
-                  </span>
-                </Check>
-              ))}
-            </div>
-          )}
-        </div>
-      </Group>
+      {!contributor && (
+        <Group
+          title="Category / industry"
+          action={
+            filters.categories.length > 0 && (
+              <Reset onClick={() => onChange({ ...filters, categories: [] })} />
+            )
+          }
+        >
+          <input
+            type="search"
+            value={categoryQuery}
+            onChange={(event) => setCategoryQuery(event.target.value)}
+            placeholder="Find a category…"
+            aria-label="Find a category"
+            className={`${CONTROL} mb-2 w-full placeholder:text-fg-3`}
+          />
+          {/* Taller than it was: one column shows half as many rows at a time,
+              and a five-row window over a hundred categories is a scrollbar with
+              a list attached. */}
+          <div className="max-h-[232px] overflow-y-auto pr-1">
+            {visibleCategories.length === 0 ? (
+              <p className="py-2 text-ui text-fg-3">No matching category.</p>
+            ) : (
+              <div className="flex flex-col gap-y-0.5">
+                {visibleCategories.map((category) => (
+                  <Check
+                    key={category.name}
+                    checked={filters.categories.includes(category.name)}
+                    onChange={() => toggleCategory(category.name)}
+                  >
+                    {/* Still truncated — a scraped category can be arbitrarily
+                        long — but never silently: the full name is in the title,
+                        and one column means the common ones now fit outright. */}
+                    <span className="min-w-0 flex-1 truncate" title={category.name}>
+                      {category.name}
+                    </span>
+                    <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                      {category.count}
+                    </span>
+                  </Check>
+                ))}
+              </div>
+            )}
+          </div>
+        </Group>
+      )}
 
       {/* --- Location: country ---------------------------------------- */}
       <Group
@@ -515,36 +537,38 @@ export default function FilterPanel({
           * Offered in every queue — whether a number has WhatsApp is known
           * before the first call as much as after it.
           */}
-        <div className="mt-4">
-          <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
-            <h3 className="eyebrow">WhatsApp</h3>
-            {filters.whatsapp.length > 0 && (
-              <span className="ml-auto">
-                <Reset onClick={() => onChange({ ...filters, whatsapp: [] })} />
-              </span>
-            )}
-          </div>
-          <div className="flex flex-col gap-y-0.5">
-            {WHATSAPP_ANSWERS.map((answer) => (
-              <Check
-                key={answer}
-                checked={filters.whatsapp.includes(answer)}
-                onChange={() => toggleWhatsapp(answer)}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${WHATSAPP_ANSWER_DOTS[answer]}`}
-                />
-                <span className="min-w-0 flex-1 leading-snug">
-                  {WHATSAPP_ANSWER_LABELS[answer]}
+        {!contributor && (
+          <div className="mt-4">
+            <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+              <h3 className="eyebrow">WhatsApp</h3>
+              {filters.whatsapp.length > 0 && (
+                <span className="ml-auto">
+                  <Reset onClick={() => onChange({ ...filters, whatsapp: [] })} />
                 </span>
-                <span className="tnum shrink-0 font-mono text-meta text-fg-3">
-                  {counts.byWhatsapp[answer].toLocaleString()}
-                </span>
-              </Check>
-            ))}
+              )}
+            </div>
+            <div className="flex flex-col gap-y-0.5">
+              {WHATSAPP_ANSWERS.map((answer) => (
+                <Check
+                  key={answer}
+                  checked={filters.whatsapp.includes(answer)}
+                  onChange={() => toggleWhatsapp(answer)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${WHATSAPP_ANSWER_DOTS[answer]}`}
+                  />
+                  <span className="min-w-0 flex-1 leading-snug">
+                    {WHATSAPP_ANSWER_LABELS[answer]}
+                  </span>
+                  <span className="tnum shrink-0 font-mono text-meta text-fg-3">
+                    {counts.byWhatsapp[answer].toLocaleString()}
+                  </span>
+                </Check>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </Group>
 
       {/* --- Callback date range -------------------------------------- */}
@@ -607,6 +631,20 @@ export default function FilterPanel({
               </p>
             </div>
           )}
+        </Group>
+      )}
+
+      {/* --- Source, in its own column (contributors — see `sourceApart`) --- */}
+      {sourceApart && (
+        <Group
+          title="Source"
+          action={
+            filters.sources.length > 0 && (
+              <Reset onClick={() => onChange({ ...filters, sources: [] })} />
+            )
+          }
+        >
+          {sourceChecks}
         </Group>
       )}
       </div>

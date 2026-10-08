@@ -59,7 +59,7 @@ export async function POST(request: Request): Promise<Response> {
   const role = payload.role;
   if (!isRole(role)) {
     return Response.json(
-      { error: "invalid_role", message: "Role must be ADMIN or AGENT." },
+      { error: "invalid_role", message: "Role must be ADMIN, AGENT or CONTRIBUTOR." },
       { status: 400 },
     );
   }

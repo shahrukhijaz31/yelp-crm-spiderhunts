@@ -5,12 +5,23 @@ import {
   AudioLines,
   CalendarCheck2,
   CalendarClock,
+  CircleDot,
+  MessageSquareText,
   PenLine,
   PhoneOutgoing,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
+import {
+  LEAD_CREATED,
+  LONG_TEXT_FIELDS,
+  changeLabel,
+  formatChangeValue,
+  type LeadChangeEntry,
+  type LeadChangeField,
+} from "@/lib/leadChangeRules";
+import { formatCallbackDate } from "@/lib/leadUtils";
 import { formatMeetingDay, formatMeetingTime } from "@/lib/meetings";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
@@ -18,14 +29,15 @@ import type { Lead } from "@/lib/types";
 /**
  * What is actually known about this lead's history, as a timeline.
  *
- * **Nothing here is invented, and that is the design constraint.** This app has
- * no activity table: it does not record that a status went from No answer to
- * Interested, or that a note was edited at 2:28pm, because nothing has ever
- * written those rows. A timeline that showed them would be a fiction, and the
- * one place a fiction is most expensive is the panel an agent reads to remember
- * what happened last time.
+ * **Nothing here is invented, and that is the design constraint.** The panel
+ * an agent reads to remember what happened last time is the one place a
+ * fiction is most expensive.
  *
- * So the trail is assembled from the timestamps Postgres genuinely keeps (see
+ * The body of it is `lead_changes` (`lib/leadChanges.ts`): every field every
+ * save changed, with the value before and after and who saved it — a status
+ * going from No answer to Interested, a call note written after each call, a
+ * phone number corrected. That table starts empty, so a lead worked before it
+ * existed falls back on the timestamps Postgres has always kept (see
  * schema.prisma):
  *
  *   created_at            the lead arrived, and which import it came in on
@@ -41,8 +53,8 @@ import type { Lead } from "@/lib/types";
  * where the agent is sitting, and `formatMeetingDay` is the same function the
  * Meetings agenda names its days with.
  *
- * If a real activity log is added later, this component gains rows and loses
- * nothing — the shape it draws is already one event per line.
+ * Those still appear, deduplicated against the history so one save is never
+ * drawn twice.
  */
 
 interface ActivityEvent {
@@ -56,6 +68,129 @@ interface ActivityEvent {
   icon: LucideIcon;
   title: string;
   detail?: React.ReactNode;
+}
+
+/** Which glyph a change wears: what kind of thing changed, not which field. */
+const CHANGE_ICONS: Record<LeadChangeField, LucideIcon> = {
+  name: PenLine,
+  phone: PenLine,
+  website: PenLine,
+  address: PenLine,
+  source: PenLine,
+  url: PenLine,
+  status: PhoneOutgoing,
+  messageStatus: CircleDot,
+  onWhatsapp: CircleDot,
+  notes: MessageSquareText,
+  callbackDate: CalendarClock,
+  meetingTime: CalendarClock,
+  meetingAttendees: CalendarClock,
+  meetingNotes: MessageSquareText,
+  meetingCompletedAt: CalendarCheck2,
+};
+
+/** The fields one booking writes together — see {@link meetingEvent}. */
+const MEETING_FIELDS: ReadonlySet<string> = new Set([
+  "callbackDate",
+  "meetingTime",
+  "meetingAttendees",
+]);
+
+/**
+ * One save's meeting fields as a single line: "Meeting booked · Oct 8 ·
+ * 1:05 pm · with Matt". The row-per-field history is still what is stored;
+ * this is only how a booking reads.
+ */
+function meetingEvent(group: LeadChangeEntry[], today: string): ActivityEvent | null {
+  const first = group[0];
+  if (!first) return null;
+  const value = (field: string) => group.find((change) => change.field === field);
+
+  const date = value("callbackDate");
+  const time = value("meetingTime");
+  const attendees = value("meetingAttendees");
+
+  // Cleared: the date went to empty. Anything else is a booking or a change
+  // to one — "booked" when there was no date before, "updated" otherwise.
+  const title =
+    date && date.newValue === null
+      ? "Meeting removed"
+      : date && date.oldValue === null
+        ? "Meeting booked"
+        : "Meeting updated";
+
+  const parts = [
+    date?.newValue ? formatCallbackDate(date.newValue, today) : null,
+    time?.newValue ? formatMeetingTime(time.newValue) : null,
+    attendees?.newValue ? `with ${attendees.newValue}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return instantEvent(first.at, {
+    key: `meeting-${first.id}`,
+    icon: CalendarClock,
+    title,
+    detail: (
+      <>
+        {parts.length > 0 && <span className="break-words">{parts.join(" · ")}</span>}
+        {first.by && <span className="mt-0.5 block">By {first.by.name}</span>}
+      </>
+    ),
+  });
+}
+
+/**
+ * One history row as a timeline event.
+ *
+ * Short values read as "Status: No answer → Interested". Notes are free text,
+ * so they show the note as written rather than a before-and-after nobody could
+ * read at this width — the previous version is the row below it.
+ */
+function changeEvent(change: LeadChangeEntry): ActivityEvent | null {
+  const field = change.field as LeadChangeField;
+  const by = change.by ? `By ${change.by.name}` : null;
+  const label = changeLabel(change.field);
+  const before = formatChangeValue(change.field, change.oldValue);
+  const after = formatChangeValue(change.field, change.newValue);
+
+  if (LONG_TEXT_FIELDS.has(field)) {
+    return instantEvent(change.at, {
+      key: change.id,
+      icon: CHANGE_ICONS[field],
+      title:
+        after === null
+          ? `${label} cleared`
+          : field === "notes"
+            ? "Call note"
+            : before === null
+              ? `${label} added`
+              : `${label} updated`,
+      detail: (
+        <>
+          {after !== null && (
+            <span className="mt-1 block whitespace-pre-wrap break-words rounded-md border border-line bg-recessed px-2.5 py-1.5 text-fg-2">
+              {after}
+            </span>
+          )}
+          {by && <span className="mt-1 block">{by}</span>}
+        </>
+      ),
+    });
+  }
+
+  return instantEvent(change.at, {
+    key: change.id,
+    icon: CHANGE_ICONS[field] ?? PenLine,
+    title: label,
+    detail: (
+      <>
+        <span className="break-words">
+          {before ?? "—"} <span aria-hidden="true">→</span>
+          <span className="sr-only">changed to</span> {after ?? "—"}
+        </span>
+        {by && <span className="mt-0.5 block">{by}</span>}
+      </>
+    ),
+  });
 }
 
 /** A local `YYYY-MM-DD` for an instant — never the UTC one, which shifts days. */
@@ -92,6 +227,8 @@ export default function LeadActivity({
   updatedAt,
   firstCalledAt,
   sourceBatch,
+  addedBy,
+  changes,
   recording,
 }: {
   lead: Lead;
@@ -100,6 +237,10 @@ export default function LeadActivity({
   updatedAt: string;
   firstCalledAt: string | null;
   sourceBatch: string | null;
+  /** Who typed the lead in by hand, when somebody did. */
+  addedBy: { id: string; name: string } | null;
+  /** Every recorded edit, newest first. */
+  changes: LeadChangeEntry[];
   recording: RecordingSummary | null;
 }) {
   const reduced = useReducedMotion();
@@ -110,9 +251,32 @@ export default function LeadActivity({
     key: "created",
     icon: Sparkles,
     title: "Added to the workspace",
-    detail: sourceBatch ? `Imported in ${sourceBatch}` : undefined,
+    detail: addedBy
+      ? `Added by hand by ${addedBy.name}`
+      : sourceBatch
+        ? `Imported in ${sourceBatch}`
+        : undefined,
   });
   if (created) events.push(created);
+
+  // The history. The "created" row is the event above, told with its author,
+  // so it is not drawn twice. A booking's date, time and attendees arrive as
+  // separate rows from one save, and are drawn as the one booking they are.
+  const meetingSaves = new Map<string, LeadChangeEntry[]>();
+  for (const change of changes) {
+    if (change.field === LEAD_CREATED) continue;
+    if (MEETING_FIELDS.has(change.field)) {
+      const key = `${change.at}|${change.by?.id ?? ""}`;
+      meetingSaves.set(key, [...(meetingSaves.get(key) ?? []), change]);
+      continue;
+    }
+    const event = changeEvent(change);
+    if (event) events.push(event);
+  }
+  for (const group of meetingSaves.values()) {
+    const event = meetingEvent(group, today);
+    if (event) events.push(event);
+  }
 
   const worked = instantEvent(firstCalledAt, {
     key: "first-called",
@@ -120,7 +284,14 @@ export default function LeadActivity({
     title: "First worked",
     detail: "Moved from the New queue to Called",
   });
-  if (worked) events.push(worked);
+  // Stamped by the same save as a status change, which the history already
+  // shows with its outcome — so only drawn when there is no such row beside it.
+  if (
+    worked &&
+    !events.some((event) => event.key !== "created" && Math.abs(event.at - worked.at) < 2000)
+  ) {
+    events.push(worked);
+  }
 
   const uploaded = recording
     ? instantEvent(recording.uploadedAt, {
@@ -260,11 +431,12 @@ export default function LeadActivity({
         ))}
       </div>
 
-      {/* Said once, quietly, at the foot: the trail is short because the
-          record is short, not because the panel is broken. */}
+      {/* Said once, quietly, at the foot: a lead worked before the history
+          existed has a short trail because the record is short, not because
+          the panel is broken. */}
       <p className="mt-1 text-meta leading-relaxed text-fg-4">
-        Only events the workspace records are shown. Individual status changes
-        and note edits are not kept as history.
+        Every saved change is listed with who made it. Edits made before change
+        history was switched on show only as &ldquo;Last saved&rdquo;.
       </p>
     </section>
   );

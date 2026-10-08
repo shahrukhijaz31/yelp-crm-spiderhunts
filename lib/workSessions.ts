@@ -1,3 +1,4 @@
+import { isTrackedRole } from "./access";
 import { Prisma } from "./generated/prisma/client";
 import { HEARTBEAT_SECONDS, todayWorkday, workdayStart, type WorkClock } from "./performanceRules";
 import { prisma } from "./prisma";
@@ -315,7 +316,7 @@ export async function openOrResumeWorkSession(
       // administrator has no open row for a later sweep to find. Rows written
       // before this rule existed are left alone; they close on their own
       // schedule and the reports below no longer list them.
-      if (user?.role !== "AGENT") return null;
+      if (!user || !isTrackedRole(user.role)) return null;
 
       const open = await tx.workSession.findFirst({
         where: { userId, endedAt: null },

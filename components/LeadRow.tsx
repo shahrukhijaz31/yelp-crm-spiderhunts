@@ -76,6 +76,7 @@ export default function LeadRow({
   onRecordingSaved,
   demo = null,
   onDemoSaved,
+  contributor = false,
 }: {
   lead: Lead;
   today: string;
@@ -110,6 +111,11 @@ export default function LeadRow({
    */
   demo?: DemoSummary | null;
   onDemoSaved?: (leadId: string, demo: DemoSummary) => void;
+  /**
+   * A contributor's row: no Category, WhatsApp, Audio or Booked cells, and the date the
+   * lead was added in the last one. Must match `CONTRIBUTOR_COLUMNS`.
+   */
+  contributor?: boolean;
 }) {
   const state = callbackState(lead, today);
 
@@ -198,18 +204,20 @@ export default function LeadRow({
         </span>
       </td>
 
-      <td className="truncate px-3 py-2 text-ui text-fg-3">
-        {lead.categories.length > 0 ? (
-          <span title={lead.categories.join(", ")}>
-            {lead.categories.slice(0, 2).join(", ")}
-            {lead.categories.length > 2 && (
-              <span className="text-fg-4"> +{lead.categories.length - 2}</span>
-            )}
-          </span>
-        ) : (
-          <span className="text-fg-4">—</span>
-        )}
-      </td>
+      {!contributor && (
+        <td className="truncate px-3 py-2 text-ui text-fg-3">
+          {lead.categories.length > 0 ? (
+            <span title={lead.categories.join(", ")}>
+              {lead.categories.slice(0, 2).join(", ")}
+              {lead.categories.length > 2 && (
+                <span className="text-fg-4"> +{lead.categories.length - 2}</span>
+              )}
+            </span>
+          ) : (
+            <span className="text-fg-4">—</span>
+          )}
+        </td>
+      )}
 
       <td className="px-3 py-2">
         {!lead.website ? (
@@ -259,9 +267,11 @@ export default function LeadRow({
           than a "Not checked" chip for the usual case: most of the list has
           never been checked, and a column of chips saying so would out-shout
           the handful of rows that carry a real answer. */}
-      <td className="px-3 py-2">
-        <OnWhatsappChip value={lead.onWhatsapp} />
-      </td>
+      {!contributor && (
+        <td className="px-3 py-2">
+          <OnWhatsappChip value={lead.onWhatsapp} />
+        </td>
+      )}
 
       {/* The one action left in a read-only row, and it is deliberately the
           smallest thing in it: a 28px glyph that opens a file picker and posts
@@ -277,7 +287,7 @@ export default function LeadRow({
           tables. */}
       {/* `relative` so a failed upload's message can be floated out of a cell
           only wide enough for the control itself. */}
-      {section === "demo" ? (
+      {contributor ? null : section === "demo" ? (
         <>
           <td className="relative px-3 py-2">
             <DemoImageCell
@@ -364,7 +374,9 @@ export default function LeadRow({
           className="row-open-link"
         />
 
-        {lead.callbackDate ? (
+        {contributor ? (
+          <DateAdded iso={lead.createdAt ?? null} today={today} />
+        ) : lead.callbackDate ? (
           <span
             className={`tnum font-mono text-caption font-medium ${
               state === "overdue"
@@ -384,6 +396,37 @@ export default function LeadRow({
         )}
       </td>
     </tr>
+  );
+}
+
+/**
+ * When a lead was added, as a date and time in the reader's timezone, with the
+ * full date in the tooltip. `suppressHydrationWarning` because the server renders it in its
+ * own timezone and the browser may be in another — the browser's is the one
+ * that should win, and the difference is not an error.
+ */
+function DateAdded({ iso, today }: { iso: string | null; today: string }) {
+  const date = iso ? new Date(iso) : null;
+  if (!date || Number.isNaN(date.getTime())) return <span className="text-fg-4">—</span>;
+
+  const day = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  return (
+    <span
+      className="tnum font-mono text-caption text-fg-2"
+      title={date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
+      suppressHydrationWarning
+    >
+      {formatCallbackDate(day, today)}
+      <span className="text-fg-3">
+        {" "}
+        {date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+      </span>
+    </span>
   );
 }
 

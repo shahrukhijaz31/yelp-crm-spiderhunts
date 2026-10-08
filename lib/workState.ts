@@ -31,7 +31,7 @@
  * been called is in New *and* SMS Sent, and stays in New until a call outcome
  * is saved, exactly as it would have without the message.
  */
-export const LEAD_WORK_STATES = ["new", "called", "sms"] as const;
+export const LEAD_WORK_STATES = ["new", "called", "sms", "all"] as const;
 
 export type LeadWorkState = (typeof LEAD_WORK_STATES)[number];
 
@@ -48,6 +48,7 @@ export const LEAD_WORK_STATE_LABELS: Record<LeadWorkState, string> = {
   new: "New",
   called: "Called",
   sms: "SMS Sent",
+  all: "My leads",
 };
 
 /** Shown beside the control so the current queue is never ambiguous. */
@@ -55,7 +56,30 @@ export const LEAD_WORK_STATE_HINTS: Record<LeadWorkState, string> = {
   new: "Never called — work these top to bottom.",
   called: "Worked at least once, most recently worked first.",
   sms: "Sent an SMS or WhatsApp, called or not — most recently worked first.",
+  all: "Every lead you added, called or not — most recently worked first.",
 };
+
+/**
+ * Which queues a role works from.
+ *
+ * Agents and administrators split the shared pool three ways. A contributor's
+ * list is the handful of leads they added themselves, so it is one queue —
+ * `all` — and a lead they call stays in front of them instead of moving to a
+ * Called queue they are not given. The worklist never offers a queue outside
+ * this list; the server would answer one (`all` over a contributor's scope is
+ * still their own leads), so this is about what is drawn, not who may read.
+ */
+export function queuesFor(role: string): readonly LeadWorkState[] {
+  return role === "CONTRIBUTOR" ? CONTRIBUTOR_QUEUES : POOL_QUEUES;
+}
+
+export const POOL_QUEUES: readonly LeadWorkState[] = ["new", "called", "sms"];
+const CONTRIBUTOR_QUEUES: readonly LeadWorkState[] = ["all"];
+
+/** The queue a role's worklist opens on: the first one it is given. */
+export function defaultWorkStateFor(role: string): LeadWorkState {
+  return queuesFor(role)[0];
+}
 
 /**
  * How many leads sit in each queue. Every lead is in exactly one of New and

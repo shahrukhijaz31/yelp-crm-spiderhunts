@@ -53,7 +53,7 @@ export interface PublicUser {
 
 export class UserInputError extends Error {}
 
-export const ROLES: readonly Role[] = ["ADMIN", "AGENT"];
+export const ROLES: readonly Role[] = ["ADMIN", "AGENT", "CONTRIBUTOR"];
 
 export function isRole(value: unknown): value is Role {
   return typeof value === "string" && (ROLES as readonly string[]).includes(value);
@@ -141,7 +141,7 @@ export async function createUser(input: NewUser): Promise<PublicUser> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new UserInputError("Enter a valid email address.");
   }
-  if (!isRole(input.role)) throw new UserInputError("Role must be ADMIN or AGENT.");
+  if (!isRole(input.role)) throw new UserInputError("Role must be ADMIN, AGENT or CONTRIBUTOR.");
 
   const passwordProblem = describePasswordProblem(input.password ?? "");
   if (passwordProblem) throw new UserInputError(passwordProblem);
@@ -222,7 +222,7 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
   } = {};
 
   if (edits.role !== undefined) {
-    if (!isRole(edits.role)) throw new UserInputError("Role must be ADMIN or AGENT.");
+    if (!isRole(edits.role)) throw new UserInputError("Role must be ADMIN, AGENT or CONTRIBUTOR.");
     data.role = edits.role;
   }
 
@@ -280,7 +280,8 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
   const losingAnAdmin =
     target.role === "ADMIN" &&
     target.isActive &&
-    (data.role === "AGENT" || data.isActive === false);
+    // Any role other than ADMIN is a demotion — Contributor as much as Agent.
+    ((data.role !== undefined && data.role !== "ADMIN") || data.isActive === false);
 
   if (losingAnAdmin && (await countAdmins()) <= 1) {
     throw new UserInputError(
@@ -354,15 +355,20 @@ export interface UserFootprint {
   recordings: number;
   /** Reset codes they issued for *other* people, as an administrator. */
   resetsIssued: number;
+  /** Leads they added by hand, and lead edits they saved. */
+  leadsAdded: number;
+  leadChanges: number;
 }
 
 export async function describeUserFootprint(id: string): Promise<UserFootprint> {
-  const [activity, recordings, resetsIssued] = await Promise.all([
+  const [activity, recordings, resetsIssued, leadsAdded, leadChanges] = await Promise.all([
     prisma.leadActivity.count({ where: { userId: id } }),
     prisma.meetingRecording.count({ where: { uploadedById: id } }),
     prisma.passwordReset.count({ where: { issuedById: id } }),
+    prisma.lead.count({ where: { createdById: id } }),
+    prisma.leadChange.count({ where: { userId: id } }),
   ]);
-  return { activity, recordings, resetsIssued };
+  return { activity, recordings, resetsIssued, leadsAdded, leadChanges };
 }
 
 /**
@@ -411,6 +417,8 @@ export async function deleteUser(id: string): Promise<boolean> {
     footprint.activity > 0 && `${footprint.activity.toLocaleString()} logged ${footprint.activity === 1 ? "action" : "actions"} on leads`,
     footprint.recordings > 0 && `${footprint.recordings} call ${footprint.recordings === 1 ? "recording" : "recordings"}`,
     footprint.resetsIssued > 0 && `${footprint.resetsIssued} password ${footprint.resetsIssued === 1 ? "reset" : "resets"} issued for other people`,
+    footprint.leadsAdded > 0 && `${footprint.leadsAdded.toLocaleString()} ${footprint.leadsAdded === 1 ? "lead" : "leads"} added by hand`,
+    footprint.leadChanges > 0 && `${footprint.leadChanges.toLocaleString()} recorded lead ${footprint.leadChanges === 1 ? "edit" : "edits"}`,
   ].filter((entry): entry is string => typeof entry === "string");
 
   if (blocking.length > 0) {

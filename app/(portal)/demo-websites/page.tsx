@@ -63,7 +63,9 @@ export default async function DemoWebsitesPage(props: PageProps<"/demo-websites"
     today,
     page: readPage(one(params.page)),
     pageSize: readPageSize(one(params.pageSize)),
-  });
+    // The whole pool: a contributor never holds the Demo Websites module
+    // (`CONTRIBUTOR_MODULE_ACCESS`), so nobody scoped reaches this page.
+  }, null);
 
   // Reads that depend on the page above, and reads that do not. The demo
   // metadata is keyed by the ids `listLeadsPage` just chose, so it cannot start
@@ -71,13 +73,13 @@ export default async function DemoWebsitesPage(props: PageProps<"/demo-websites"
   // independent and ride along.
   const [demos, categories, countries, demoCounts, queueFacets] = await Promise.all([
     demoSummariesFor(result.leads.map((lead) => lead.id)),
-    leadCategories(),
-    leadCountries(),
+    leadCategories(null),
+    leadCountries(null),
     // The numbers on the demo filter buttons, so the panel opens with them
     // rather than filling in after a round trip.
     demoFilterCounts(),
     // The filter rail's checkbox counts for the queue the screen opens on.
-    leadQueueFacets(DEFAULT_WORK_STATE),
+    leadQueueFacets(DEFAULT_WORK_STATE, null),
   ]);
 
   return (

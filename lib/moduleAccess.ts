@@ -10,6 +10,8 @@ import {
 } from "./modules";
 import { prisma } from "./prisma";
 
+const NO_COLUMNS: ModuleAccessColumns = { canAccessLeads: false, canAccessDemoWebsites: false };
+
 /**
  * Reading an account's module access out of Postgres.
  *
@@ -52,6 +54,9 @@ import { prisma } from "./prisma";
 export const moduleAccessFor = cache(
   async (user: SessionUser): Promise<ModuleAccess> => {
     if (user.role === "ADMIN") return { ...ADMIN_MODULE_ACCESS };
+    // Fixed for contributors too, and for the same reason — see
+    // `CONTRIBUTOR_MODULE_ACCESS`. `moduleAccessOf` ignores the columns.
+    if (user.role === "CONTRIBUTOR") return moduleAccessOf(user.role, NO_COLUMNS);
 
     const row = await prisma.user.findUnique({
       where: { id: user.id },

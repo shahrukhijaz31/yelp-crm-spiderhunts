@@ -7,8 +7,21 @@ import { KeyRound, Trash2 } from "lucide-react";
 import PasswordField from "./PasswordField";
 import ResetPasswordDialog from "./ResetPasswordDialog";
 import type { Role } from "@/lib/access";
-import { MODULE_HINTS, MODULE_LABELS, PORTAL_MODULES, type PortalModule } from "@/lib/modules";
+import {
+  CONTRIBUTOR_MODULE_ACCESS,
+  MODULE_HINTS,
+  MODULE_LABELS,
+  PORTAL_MODULES,
+  type PortalModule,
+} from "@/lib/modules";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password";
+
+/** The toast after a role change: "Priya is now an administrator." */
+const ROLE_PHRASES: Record<Role, string> = {
+  ADMIN: "an administrator",
+  AGENT: "an agent",
+  CONTRIBUTOR: "a contributor",
+};
 
 /**
  * Who can sign in, and as what.
@@ -214,13 +227,14 @@ export default function UsersPanel({
                     void patchUser(
                       user.id,
                       { role: event.target.value },
-                      `${user.name} is now ${event.target.value === "ADMIN" ? "an administrator" : "an agent"}. They have been signed out.`,
+                      `${user.name} is now ${ROLE_PHRASES[event.target.value as Role] ?? "an agent"}. They have been signed out.`,
                     )
                   }
                   className="ui-field cursor-pointer"
                 >
                   <option value="ADMIN">Admin</option>
                   <option value="AGENT">Agent</option>
+                  <option value="CONTRIBUTOR">Contributor</option>
                 </select>
               </label>
 
@@ -466,6 +480,9 @@ function ModuleAccess({
   onSave: (edits: Record<string, boolean>, describe: string) => Promise<void>;
 }) {
   const isAdmin = user.role === "ADMIN";
+  // A contributor's access is fixed too — the Leads section, narrowed to their
+  // own leads, and never Demo Websites (`CONTRIBUTOR_MODULE_ACCESS`).
+  const isContributor = user.role === "CONTRIBUTOR";
 
   const saved = useMemo<Record<PortalModule, boolean>>(
     () => ({ leads: user.canAccessLeads, demoWebsites: user.canAccessDemoWebsites }),
@@ -491,7 +508,7 @@ function ModuleAccess({
 
   // Locked for an administrator, who has both modules whatever the row says,
   // and on your own row, where the API refuses the edit anyway.
-  const locked = isAdmin || isSelf;
+  const locked = isAdmin || isContributor || isSelf;
 
   async function save() {
     const granted = PORTAL_MODULES.filter((module) => draft[module]).map(
@@ -512,7 +529,11 @@ function ModuleAccess({
 
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         {PORTAL_MODULES.map((module) => {
-          const checked = isAdmin ? true : draft[module];
+          const checked = isAdmin
+            ? true
+            : isContributor
+              ? CONTRIBUTOR_MODULE_ACCESS[module]
+              : draft[module];
 
           return (
             <label
@@ -520,7 +541,9 @@ function ModuleAccess({
               title={
                 isAdmin
                   ? "Administrators always have both sections"
-                  : isSelf
+                  : isContributor
+                    ? "Contributors see only the leads they add, and never Demo Websites"
+                    : isSelf
                     ? "You cannot change your own lead access"
                     : MODULE_HINTS[module]
               }
@@ -696,6 +719,7 @@ function NewUserForm({
             className="ui-field cursor-pointer"
           >
             <option value="AGENT">Agent</option>
+            <option value="CONTRIBUTOR">Contributor</option>
             <option value="ADMIN">Admin</option>
           </select>
         </label>

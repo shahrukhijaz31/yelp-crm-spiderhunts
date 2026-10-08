@@ -13,6 +13,7 @@ import {
   Gauge,
   Globe,
   Inbox,
+  ListChecks,
   MessageSquare,
   Monitor,
   PhoneOutgoing,
@@ -24,7 +25,7 @@ import {
 } from "lucide-react";
 
 import { useLeadQueue } from "./LeadQueueProvider";
-import { canAccess, type Role } from "@/lib/access";
+import { TRACKED_ROLES, canAccess, type Role } from "@/lib/access";
 import {
   ADMIN_MODULE_ACCESS,
   hasModule,
@@ -34,7 +35,6 @@ import {
 } from "@/lib/modules";
 import { NAV_MODE_CLASSES, type NavMode } from "@/lib/navPreference";
 import {
-  LEAD_WORK_STATES,
   LEAD_WORK_STATE_LABELS,
   type LeadWorkState,
 } from "@/lib/workState";
@@ -127,6 +127,7 @@ const QUEUE_ICONS: Record<LeadWorkState, LucideIcon> = {
   new: Inbox,
   called: PhoneOutgoing,
   sms: MessageSquare,
+  all: ListChecks,
 };
 
 /** The workspaces an agent moves between all day. Order is a day's work. */
@@ -149,11 +150,11 @@ const WORKSPACE: NavItem[] = [
    * right place for "who is this useful to", and the wrong place for a rule
    * anyone could sidestep with the address bar.
    */
-  { href: "/my-performance", label: "My performance", icon: Gauge, roles: ["AGENT"] },
+  { href: "/my-performance", label: "My performance", icon: Gauge, roles: TRACKED_ROLES },
   // Same rule and the same reasoning as My performance above: an agent's own
   // clock, with the administrator's view of everybody's — Time tracking and
   // Timesheets — sitting in the Data group below.
-  { href: "/time-tracking", label: "My time", icon: Clock, roles: ["AGENT"] },
+  { href: "/time-tracking", label: "My time", icon: Clock, roles: TRACKED_ROLES },
 ];
 
 /** Bulk data movement, and the read-only view of it. Admin-only, all four. */
@@ -251,7 +252,7 @@ export default function AppSidebar({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { workState, setWorkState, counts } = useLeadQueue();
+  const { workState, setWorkState, counts, queues } = useLeadQueue();
 
   // What this mode does to a label, a heading and a nav row. See the note on
   // NAV_MODE_CLASSES for why these are whole literal strings.
@@ -390,7 +391,7 @@ export default function AppSidebar({
           <div className="flex flex-col gap-1">
             <p className={`eyebrow px-2 pb-1 ${style.hide}`}>Leads</p>
             {hasModule(access, "leads") &&
-              LEAD_WORK_STATES.map((candidate) => {
+              queues.map((candidate) => {
               // Only lit while the worklist is actually on screen. On Meetings
               // these are a way *back* to a queue, not a description of what is
               // in front of you, and a highlight there would say otherwise.

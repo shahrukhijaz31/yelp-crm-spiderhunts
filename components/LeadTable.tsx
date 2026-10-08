@@ -66,6 +66,21 @@ const COLUMNS: Column[] = [
 ];
 
 /**
+ * A contributor's table: the leads they added, and only what they need to work
+ * them. Category, WhatsApp, Audio and Booked go — a hand-added lead has no
+ * scraped categories, and a contributor's list is short and they open each lead
+ * to work it — and Date added takes the last seat, because
+ * "which ones did I add this week" is the question this list is read for.
+ */
+const CONTRIBUTOR_COLUMNS: Column[] = [
+  { label: "Business", width: "32%", sortKey: "name" },
+  { label: "Phone", width: "17%", sortKey: "phone" },
+  { label: "Website", width: "21%" },
+  { label: "Status", width: "13%" },
+  { label: "Date added", width: "17%" },
+];
+
+/**
  * The same table, in Demo mode.
  *
  * **The same columns**, in the same order, at the same widths where they fit —
@@ -126,6 +141,7 @@ export default function LeadTable({
   onRecordingSaved,
   demos,
   onDemoSaved,
+  contributor = false,
 }: {
   leads: Lead[];
   today: string;
@@ -173,9 +189,11 @@ export default function LeadTable({
   demos?: DemoSummaryMap;
   /** A demo image or link that was just saved from a row. */
   onDemoSaved?: (leadId: string, demo: DemoSummary) => void;
+  /** Draw a contributor's columns (`CONTRIBUTOR_COLUMNS`). */
+  contributor?: boolean;
 }) {
   const demo = section === "demo";
-  const columns = demo ? DEMO_COLUMNS : COLUMNS;
+  const columns = demo ? DEMO_COLUMNS : contributor ? CONTRIBUTOR_COLUMNS : COLUMNS;
   return (
     // No panel of its own: the table is the body of the workspace surface,
     // between the toolbar strip above it and the pager strip below. Only the
@@ -268,6 +286,7 @@ export default function LeadTable({
               onRecordingSaved={onRecordingSaved}
               demo={demos?.[lead.id] ?? null}
               onDemoSaved={onDemoSaved}
+              contributor={contributor}
             />
           ))}
           {leads.length === 0 && (

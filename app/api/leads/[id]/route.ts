@@ -1,11 +1,14 @@
 import { apiAnyModule, LEAD_POOL_MODULES } from "@/lib/authz";
 import { demoSummaryFor } from "@/lib/demoWebsites";
+import { listLeadChanges } from "@/lib/leadChanges";
 import {
   getLeadDetail,
   LeadEditError,
+  parseLeadDetails,
   parseLeadEdits,
   updateLeadFields,
 } from "@/lib/leadDb";
+import { canEditLeadDetails, leadScopeFor } from "@/lib/leadScope";
 import { getRecordingSummaryFor } from "@/lib/recordings";
 
 /**
@@ -43,7 +46,9 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const detail = await getLeadDetail(id);
+    // Scoped: a contributor gets the same 404 for somebody else's lead as for
+    // one that does not exist.
+    const detail = await getLeadDetail(id, leadScopeFor(auth));
     if (!detail) {
       return Response.json(
         {
@@ -101,10 +106,18 @@ export async function GET(
  * body is returned mainly for debugging and for the rollback path: on a
  * non-2xx the provider puts the previous value back.
  *
- * Open to both roles. Status, notes and callbacks are the agent's day job, and
+ * Open to every role. Status, notes and callbacks are the agent's day job, and
  * `parseLeadEdits` is a whitelist — there is no field reachable through this
  * body that an agent should not be setting, and nothing here can touch a user
  * or a role.
+ *
+ * The lead's details (`name`, `phone`, `website`, `source`) are read from the
+ * body only for a role allowed to correct them (`canEditLeadDetails`); for an
+ * agent they are ignored exactly as unknown keys always were. A contributor is
+ * held to their own leads by the scope, so they cannot edit anybody else's.
+ *
+ * The response carries the lead's history as well as the row, so the Activity
+ * panel shows the edit that was just saved without a second request.
  */
 export async function PATCH(
   request: Request,
@@ -127,7 +140,10 @@ export async function PATCH(
 
   let edits;
   try {
-    edits = parseLeadEdits(body);
+    edits = {
+      ...parseLeadEdits(body),
+      ...(canEditLeadDetails(auth.role) ? parseLeadDetails(body, "edit") : {}),
+    };
   } catch (error) {
     if (error instanceof LeadEditError) {
       return Response.json({ error: "invalid_field", message: error.message }, { status: 400 });
@@ -140,7 +156,7 @@ export async function PATCH(
     // anything the body claimed. This is what attributes the save in
     // `lead_activities`, so there is no way to record work under someone
     // else's name: the endpoint never reads an author from the request.
-    const lead = await updateLeadFields(id, edits, auth.id);
+    const lead = await updateLeadFields(id, edits, auth.id, leadScopeFor(auth));
     if (!lead) {
       return Response.json(
         {
@@ -151,7 +167,10 @@ export async function PATCH(
       );
     }
 
-    return Response.json({ lead }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json(
+      { lead, changes: await listLeadChanges(id) },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error(`PATCH /api/leads/${id} failed:`, error);
     return Response.json(

@@ -81,10 +81,10 @@ model Lead {
   // --- Scraped fields (match the scraper CSV columns) ---
   name       String
   /// Never null in the UI — an absent address is the empty string.
-  address    String   @default("")
+  address    String     @default("")
   /// The CSV `categories` column is a list, and the UI renders it as one, so
   /// it is stored as a Postgres text[] instead of being flattened to a string.
-  categories String[] @default([])
+  categories String[]   @default([])
   /// Nullable to match the type, though `cleanLeads` means stored rows have one.
   phone      String?
   website    String?
@@ -117,14 +117,14 @@ model Lead {
   /// *labels* are still a closed set (`COUNTRY_LABELS`), so the UI never has to
   /// render a code it does not know; that is a display concern, not a storage
   /// one.
-  country    String?
+  country String?
   /// The town, normalised for case so `SAN FRANCISCO` and `san francisco` are
   /// one entry in the filter list. Null on the same terms as `country`, and
   /// independently of it: an address can name one without the other.
-  city       String?
+  city    String?
 
   // --- Agent-owned fields ---
-  status        CallStatus @default(not_called)
+  status        CallStatus    @default(not_called)
   /// Where the messaging thread stands, independent of `status`.
   ///
   /// Deliberately *not* wired into the New/Called split: `firstCalledAt` is
@@ -152,10 +152,10 @@ model Lead {
   /// *When* it was last worked is `updatedAt`, which already tracks exactly
   /// that; the Called list orders by it rather than carrying a second
   /// timestamp that would have to be kept in step by hand.
-  firstCalledAt DateTime?  @map("first_called_at")
-  notes         String     @default("")
+  firstCalledAt DateTime?     @map("first_called_at")
+  notes         String        @default("")
   /// Date only: the UI works in `YYYY-MM-DD` strings and never has a time here.
-  callbackDate  DateTime?  @map("callback_date") @db.Date
+  callbackDate  DateTime?     @map("callback_date") @db.Date
 
   // --- Meeting detail, layered on top of callbackDate (see lib/meetings.ts) ---
   /// 24-hour `HH:MM`. A string, not a `time` column: it is a label on the
@@ -167,6 +167,18 @@ model Lead {
   meetingCompletedAt DateTime? @map("meeting_completed_at") @db.Date
 
   // --- Provenance / bookkeeping ---
+  /// Who typed this lead in by hand, through `POST /api/leads`. Null for every
+  /// row that arrived by CSV import or from the scraper — those have a
+  /// `sourceBatch` instead, and nobody in particular added them.
+  ///
+  /// **This is an authorization subject, not a display field.** A contributor
+  /// reaches a lead only through this column matching their own id (see
+  /// `lib/leadScope.ts`), so it is set from the session on the server and
+  /// never read from a request body. Restrict, matching `meeting_recordings`:
+  /// accounts here are disabled rather than deleted, and a delete must not
+  /// quietly turn somebody's private pipeline into the shared pool.
+  createdById String?  @map("created_by_user_id")
+  createdBy   User?    @relation("LeadCreator", fields: [createdById], references: [id], onDelete: Restrict)
   /// Written by server-side duplicate detection. Nothing sets it to true yet —
   /// today `cleanLeads` drops repeats at ingest — but the column exists so that
   /// change has somewhere to write without another migration.
@@ -190,6 +202,10 @@ model Lead {
   /// current outcome; this keeps every one of them, with a name against it.
   activity LeadActivity[]
 
+  /// Every edit ever saved against this lead, field by field, with who made it
+  /// and what the value was before and after. See {@link LeadChange}.
+  changes LeadChange[]
+
   /// Indexes follow the queries the UI actually runs: the stat bar and filters
   /// group by status, the Callbacks/Meetings views range-scan on callbackDate,
   /// and the import view scopes by batch. There is deliberately no unique
@@ -210,6 +226,8 @@ model Lead {
   @@index([country, city])
   @@index([sourceBatch])
   @@index([isDuplicate])
+  /// A contributor's every read is `WHERE created_by_user_id = me`.
+  @@index([createdById])
   @@map("leads")
 }
 
@@ -354,6 +372,47 @@ model LeadActivity {
   @@map("lead_activities")
 }
 
+/// One field of one lead changing, as a before-and-after pair.
+///
+/// **Not the same table as `lead_activities`, and it does not replace it.**
+/// That one is a small closed set of *acts* — call logged, meeting booked —
+/// that the reports count. This one is the full history: every field a save
+/// touched, including the notes box, written so the lead's Activity panel can
+/// show exactly what changed, when, and by whom. Nothing counts rows here.
+///
+/// Values are stored as display-neutral text (`YYYY-MM-DD`, `HH:MM`, the enum
+/// key, `true`/`false`) and turned into labels by the browser, so renaming a
+/// status label is not a data migration. Null means "empty".
+///
+/// Append-only, like `lead_activities`: rows are never updated and never
+/// deleted by the application.
+model LeadChange {
+  id String @id @default(cuid())
+
+  /// Cascade: history of a lead that no longer exists has nothing to hang off.
+  leadId String @map("lead_id")
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Who saved it. Null only for a write with no person behind it (a script).
+  /// Restrict for the reason `lead_activities.user_id` gives.
+  userId String? @map("user_id")
+  user   User?   @relation("LeadChangeAuthor", fields: [userId], references: [id], onDelete: Restrict)
+
+  /// Which field — a key of `LEAD_CHANGE_FIELDS` in `lib/leadChanges.ts`, or
+  /// `created` for the row written when a lead is added by hand. A string
+  /// rather than an enum so a new editable field is not a migration.
+  field    String
+  oldValue String? @map("old_value")
+  newValue String? @map("new_value")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The only read is "this lead's history, newest first".
+  @@index([leadId, createdAt])
+  @@index([userId])
+  @@map("lead_changes")
+}
+
 /// A stretch of time somebody was signed in and working.
 ///
 /// **Not the same row as `sessions`.** That table is a *browser* — one row per
@@ -389,10 +448,10 @@ model WorkSession {
   userId String @map("user_id")
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  startedAt  DateTime  @default(now()) @map("started_at")
+  startedAt  DateTime @default(now()) @map("started_at")
   /// Last heartbeat from an open portal tab. **Portal presence, not the whole
   /// of liveness** — see `lastMonitorSeenAt` below and `lib/workSessions.ts`.
-  lastSeenAt DateTime  @default(now()) @map("last_seen_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
 
   /// Last authenticated request from this agent's SpiderHunts Monitor while
   /// this shift was open, written from the server's clock only.
@@ -412,7 +471,7 @@ model WorkSession {
   lastMonitorSeenAt DateTime? @map("last_monitor_seen_at")
 
   /// Null while the session is open — the one column that says "still working".
-  endedAt    DateTime? @map("ended_at")
+  endedAt DateTime? @map("ended_at")
 
   /// Whole seconds between `startedAt` and `endedAt`, written when the session
   /// closes. Stored rather than computed on read because it is what every
@@ -459,9 +518,15 @@ model WorkSession {
   @@map("work_sessions")
 }
 
-/// Exactly two roles, and every user has one. ADMIN is the full portal; AGENT
-/// is the day job — the worklist and meetings — with export, import, reports,
-/// settings and user management withheld.
+/// Three roles, and every user has one. ADMIN is the full portal; AGENT is the
+/// day job — the worklist and meetings — with export, import, reports, settings
+/// and user management withheld.
+///
+/// CONTRIBUTOR brings their own leads. They add them one at a time by hand and
+/// work them like an agent would — status, meetings, call notes — but only
+/// the leads they added themselves (`leads.created_by_user_id`). They see
+/// nothing else in the pool, and none of the agent-only tracking (Monitor, My
+/// time, My performance) applies to them. See `lib/leadScope.ts`.
 ///
 /// An enum rather than a string column: Postgres rejects a value outside this
 /// set, so a bad write fails at the database rather than becoming a role the
@@ -469,6 +534,7 @@ model WorkSession {
 enum UserRole {
   ADMIN
   AGENT
+  CONTRIBUTOR
 
   @@map("user_role")
 }
@@ -588,6 +654,12 @@ model User {
   /// {@link DemoWebsite}, which explains why it is not `Restrict` like
   /// recordings.
   demoWebsiteEdits DemoWebsite[] @relation("DemoWebsiteEditor")
+
+  /// Leads this person added by hand, and every lead edit they saved. Both are
+  /// `Restrict` on the far side, so an account holding either is disabled
+  /// rather than deleted.
+  leadChanges LeadChange[] @relation("LeadChangeAuthor")
+  leadsAdded  Lead[]       @relation("LeadCreator")
 
   @@map("users")
 }
@@ -746,7 +818,7 @@ model MonitorDevice {
   /// stale reason look current.
   captureHealth   String?   @map("capture_health")
   captureHealthAt DateTime? @map("capture_health_at")
-  createdAt  DateTime @default(now()) @map("created_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
   /// When this workstation last had a screenshot **accepted**, and the whole of
   /// the upload rate limit's state (`lib/screenshotRateLimit.ts`).

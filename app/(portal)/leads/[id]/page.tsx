@@ -5,6 +5,7 @@ import LeadWorkspace from "@/components/LeadWorkspace";
 import { requireModule } from "@/lib/authz";
 import { demoSummaryFor } from "@/lib/demoWebsites";
 import { getLeadDetail, nextLeadId } from "@/lib/leadDb";
+import { canEditLeadDetails, leadScopeFor } from "@/lib/leadScope";
 import { leadsListHref, leadWorkspaceHref, readLeadPosition } from "@/lib/leadLink";
 import { parseLeadSearchParams } from "@/lib/leadQuery";
 import { todayIso } from "@/lib/leadUtils";
@@ -78,7 +79,10 @@ export default async function LeadPage(props: PageProps<"/leads/[id]">) {
   const query = parseLeadSearchParams(params, todayIso());
   const position = readLeadPosition(params.get("pos"));
 
-  const detail = await getLeadDetail(id);
+  // Scoped: a contributor following a link to somebody else's lead meets the
+  // same 404 as one following a link to a lead that does not exist.
+  const scope = leadScopeFor(user);
+  const detail = await getLeadDetail(id, scope);
   // A lead that has been deleted, or an id that never named one. `notFound`
   // rather than an empty workspace: the tab was opened for a specific lead and
   // there is nothing here to work.
@@ -97,7 +101,7 @@ export default async function LeadPage(props: PageProps<"/leads/[id]">) {
   const [recording, demo, nextId] = await Promise.all([
     wantsDemo ? Promise.resolve(null) : getRecordingSummaryFor(id, user),
     wantsDemo ? demoSummaryFor(id) : Promise.resolve(null),
-    nextLeadId(query, id, position),
+    nextLeadId(query, id, position, scope),
   ]);
 
   return (
@@ -111,6 +115,8 @@ export default async function LeadPage(props: PageProps<"/leads/[id]">) {
       initialDemo={demo}
       section={query.section}
       serverToday={query.today}
+      canEditDetails={canEditLeadDetails(user.role)}
+      contributorView={user.role === "CONTRIBUTOR"}
       nav={{
         variant: "page",
         backHref: leadsListHref(query),

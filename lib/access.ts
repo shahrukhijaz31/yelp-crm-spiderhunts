@@ -10,7 +10,25 @@
  * free of Prisma, `next/headers` and anything else with a runtime of its own.
  */
 
-export type Role = "ADMIN" | "AGENT";
+/**
+ * ADMIN is the whole portal, AGENT works the shared pool, CONTRIBUTOR adds and
+ * works only their own leads. A contributor is not an administrator for any
+ * path below — what narrows them further is *which rows* they may read, which
+ * is a property of the lead rather than of a URL (see `lib/leadScope.ts`).
+ */
+export type Role = "ADMIN" | "AGENT" | "CONTRIBUTOR";
+
+/**
+ * The roles the portal tracks time for: the shift clock, the SpiderHunts
+ * Monitor, My time and My performance, and the administrator's time reports.
+ * Contributors work leads on the phone exactly as agents do, so they are on the
+ * clock exactly as agents are. Administrators are not tracked.
+ */
+export const TRACKED_ROLES: readonly Role[] = ["AGENT", "CONTRIBUTOR"];
+
+export function isTrackedRole(role: Role): boolean {
+  return TRACKED_ROLES.includes(role);
+}
 
 /**
  * The session cookie's name.

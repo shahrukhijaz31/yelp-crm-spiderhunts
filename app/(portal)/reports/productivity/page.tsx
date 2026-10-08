@@ -3,6 +3,7 @@ import { connection } from "next/server";
 import AccessDenied from "@/components/AccessDenied";
 import ProductivityPanel from "@/components/ProductivityPanel";
 import { resolveTimesheetRange } from "@/lib/activityRules";
+import { TRACKED_ROLES } from "@/lib/access";
 import { requireRole } from "@/lib/authz";
 import { teamProductivity } from "@/lib/productivity";
 import { DEFAULT_PRODUCTIVITY_FILTERS } from "@/lib/productivityRules";
@@ -35,13 +36,13 @@ export default async function ProductivityPage() {
 
   const [payload, agents] = await Promise.all([
     teamProductivity(range, DEFAULT_PRODUCTIVITY_FILTERS),
-    // Agents only, and names only: the picker needs enough to label a filter
+    // Tracked roles only (agents and contributors), and names only: the picker needs enough to label a filter
     // and nothing more, so no email address or account state travels to a
     // screen that has no use for one. Administrators are absent for the same
     // reason they are absent from the table — they are not scored, so offering
     // one as a filter would promise a report that does not exist.
     prisma.user.findMany({
-      where: { role: "AGENT" },
+      where: { role: { in: [...TRACKED_ROLES] } },
       select: { id: true, name: true },
       orderBy: [{ name: "asc" }],
     }),

@@ -18,6 +18,7 @@
  * would be a product decision dressed as a constant.
  */
 
+import type { Role } from "./access";
 import { resolveRange, type DateRange } from "./performanceRules";
 
 /** An expected refusal, carrying the status the route should answer with. */
@@ -384,7 +385,7 @@ export interface AppUsageSummary {
 
 /** One employee's app usage, as the employee view shows it. */
 export interface EmployeeAppUsage {
-  user: { id: string; name: string; username: string; role: "ADMIN" | "AGENT" };
+  user: { id: string; name: string; username: string; role: Role };
   trackedSeconds: number;
   /** Duration-weighted mean over the window, or null when nothing was observed. */
   activityPercentage: number | null;
