@@ -47,18 +47,55 @@ import { touchMonitorLiveness } from "./workSessions";
  * ---------------------------------------------------------------------------
  *   ACCESS   15 minutes. Carried on every request. Short so that a token
  *            captured in flight or scraped from memory dies on its own.
- *   REFRESH  30 days, rotating on every use and never extended past its
- *            original ceiling. This is the one that survives an application
- *            restart, and the only thing the desktop client stores at rest.
+ *   REFRESH  30 days of *idleness*, slid forward on every rotation and never
+ *            past 180 days from the day the workstation was connected. This is
+ *            the one that survives an application restart, and the only thing
+ *            the desktop client stores at rest.
  *
  * Rotation is what makes theft of the stored refresh token bounded rather than
  * permanent: the copy stops working the moment the real device refreshes, and
  * the legitimate device is then signed out — a visible failure rather than a
  * silent shared session.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the refresh window slides
+ * ---------------------------------------------------------------------------
+ * It was a hard 30 days from issue, which meant every agent repeated the entire
+ * sign-in — password, emailed code — once a month on every workstation, buying
+ * no security that rotation was not already providing. Connecting a workstation
+ * is meant to be something a person does once.
+ *
+ * The cost is real and worth stating: a refresh token lifted from a machine
+ * nobody uses any more now renews indefinitely, where before it died within 30
+ * days. Three things bound that. Rotation turns *use* into detection, because
+ * the thief's first refresh signs the real workstation out within the minute.
+ * The absolute ceiling below ends the connection regardless. And an agent can
+ * now see their connected workstations and disconnect one — the remedy that
+ * detection previously lacked, and the reason that screen shipped with this
+ * change rather than after it.
  */
 
 const ACCESS_TTL_MS = 15 * 60 * 1000;
-const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * How long a workstation may go unused before its credential dies.
+ *
+ * Measured from the last rotation rather than from issue. A running Monitor
+ * refreshes every fifteen minutes, so this is only ever reached by a machine
+ * that has genuinely stopped calling in: switched off, reimaged, or taken.
+ */
+const REFRESH_IDLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * The ceiling on one connection, measured from `created_at`, whatever the
+ * sliding window says.
+ *
+ * Six months: long enough that nobody is re-connecting workstations as a chore,
+ * short enough that a credential cannot live for ever on the strength of a
+ * process that keeps renewing it. It costs one click now, which is what makes a
+ * bound this tight acceptable.
+ */
+const REFRESH_ABSOLUTE_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
 const TOKEN_BYTES = 32;
 
@@ -155,7 +192,7 @@ export async function issueDeviceTokens(
   const refreshToken = newToken();
   const now = Date.now();
   const accessExpiresAt = new Date(now + ACCESS_TTL_MS);
-  const refreshExpiresAt = new Date(now + REFRESH_TTL_MS);
+  const refreshExpiresAt = new Date(now + REFRESH_IDLE_TTL_MS);
 
   await prisma.monitorDevice.create({
     data: {
@@ -303,8 +340,14 @@ export async function getDeviceContext(request: Request): Promise<DeviceContext 
  *
  * Both tokens are replaced in one update guarded on the old refresh hash, so
  * two clients racing a refresh cannot both win: the second matches no row and
- * is refused. `refresh_expires_at` is carried forward untouched — a refresh
- * buys a new access token, never a longer connection.
+ * is refused.
+ *
+ * `refresh_expires_at` slides forward with the rotation, bounded by
+ * {@link REFRESH_ABSOLUTE_TTL_MS} from the day the workstation connected — so a
+ * Monitor in daily use never asks its agent to connect again, and one that
+ * stops calling in still expires. The extension is written inside the same
+ * guarded update as the rotation, which is what makes the two atomic: a
+ * connection cannot be lengthened by a request that lost the race.
  */
 export type RefreshResult =
   | { ok: true; tokens: DeviceTokens; user: SessionUser }
@@ -318,6 +361,7 @@ export async function refreshDeviceTokens(refreshToken: string): Promise<Refresh
       where: { refreshTokenHash: hashToken(refreshToken) },
       select: {
         id: true,
+        createdAt: true,
         refreshExpiresAt: true,
         revokedAt: true,
         user: {
@@ -354,6 +398,16 @@ export async function refreshDeviceTokens(refreshToken: string): Promise<Refresh
   const nextRefreshToken = newToken();
   const accessExpiresAt = new Date(now.getTime() + ACCESS_TTL_MS);
 
+  // The sliding window, clamped to the connection's own ceiling. Taking the
+  // earlier of the two is what stops a Monitor that refreshes for ever from
+  // holding a credential for ever.
+  const refreshExpiresAt = new Date(
+    Math.min(
+      now.getTime() + REFRESH_IDLE_TTL_MS,
+      device.createdAt.getTime() + REFRESH_ABSOLUTE_TTL_MS,
+    ),
+  );
+
   // Guarded on the presented hash: this is the rotation, and it must be
   // atomic. A second request holding the same (now spent) refresh token
   // updates zero rows and is told to sign in again.
@@ -363,6 +417,7 @@ export async function refreshDeviceTokens(refreshToken: string): Promise<Refresh
       accessTokenHash: hashToken(accessToken),
       accessExpiresAt,
       refreshTokenHash: hashToken(nextRefreshToken),
+      refreshExpiresAt,
       lastSeenAt: now,
     },
   });
@@ -375,7 +430,7 @@ export async function refreshDeviceTokens(refreshToken: string): Promise<Refresh
       accessToken,
       accessExpiresAt: accessExpiresAt.toISOString(),
       refreshToken: nextRefreshToken,
-      refreshExpiresAt: device.refreshExpiresAt.toISOString(),
+      refreshExpiresAt: refreshExpiresAt.toISOString(),
     },
     user: {
       id: device.user.id,
@@ -410,20 +465,44 @@ export async function revokeDevice(token: {
   if (conditions.length === 0) return;
 
   await prisma.monitorDevice
-    .updateMany({
-      where: { OR: conditions, revokedAt: null },
-      // The hashes are cleared as well as the row being marked: a revoked
-      // device must not keep occupying the unique index, or the same random
-      // token could never be issued again and a stale row would shadow a new
-      // connection from the same workstation.
-      data: {
-        revokedAt: new Date(),
-        accessTokenHash: null,
-        accessExpiresAt: null,
-        refreshTokenHash: `revoked:${randomBytes(16).toString("hex")}`,
-      },
-    })
+    .updateMany({ where: { OR: conditions, revokedAt: null }, data: revokedPatch() })
     .catch(() => {});
+}
+
+/**
+ * What revoking a device writes.
+ *
+ * One definition, because there are now three callers and the detail that
+ * matters is easy to leave out of a fourth: the hashes are cleared as well as
+ * the row being marked. A revoked device must not keep occupying the unique
+ * index, or the same random token could never be issued again and a stale row
+ * would shadow a new connection from the same workstation. The replacement
+ * refresh hash is random rather than null because that column is not nullable.
+ */
+function revokedPatch() {
+  return {
+    revokedAt: new Date(),
+    accessTokenHash: null,
+    accessExpiresAt: null,
+    refreshTokenHash: `revoked:${randomBytes(16).toString("hex")}`,
+  };
+}
+
+/**
+ * Disconnect one workstation on behalf of its owner.
+ *
+ * `userId` is in the `where`, not checked before it: a device id belonging to
+ * somebody else matches no row, so the caller cannot ask a question about
+ * another agent's workstation, let alone act on one. Returns whether anything
+ * was revoked, so the route can answer 404 for "not yours" and "not there"
+ * identically.
+ */
+export async function revokeDeviceForUser(userId: string, deviceId: string): Promise<boolean> {
+  const revoked = await prisma.monitorDevice
+    .updateMany({ where: { id: deviceId, userId, revokedAt: null }, data: revokedPatch() })
+    .catch(() => null);
+
+  return (revoked?.count ?? 0) > 0;
 }
 
 /** Disconnect every workstation for a user. Used when an account is disabled. */
@@ -434,28 +513,32 @@ export async function revokeAllDevicesFor(userId: string): Promise<void> {
 
   for (const device of devices) {
     await prisma.monitorDevice
-      .update({
-        where: { id: device.id },
-        data: {
-          revokedAt: new Date(),
-          accessTokenHash: null,
-          accessExpiresAt: null,
-          refreshTokenHash: `revoked:${randomBytes(16).toString("hex")}`,
-        },
-      })
+      .update({ where: { id: device.id }, data: revokedPatch() })
       .catch(() => {});
   }
 }
 
 /**
  * Housekeeping, on the same opportunistic beat as `pruneExpiredSessions` — this
- * app has no cron. Only rows whose refresh ceiling has passed are dropped; a
- * revoked row is kept for a while as the trace that a device was disconnected.
+ * app has no cron.
+ *
+ * Two sweeps, because the sliding window broke the one that used to be enough.
+ * Expired rows go a day after their refresh ceiling passes, as before. Revoked
+ * rows now need a sweep of their own: revocation leaves `refresh_expires_at`
+ * untouched, so with a window that can reach 180 days a disconnected
+ * workstation would otherwise sit in the table for half a year. Ninety days
+ * keeps a disconnection legible for a good while — it is the trace that a
+ * device was deliberately cut off — without keeping it for ever.
  */
 export async function pruneExpiredDevices(): Promise<void> {
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const expiredCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   await prisma.monitorDevice
-    .deleteMany({ where: { refreshExpiresAt: { lte: cutoff } } })
+    .deleteMany({ where: { refreshExpiresAt: { lte: expiredCutoff } } })
+    .catch(() => {});
+
+  const revokedCutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  await prisma.monitorDevice
+    .deleteMany({ where: { revokedAt: { lte: revokedCutoff } } })
     .catch(() => {});
 }
 

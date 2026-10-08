@@ -783,8 +783,11 @@ model MonitorDevice {
 
   /// SHA-256 hex of the current refresh token. Replaced on every refresh.
   refreshTokenHash String   @unique @map("refresh_token_hash")
-  /// Hard ceiling on the device's connection. Never extended by a refresh, so a
-  /// workstation nobody has touched for a month must sign in again.
+  /// When this connection dies if nothing renews it. Slid forward by every
+  /// refresh, so a workstation in daily use stays connected and is never asked
+  /// to connect again — but never past 180 days from `created_at`, so a machine
+  /// that stopped calling in expires a month later and no connection outlives
+  /// the ceiling. See `lib/monitorAuth.ts`, "Why the refresh window slides".
   refreshExpiresAt DateTime @map("refresh_expires_at")
 
   /// Set when the agent signs out of the Monitor, or when an administrator

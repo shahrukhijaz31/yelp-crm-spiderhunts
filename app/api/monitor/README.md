@@ -213,4 +213,13 @@ one of them. `npm run screenshots:retention` runs the same code by hand.
   which keeps the promise `.env.example` makes that authentication adds no
   environment variables.
 - **Refresh rotates.** A token copied off a workstation stops working the moment
-  that workstation next refreshes.
+  that workstation next refreshes — and the real workstation is signed out,
+  which is what turns a theft into something somebody notices.
+- **A connection lasts as long as it is used, and no longer than six months.**
+  `refresh_expires_at` slides thirty days forward on every rotation, bounded by
+  180 days from the day the workstation connected. A Monitor in daily use is
+  therefore never asked to sign in again on a schedule; one that stops calling
+  in dies a month later; and no connection outlives the ceiling. It used to be
+  a hard thirty days from issue, which bought nothing rotation was not already
+  providing and made every agent repeat a password and an emailed code monthly.
+  See "Why the refresh window slides" in `lib/monitorAuth.ts`.

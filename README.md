@@ -331,6 +331,7 @@ scraper CSV has no agent-owned fields, so seeding from it leaves every lead on
 | `npm run db:studio` | browse the table in Prisma Studio |
 | `npm run user:create` | create a user (`-- --name … --username … --email … --role ADMIN`) |
 | `npm run test:recordings` | end-to-end check of the call-recording feature against a running server |
+| `npm run test:monitor-refresh` | the Monitor's refresh window against a running server: that a refresh extends the connection, that the extension stops at 180 days from the day the workstation connected, that an expired connection is refused rather than revived, and that rotation and the eligibility check are unchanged |
 | `npm run test:security-offline` | the security fixes that are pure functions: trusted-hop client IP, export formula neutralisation, the cross-site rule. No server needed |
 | `npm run test:security-live` | the same fixes end to end against a running server: the login throttle under a spoofed `X-Forwarded-For`, `sessions.ip_address`, cross-site vs same-origin, security headers on pages and `/_next/static/*`, the authenticated rate limits |
 

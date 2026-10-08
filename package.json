@@ -27,6 +27,7 @@
     "test:productivity": "tsx scripts/test-productivity.ts",
     "test:app-usage": "tsx scripts/test-app-usage.ts",
     "test:monitor-download": "tsx scripts/test-monitor-download.ts",
+    "test:monitor-refresh": "tsx scripts/test-monitor-refresh.ts",
     "test:work-session-liveness": "tsx scripts/test-work-session-liveness.ts",
     "test:demo-websites": "tsx scripts/test-demo-websites.ts",
     "test:security-offline": "tsx scripts/test-security-offline.ts",
