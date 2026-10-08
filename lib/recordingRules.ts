@@ -28,6 +28,36 @@ export const ACCEPTED_AUDIO_TYPES: Record<string, readonly string[]> = {
   "audio/ogg": ["ogg", "oga", "opus"],
 };
 
+/**
+ * Other names browsers and operating systems give the same formats.
+ *
+ * The declared type is whatever the client's OS maps the extension to, and
+ * that is often not the canonical audio type: Windows calls every `.webm`
+ * `video/webm` (a browser recorder's audio-only file included), `.m4a` is
+ * `audio/x-m4a`, `.wav` is `audio/x-wav`. Refusing those turned away real call
+ * recordings on the strength of a label. They are accepted as declarations
+ * only — what is stored is still decided by sniffing the bytes below, so a
+ * video that happens to say `video/webm` is no more trusted than before.
+ */
+const DECLARED_ALIASES = new Set([
+  "video/webm",
+  "audio/x-m4a",
+  "audio/m4a",
+  "audio/aac",
+  "video/mp4",
+  "audio/x-wav",
+  "audio/wave",
+  "audio/vnd.wave",
+  "audio/mp3",
+  "audio/x-mpeg",
+  "audio/x-mp3",
+  "video/ogg",
+  "application/ogg",
+  "audio/opus",
+  // Some pickers label anything they do not recognise this way.
+  "application/octet-stream",
+]);
+
 /** What the file picker offers, and what the copy tells the agent. */
 export const ACCEPTED_EXTENSIONS = ["mp3", "wav", "m4a", "webm", "ogg"] as const;
 
@@ -141,7 +171,8 @@ export function validateUpload(
   // The declared type is only ever used to refuse — never to decide what is
   // stored. A blank type (some file pickers send none) falls through to the
   // extension and then to the sniff, which is the authority regardless.
-  const declaredIsAudio = declared === "" || declared in ACCEPTED_AUDIO_TYPES;
+  const declaredIsAudio =
+    declared === "" || declared in ACCEPTED_AUDIO_TYPES || DECLARED_ALIASES.has(declared);
   const extensionIsAudio =
     extension === "" ||
     Object.values(ACCEPTED_AUDIO_TYPES).some((list) => list.includes(extension));
