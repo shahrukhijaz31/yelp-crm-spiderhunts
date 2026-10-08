@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { Building2, Check, House, MapPin } from "lucide-react";
 
 import { useWorkSession } from "./WorkSessionProvider";
@@ -12,6 +13,8 @@ import {
 } from "@/lib/workLocationRules";
 
 const ICONS = { office: Building2, remote: House } as const;
+
+const noSubscription = () => () => {};
 
 /**
  * Where this person is working — Office or Remote — beside the shift clock.
@@ -32,6 +35,8 @@ export default function WorkLocationBadge() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  // The question is drawn into <body>, which exists only in the browser.
+  const inBrowser = useSyncExternalStore(noSubscription, () => true, () => false);
 
   useEffect(() => {
     if (!open) return;
@@ -83,7 +88,14 @@ export default function WorkLocationBadge() {
 
   // --- the start-of-shift question --------------------------------------
   if (status.needsChoice) {
-    return (
+    if (!inBrowser) return null;
+    /*
+     * Into <body>, not here. This badge lives in the top bar, whose backdrop
+     * blur makes it the containing block for anything `fixed` inside it — so a
+     * dialog rendered in place was laid out against the bar, centred on its
+     * 64px height and cut off at the top of the window.
+     */
+    return createPortal(
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
         role="dialog"
@@ -125,7 +137,8 @@ export default function WorkLocationBadge() {
             </p>
           )}
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
