@@ -16,6 +16,7 @@ import {
 } from "@/lib/activityRules";
 import { formatDuration, RANGE_LABELS, type RangeKey } from "@/lib/performanceRules";
 import type { EmployeeTimeDetail } from "@/lib/timeTracking";
+import { formatClock, formatDate, fromPortalInput, toPortalInput } from "@/lib/portalTime";
 
 /**
  * One employee's tracking record — the administrator's detail screen.
@@ -271,8 +272,8 @@ export default function EmployeeTimePanel({
  * by this form, because a correction with no stated reason is indistinguishable
  * from tampering six months later.
  *
- * `datetime-local` sends a value with no zone, which is read as the reader's own
- * local time — the same zone every other instant on this screen is displayed in.
+ * `datetime-local` sends a value with no zone, which is read as Pakistan time —
+ * the same zone every other instant on this screen is displayed in.
  * It is converted to an ISO instant on the way out so the server never has to
  * guess what "14:30" meant.
  */
@@ -295,7 +296,7 @@ function CorrectionDialog({
 
   const nextSeconds = Math.max(
     0,
-    Math.round((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000),
+    Math.round((fromLocalInput(endedAt) - fromLocalInput(startedAt)) / 1000),
   );
 
   async function save() {
@@ -308,8 +309,8 @@ function CorrectionDialog({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workSessionId: session.id,
-          startedAt: new Date(startedAt).toISOString(),
-          endedAt: new Date(endedAt).toISOString(),
+          startedAt: new Date(fromLocalInput(startedAt)).toISOString(),
+          endedAt: new Date(fromLocalInput(endedAt)).toISOString(),
           reason,
         }),
       });
@@ -525,22 +526,19 @@ function Cell({ children }: { children: React.ReactNode }) {
 }
 
 function clock(iso: string, withSeconds = true): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(withSeconds ? { second: "2-digit" } : {}),
-    hour12: false,
-  });
+  return formatClock(iso, withSeconds);
 }
 
 function dayAndClock(iso: string): string {
-  const date = new Date(iso);
-  return `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${clock(iso, false)}`;
+  return `${formatDate(iso)} ${clock(iso, false)}`;
 }
 
-/** An ISO instant as the `YYYY-MM-DDTHH:MM` a `datetime-local` input wants. */
+/** An ISO instant as the Pakistan wall time a `datetime-local` input wants. */
 function toLocalInput(iso: string): string {
-  const date = new Date(iso);
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+  return toPortalInput(iso);
+}
+
+/** The inverse, as epoch milliseconds; NaN for a malformed value. */
+function fromLocalInput(value: string): number {
+  return fromPortalInput(value)?.getTime() ?? Number.NaN;
 }

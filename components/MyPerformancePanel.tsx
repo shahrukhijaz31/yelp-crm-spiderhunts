@@ -23,6 +23,7 @@ import {
   type ActivityDay,
   type PersonalPerformance,
 } from "@/lib/performanceRules";
+import { formatClock } from "@/lib/portalTime";
 
 /**
  * My performance — one agent's own screen.
@@ -209,10 +210,7 @@ function ActiveSessionCard({
     );
   }
 
-  const loggedInAt = new Date(startedAt).toLocaleTimeString("en-GB", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const loggedInAt = formatClock(startedAt);
 
   return (
     <section className="panel relative isolate grid grid-cols-1 gap-px overflow-hidden bg-line sm:grid-cols-2">

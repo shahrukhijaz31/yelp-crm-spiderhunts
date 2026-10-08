@@ -9,6 +9,7 @@ import { ActivityPill } from "./TimeTrackingPanel";
 import { useSpotlight } from "./useSpotlight";
 import { type EmployeeTimeRow, type TeamTimePayload } from "@/lib/activityRules";
 import { formatDuration } from "@/lib/performanceRules";
+import { formatClock } from "@/lib/portalTime";
 
 /**
  * Time tracking — the administrator's live dashboard.
@@ -393,12 +394,7 @@ function Cell({ children }: { children: React.ReactNode }) {
 }
 
 function clock(iso: string, withSeconds = true): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(withSeconds ? { second: "2-digit" } : {}),
-    hour12: false,
-  });
+  return formatClock(iso, withSeconds);
 }
 
 /**

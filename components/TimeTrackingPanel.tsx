@@ -13,6 +13,7 @@ import {
 } from "@/lib/activityRules";
 import { formatDuration, formatWorkClockLong } from "@/lib/performanceRules";
 import type { AgentTimeTracking } from "@/lib/timeTracking";
+import { formatClock, formatDate } from "@/lib/portalTime";
 
 /**
  * Time tracking — one agent's own screen.
@@ -379,20 +380,14 @@ function Cell({ children }: { children: React.ReactNode }) {
   return <td className="tnum px-3 py-3 text-right font-mono text-num text-fg-2">{children}</td>;
 }
 
-/** `14:32:18` in the reader's own timezone. */
+/** `2:32:18 PM`, Pakistan time (`lib/portalTime.ts`). */
 function clock(iso: string, withSeconds = true): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(withSeconds ? { second: "2-digit" } : {}),
-    hour12: false,
-  });
+  return formatClock(iso, withSeconds);
 }
 
-/** `Mon 09:04` — enough to tell two sessions apart in a week-long list. */
+/** `Mon 9:04 AM` — enough to tell two sessions apart in a week-long list. */
 function dayAndClock(iso: string): string {
-  const date = new Date(iso);
-  return `${date.toLocaleDateString([], { weekday: "short" })} ${clock(iso, false)}`;
+  return `${formatDate(iso, { weekday: "short" })} ${clock(iso, false)}`;
 }
 
 function firstName(name: string): string {

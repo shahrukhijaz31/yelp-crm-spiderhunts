@@ -1,6 +1,7 @@
 "use client";
 
 import type { RecordingSummary } from "@/lib/recordingRules";
+import { formatClock, formatDate } from "@/lib/portalTime";
 
 /**
  * The browser half of a call-recording upload.
@@ -91,17 +92,9 @@ export function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-/** `2026-08-07T09:12:00Z` -> `7 Aug · 9:12 am`, in the reader's own timezone. */
+/** `2026-08-07T09:12:00Z` -> `Aug 7 · 2:12 PM`, Pakistan time (`lib/portalTime.ts`). */
 export function formatUploadedAt(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return date
-    .toLocaleString("en-GB", {
-      day: "numeric",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    })
-    .replace(",", " ·");
+  return `${formatDate(date)} · ${formatClock(date)}`;
 }

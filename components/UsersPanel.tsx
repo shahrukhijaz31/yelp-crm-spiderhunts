@@ -15,6 +15,7 @@ import {
   type PortalModule,
 } from "@/lib/modules";
 import { PASSWORD_MIN_LENGTH } from "@/lib/password";
+import { formatDate } from "@/lib/portalTime";
 
 /** The toast after a role change: "Priya is now an administrator." */
 const ROLE_PHRASES: Record<Role, string> = {
@@ -810,6 +811,5 @@ function Field({
 /** `2026-08-07T…` -> `last signed in 7 Aug`, or `never signed in`. */
 function describeLastLogin(iso: string | null): string {
   if (!iso) return "never signed in";
-  const date = new Date(iso);
-  return `last signed in ${date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`;
+  return `last signed in ${formatDate(iso)}`;
 }

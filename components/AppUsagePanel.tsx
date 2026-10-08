@@ -8,6 +8,7 @@ import AppUsageBreakdown from "./AppUsageBreakdown";
 import { formatActivity } from "@/lib/activityRules";
 import type { AppUsageReport, AppUsageTimeline } from "@/lib/appUsageRules";
 import { formatDuration, RANGE_LABELS, type RangeKey } from "@/lib/performanceRules";
+import { formatClock } from "@/lib/portalTime";
 
 /**
  * App usage — ADMIN only, and the screen the feature exists for.
@@ -437,11 +438,7 @@ function Select({
   );
 }
 
-/** `09:02`. Hours and minutes, 24-hour, matching every other tracking screen. */
+/** `9:02 AM`, Pakistan time — the portal's clock (`lib/portalTime.ts`). */
 function clock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return formatClock(iso);
 }

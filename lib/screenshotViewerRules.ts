@@ -1,5 +1,6 @@
 import { todayIso } from "./leadUtils";
 import { addDays } from "./performanceRules";
+import { formatClock as formatPortalClock, formatDate, portalDay } from "./portalTime";
 
 /**
  * What the screenshot viewer may be asked for, and nothing more.
@@ -332,14 +333,9 @@ export interface ScreenshotPayload {
 /* Formatting                                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** `14:32:18`, in the reader's timezone. */
+/** `2:32:18 PM`, Pakistan time (`lib/portalTime.ts`). */
 export function formatClock(iso: string, withSeconds = true): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(withSeconds ? { second: "2-digit" } : {}),
-    hour12: false,
-  });
+  return formatPortalClock(iso, withSeconds);
 }
 
 /** "Today", "Yesterday", or a written date — relative to the reader's day. */
@@ -350,17 +346,12 @@ export function formatDayLabel(iso: string, today: string): string {
   if (dayIso === today) return "Today";
   if (dayIso === addDays(today, -1)) return "Yesterday";
 
-  return day.toLocaleDateString([], {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
+  return formatDate(day, { weekday: "short", day: "numeric", month: "short" });
 }
 
-/** A Date as `YYYY-MM-DD` in the local zone. The inverse of `startOfDay`. */
+/** A Date as its Pakistan `YYYY-MM-DD`, matching the times printed beside it. */
 export function localDayIso(date: Date): string {
-  const offsetMs = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 10);
+  return portalDay(date);
 }
 
 /** `1.4 MB`. Base ten, because that is what a file manager shows. */

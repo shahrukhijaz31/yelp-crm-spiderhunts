@@ -6,6 +6,7 @@ import { AlertCircle, Laptop, Loader2, ShieldCheck, Unplug } from "lucide-react"
 
 import type { WorkstationCard } from "@/lib/workstations";
 import { disconnectWorkstation } from "@/lib/workstationsClient";
+import { formatDate } from "@/lib/portalTime";
 
 /**
  * Profile → Your workstations: the computers reporting under your account, and
@@ -193,11 +194,7 @@ export default function MyWorkstationsPanel({
 
 /** `12 Mar 2026`. A date, because "connected" is a one-off event. */
 function formatDay(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatDate(iso, { day: "numeric", month: "short", year: "numeric" });
 }
 
 /**

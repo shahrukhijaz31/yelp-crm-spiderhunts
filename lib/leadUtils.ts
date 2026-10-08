@@ -11,12 +11,15 @@ import {
   type MessageStatus,
   type WhatsappAnswer,
 } from "./types";
+import { portalDay } from "./portalTime";
 
-/** Today's date as `YYYY-MM-DD` in the agent's local timezone. */
+/**
+ * Today's date as `YYYY-MM-DD` — Pakistan's today (`lib/portalTime.ts`), on the
+ * server and in every browser alike, so "due today" means the same day to the
+ * server in Germany and to a laptop left on a US timezone.
+ */
 export function todayIso(): string {
-  const now = new Date();
-  const offsetMs = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+  return portalDay(new Date());
 }
 
 /** Digits only, so `(415) 555-0100` and `415-555-0100` compare equal. */

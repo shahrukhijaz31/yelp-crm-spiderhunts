@@ -22,6 +22,7 @@ import {
   LEAD_SOURCE_STYLES,
   type Lead,
 } from "@/lib/types";
+import { formatClock, formatDateTime, portalDay } from "@/lib/portalTime";
 
 /**
  * One lead on the worklist — and, since the workspace exists, **one link**.
@@ -400,32 +401,18 @@ export default function LeadRow({
 }
 
 /**
- * When a lead was added, as a date and time in the reader's timezone, with the
- * full date in the tooltip. `suppressHydrationWarning` because the server renders it in its
- * own timezone and the browser may be in another — the browser's is the one
- * that should win, and the difference is not an error.
+ * When a lead was added, as a date and time in Pakistan time, with the full
+ * date in the tooltip. The same text on the server and in the browser — see
+ * `lib/portalTime.ts`.
  */
 function DateAdded({ iso, today }: { iso: string | null; today: string }) {
   const date = iso ? new Date(iso) : null;
   if (!date || Number.isNaN(date.getTime())) return <span className="text-fg-4">—</span>;
 
-  const day = [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
-
   return (
-    <span
-      className="tnum font-mono text-caption text-fg-2"
-      title={date.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
-      suppressHydrationWarning
-    >
-      {formatCallbackDate(day, today)}
-      <span className="text-fg-3">
-        {" "}
-        {date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-      </span>
+    <span className="tnum font-mono text-caption text-fg-2" title={formatDateTime(date)}>
+      {formatCallbackDate(portalDay(date), today)}
+      <span className="text-fg-3"> {formatClock(date)}</span>
     </span>
   );
 }

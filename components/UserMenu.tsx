@@ -9,6 +9,7 @@ import { ChevronDown, KeyRound, Laptop, LogOut, MonitorDown } from "lucide-react
 import { useWorkSession } from "./WorkSessionProvider";
 import { LOGIN_PATH, isTrackedRole, type SessionUser } from "@/lib/access";
 import { formatWorkClock } from "@/lib/performanceRules";
+import { formatClock } from "@/lib/portalTime";
 
 /**
  * The signed-in user, at the right-hand end of the top bar.
@@ -284,10 +285,7 @@ function SessionRow() {
 
   if (!startedAt || currentSessionSeconds === null) return null;
 
-  const since = new Date(startedAt).toLocaleTimeString("en-GB", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const since = formatClock(startedAt);
 
   return (
     <>

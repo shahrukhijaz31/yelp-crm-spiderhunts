@@ -1122,11 +1122,7 @@ function buildAxis(points: TimelinePoint[], windowFrom: Date, windowTo: Date): A
     ticks.push({
       at,
       percent: ((at - from) / Math.max(1, to - from)) * 100,
-      label: new Date(at).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }),
+      label: formatClock(new Date(at).toISOString(), false),
     });
   }
 

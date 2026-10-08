@@ -25,6 +25,7 @@ import { formatCallbackDate } from "@/lib/leadUtils";
 import { formatMeetingDay, formatMeetingTime } from "@/lib/meetings";
 import type { RecordingSummary } from "@/lib/recordingRules";
 import type { Lead } from "@/lib/types";
+import { formatClock, portalDay } from "@/lib/portalTime";
 
 /**
  * What is actually known about this lead's history, as a timeline.
@@ -193,20 +194,14 @@ function changeEvent(change: LeadChangeEntry): ActivityEvent | null {
   });
 }
 
-/** A local `YYYY-MM-DD` for an instant — never the UTC one, which shifts days. */
+/** The Pakistan `YYYY-MM-DD` for an instant — the day the timeline groups on. */
 function localDay(date: Date): string {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
+  return portalDay(date);
 }
 
+/** `2:34 PM`, Pakistan time (`lib/portalTime.ts`). */
 function clockOf(date: Date): string {
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatClock(date);
 }
 
 /** An ISO instant as an event, or null when the timestamp is absent or junk. */
