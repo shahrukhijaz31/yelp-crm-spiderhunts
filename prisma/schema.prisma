@@ -509,6 +509,10 @@ model WorkSession {
   /// value, these hold every value it has ever had and who changed it.
   adjustments TimeAdjustment[]
 
+  /// Where this shift was worked from, stretch by stretch. Contributors only.
+  /// Describes the shift and never shapes it — see {@link WorkLocationSegment}.
+  locationSegments WorkLocationSegment[]
+
   /// The two queries this table has: "the open session for this user"
   /// (`endedAt IS NULL`, hit on every page load) and "sessions overlapping this
   /// window" for the reports.
@@ -658,6 +662,17 @@ model User {
   /// {@link DemoWebsite}, which explains why it is not `Restrict` like
   /// recordings.
   demoWebsiteEdits DemoWebsite[] @relation("DemoWebsiteEditor")
+
+  /// A contributor's own correction of where they are working, when the
+  /// network got it wrong (a home VPN that exits at the office, say). Held
+  /// only while the network still reads as `locationOverrideBasis` — the
+  /// location detected when they set it — so it lapses by itself the moment
+  /// they move, and detection takes over again. See `lib/workLocation.ts`.
+  locationOverride      WorkLocation? @map("location_override")
+  locationOverrideBasis WorkLocation? @map("location_override_basis")
+
+  locationSegments WorkLocationSegment[]
+  officeNetworksAdded OfficeNetwork[] @relation("OfficeNetworkCreator")
 
   /// Leads this person added by hand, and every lead edit they saved. Both are
   /// `Restrict` on the far side, so an account holding either is disabled
@@ -1592,4 +1607,68 @@ model DemoWebsite {
   /// searching all happen against `leads` and its indexes, exactly as they do
   /// for the ordinary worklist.
   @@map("demo_websites")
+}
+
+/// Where a stretch of work happened. Two values, because the question is
+/// "office or not"; *which* home is not something the portal needs to know.
+enum WorkLocation {
+  office
+  remote
+
+  @@map("work_location")
+}
+
+/// A public address that means "in the office". Requests from any other
+/// address are remote. Edited on the Settings page by an administrator.
+///
+/// Exact addresses only: an office line has one fixed public IP, and a range
+/// is a way to accidentally call half a city "the office".
+model OfficeNetwork {
+  id    String @id @default(cuid())
+  ip    String @unique
+  label String @default("")
+
+  createdById String? @map("created_by_user_id")
+  createdBy   User?   @relation("OfficeNetworkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("office_networks")
+}
+
+/// One unbroken stretch of a contributor's shift in one place.
+///
+/// Written from the liveness signals the shift already has — the portal
+/// heartbeat and every Monitor request — tagged with where the request came
+/// from (`lib/workLocation.ts`). The same place on consecutive signals extends
+/// the stretch; a different place starts a new one. So a day of office in the
+/// morning and home in the afternoon is two rows, with nobody pressing
+/// anything.
+///
+/// **Visibility only.** Nothing here opens, closes or lengthens a shift, and no
+/// figure that existed before reads it. Its length is `lastSeenAt - startedAt`;
+/// the travel between two places is in neither stretch.
+model WorkLocationSegment {
+  id String @id @default(cuid())
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  workSessionId String      @map("work_session_id")
+  workSession   WorkSession @relation(fields: [workSessionId], references: [id], onDelete: Cascade)
+
+  location WorkLocation
+  /// True when the contributor chose it rather than the network saying so.
+  manual   Boolean  @default(false)
+  /// The address last seen in this stretch, for an administrator checking why
+  /// a stretch reads the way it does.
+  ip       String?
+
+  startedAt  DateTime @map("started_at")
+  lastSeenAt DateTime @map("last_seen_at")
+
+  /// "This shift's latest stretch" on every signal, and "this person over this
+  /// window" for the reports.
+  @@index([workSessionId, startedAt])
+  @@index([userId, startedAt])
+  @@map("work_location_segments")
 }

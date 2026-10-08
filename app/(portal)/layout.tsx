@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { connection } from "next/server";
 
 import AppShell from "@/components/AppShell";
@@ -13,6 +13,9 @@ import { leadScopeFor } from "@/lib/leadScope";
 import { computeStats, todayIso } from "@/lib/leadUtils";
 import { NAV_MODE_COOKIE, readNavMode } from "@/lib/navPreference";
 import { queuesFor } from "@/lib/workState";
+import { clientIp } from "@/lib/loginThrottle";
+import { currentLocationStatus } from "@/lib/workLocation";
+import { isLocationTracked } from "@/lib/workLocationRules";
 import { getWorkClock } from "@/lib/workSessions";
 
 /**
@@ -106,6 +109,12 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
     tracked ? getWorkClock(user.id) : null,
   ]);
 
+  // Office or remote, for the badge (agents and contributors) — read, not recorded; the first
+  // heartbeat records. The address is the one nginx wrote (`clientIp`).
+  const workLocation = isLocationTracked(user.role)
+    ? await currentLocationStatus(user, clientIp({ headers: await headers() }))
+    : null;
+
   return (
     // One set of counts for the shell. Whichever screen learns a fresher set
     // replaces them, so the bar keeps moving as an agent works.
@@ -116,7 +125,11 @@ export default async function PortalLayout({ children }: LayoutProps<"/">) {
         {/* Outside the shell so the heartbeat keeps beating whatever screen is
             on, including the ones that draw no clock at all. Mounted for both
             roles but inert for administrators — see the note on `tracking`. */}
-        <WorkSessionProvider initialClock={workClock} tracking={tracked}>
+        <WorkSessionProvider
+          initialClock={workClock}
+          initialLocation={workLocation}
+          tracking={tracked}
+        >
           <AppShell
             today={today}
             user={user}

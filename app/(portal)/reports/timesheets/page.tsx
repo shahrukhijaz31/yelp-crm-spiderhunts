@@ -5,6 +5,7 @@ import TimesheetsPanel from "@/components/TimesheetsPanel";
 import { resolveTimesheetRange } from "@/lib/activityRules";
 import { requireRole } from "@/lib/authz";
 import { timeReport, timesheet } from "@/lib/timeTracking";
+import { teamLocationTotals } from "@/lib/workLocation";
 import { listUsers } from "@/lib/userDb";
 
 /**
@@ -29,10 +30,11 @@ export default async function TimesheetsPage() {
   const range = resolveTimesheetRange(new URLSearchParams({ range: "last7" }));
   const filters = { userId: null, minActivity: null, status: null };
 
-  const [report, rows, users] = await Promise.all([
+  const [report, rows, users, locations] = await Promise.all([
     timeReport(range, filters),
     timesheet(range, null),
     listUsers(),
+    teamLocationTotals(range, null),
   ]);
 
   return (
@@ -42,6 +44,7 @@ export default async function TimesheetsPage() {
           range: { key: range.key, from: range.fromDay, to: range.toDay, label: range.label },
           report,
           timesheet: rows,
+          locations,
         }}
         // Names and roles only. The picker needs enough to label a filter and
         // nothing more, so no email address or account state travels to a screen

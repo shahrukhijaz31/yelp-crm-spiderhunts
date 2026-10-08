@@ -5,11 +5,14 @@ import { notFound } from "next/navigation";
 import AccessDenied from "@/components/AccessDenied";
 import AppUsageBreakdown from "@/components/AppUsageBreakdown";
 import EmployeeTimePanel from "@/components/EmployeeTimePanel";
+import WorkLocationCard from "@/components/WorkLocationCard";
 import { resolveTimesheetRange } from "@/lib/activityRules";
 import { employeeAppUsage } from "@/lib/appUsage";
 import { requireRole } from "@/lib/authz";
 import { formatDuration } from "@/lib/performanceRules";
 import { employeeTimeDetail } from "@/lib/timeTracking";
+import { locationSummary } from "@/lib/workLocation";
+import { isLocationTracked } from "@/lib/workLocationRules";
 
 /**
  * One employee's tracking detail — ADMIN only.
@@ -59,9 +62,23 @@ export default async function EmployeeTimePage({
   ]);
   if (!detail) notFound();
 
+  // Office and remote over the same period, for an agent or a contributor.
+  const location = isLocationTracked(detail.user.role)
+    ? await locationSummary(userId, range)
+    : null;
+
   return (
     <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
       <EmployeeTimePanel detail={detail} rangeKey={range.key} />
+
+      {location && (
+        <div className="mx-auto mt-5 w-full max-w-6xl">
+          <WorkLocationCard
+            periods={[{ label: detail.range.label, summary: location }]}
+            listTitle="Stretches, newest first"
+          />
+        </div>
+      )}
 
       {/* App usage for the same period, beneath the record it belongs to.
           Aggregates only — one row per application, never one per segment —

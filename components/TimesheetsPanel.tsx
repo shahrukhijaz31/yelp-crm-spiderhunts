@@ -4,10 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 
+import LocationGauges from "./LocationGauges";
 import { ActivityPill } from "./TimeTrackingPanel";
 import type { TimesheetRow } from "@/lib/activityRules";
 import { formatDuration, RANGE_LABELS, type RangeKey } from "@/lib/performanceRules";
 import type { TimeReport, TimeReportFilters } from "@/lib/timeTracking";
+import type { PersonLocationTotals } from "@/lib/workLocationRules";
+import { formatClock } from "@/lib/portalTime";
 
 /**
  * Timesheets — the administrator's period report.
@@ -44,6 +47,8 @@ export interface TimesheetPayload {
   range: { key: RangeKey; from: string; to: string; label: string };
   report: TimeReport;
   timesheet: TimesheetRow[];
+  /** Office and remote time per person for the period (`teamLocationTotals`). */
+  locations: PersonLocationTotals[];
 }
 
 export default function TimesheetsPanel({
@@ -104,7 +109,8 @@ export default function TimesheetsPanel({
     void load();
   }, [load]);
 
-  const { report, timesheet } = payload;
+  const { report, timesheet, locations } = payload;
+  const locationOf = new Map(locations.map((person) => [person.userId, person]));
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
@@ -206,6 +212,9 @@ export default function TimesheetsPanel({
         </p>
       </section>
 
+      {/* --- office and remote, as gauges -------------------------------- */}
+      <LocationGauges people={locations} busy={busy} />
+
       {/* --- per-employee summary ---------------------------------------- */}
       <section className={`panel overflow-hidden ${busy ? "opacity-60" : ""}`}>
         <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
@@ -216,7 +225,7 @@ export default function TimesheetsPanel({
         </div>
 
         <div className="w-full overflow-x-auto">
-          <table className="w-full min-w-[900px]">
+          <table className="w-full min-w-[1040px]">
             <thead>
               <tr className="border-b border-line">
                 <th scope="col" className="eyebrow px-5 py-2 text-left">Employee</th>
@@ -224,6 +233,8 @@ export default function TimesheetsPanel({
                 <Head>Active</Head>
                 <Head>Idle</Head>
                 <Head>Activity</Head>
+                <Head>Office</Head>
+                <Head>Remote</Head>
                 <Head>Sessions</Head>
                 <Head>Meetings</Head>
                 <Head>Shots</Head>
@@ -249,6 +260,8 @@ export default function TimesheetsPanel({
                   <td className="px-3 py-3 text-right">
                     <ActivityPill value={row.activityPercentage} />
                   </td>
+                  <Cell>{locationCell(locationOf.get(row.userId)?.officeSeconds)}</Cell>
+                  <Cell>{locationCell(locationOf.get(row.userId)?.remoteSeconds)}</Cell>
                   <Cell>{row.sessions}</Cell>
                   <Cell>
                     {row.meetingsBooked}
@@ -261,7 +274,7 @@ export default function TimesheetsPanel({
               ))}
               {report.rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-8 text-center text-ui text-fg-3">
+                  <td colSpan={10} className="px-5 py-8 text-center text-ui text-fg-3">
                     No employees match these filters.
                   </td>
                 </tr>
@@ -277,6 +290,8 @@ export default function TimesheetsPanel({
                   <td className="px-3 py-3 text-right">
                     <ActivityPill value={report.totals.activityPercentage} />
                   </td>
+                  <Cell>{locationCell(sumLocations(locations, report.rows, "officeSeconds"))}</Cell>
+                  <Cell>{locationCell(sumLocations(locations, report.rows, "remoteSeconds"))}</Cell>
                   <Cell>{report.totals.sessions}</Cell>
                   <Cell>{report.totals.meetingsBooked}</Cell>
                   <Cell>{report.totals.screenshots}</Cell>
@@ -405,11 +420,7 @@ function Cell({ children }: { children: React.ReactNode }) {
 }
 
 function clock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
+  return formatClock(iso);
 }
 
 /** `2026-08-12` -> `Wed 12 Aug`. */
@@ -423,3 +434,20 @@ function longDay(iso: string): string {
 }
 
 export type { TimeReportFilters };
+
+/** Office or remote hours for a cell; a dash when none were recorded. */
+function locationCell(seconds: number | undefined): React.ReactNode {
+  return seconds ? formatDuration(seconds) : <span className="text-fg-4">—</span>;
+}
+
+/** The total for the people the table is showing, so the footer adds up its column. */
+function sumLocations(
+  locations: PersonLocationTotals[],
+  rows: Array<{ userId: string }>,
+  key: "officeSeconds" | "remoteSeconds",
+): number {
+  const shown = new Set(rows.map((row) => row.userId));
+  return locations
+    .filter((person) => shown.has(person.userId))
+    .reduce((total, person) => total + person[key], 0);
+}

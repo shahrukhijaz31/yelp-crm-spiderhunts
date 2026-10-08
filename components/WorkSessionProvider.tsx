@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { HEARTBEAT_SECONDS, type WorkClock } from "@/lib/performanceRules";
+import type { WorkLocationStatus } from "@/lib/workLocationRules";
 
 /**
  * The work clock, for anything on screen that shows it.
@@ -106,6 +107,14 @@ interface WorkSessionValue {
   currentSessionSeconds: number | null;
   /** Every session today, including the one running. Null before the first tick. */
   todayTotalSeconds: number | null;
+  /**
+   * Office or remote, for an agent or a contributor; null for administrators. Refreshed by
+   * every heartbeat, so a move between the office and home shows within a
+   * minute (`lib/workLocation.ts`).
+   */
+  location: WorkLocationStatus | null;
+  /** Adopt a status the server just returned — the badge's own correction. */
+  setLocation: (next: WorkLocationStatus | null) => void;
 }
 
 const WorkSessionContext = createContext<WorkSessionValue | null>(null);
@@ -120,10 +129,13 @@ export function useWorkSession(): WorkSessionValue {
 
 export function WorkSessionProvider({
   initialClock,
+  initialLocation = null,
   tracking = true,
   children,
 }: {
   initialClock: WorkClock | null;
+  /** A contributor's office/remote status for the first paint, before a beat. */
+  initialLocation?: WorkLocationStatus | null;
   /**
    * Whether this user's time is tracked at all. False for administrators.
    *
@@ -141,6 +153,7 @@ export function WorkSessionProvider({
   tracking?: boolean;
   children: React.ReactNode;
 }) {
+  const [location, setLocation] = useState<WorkLocationStatus | null>(initialLocation);
   /**
    * The server's answer, and this machine's error against it.
    *
@@ -187,7 +200,12 @@ export function WorkSessionProvider({
       });
       if (!response.ok) return;
 
-      const payload = (await response.json()) as { clock?: WorkClock | null };
+      const payload = (await response.json()) as {
+        clock?: WorkClock | null;
+        location?: WorkLocationStatus | null;
+      };
+      // Before the clock check: where somebody is does not depend on a shift.
+      if (payload.location !== undefined) setLocation(payload.location);
       if (!payload.clock) return;
 
       // Measured here, at the moment the answer arrives, and stored with the
@@ -247,7 +265,13 @@ export function WorkSessionProvider({
 
   const value = useMemo<WorkSessionValue>(() => {
     if (!clock) {
-      return { startedAt: null, currentSessionSeconds: null, todayTotalSeconds: null };
+      return {
+        startedAt: null,
+        currentSessionSeconds: null,
+        todayTotalSeconds: null,
+        location,
+        setLocation,
+      };
     }
 
     // Before the first tick there is no client clock to read, so both live
@@ -258,6 +282,8 @@ export function WorkSessionProvider({
         startedAt: clock.startedAt,
         currentSessionSeconds: null,
         todayTotalSeconds: clock.startedAt ? null : clock.completedSecondsToday,
+        location,
+        setLocation,
       };
     }
 
@@ -282,8 +308,10 @@ export function WorkSessionProvider({
       currentSessionSeconds,
       // The one addition, and the only place the open session is added at all.
       todayTotalSeconds: clock.completedSecondsToday + openSecondsToday,
+      location,
+      setLocation,
     };
-  }, [clock, nowMs, state.skewMs]);
+  }, [clock, nowMs, state.skewMs, location]);
 
   return (
     <WorkSessionContext.Provider value={value}>{children}</WorkSessionContext.Provider>

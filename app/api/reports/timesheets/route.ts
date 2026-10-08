@@ -1,6 +1,7 @@
 import { resolveTimesheetRange } from "@/lib/activityRules";
 import { apiAdmin } from "@/lib/authz";
 import { timeReport, timesheet, type TimeReportFilters } from "@/lib/timeTracking";
+import { teamLocationTotals } from "@/lib/workLocation";
 
 /**
  * GET /api/reports/timesheets — the timesheet and the report behind it.
@@ -65,13 +66,14 @@ export async function GET(request: Request): Promise<Response> {
   const userId = safeId(params.get("agent"));
 
   try {
-    const [report, rows] = await Promise.all([
+    const [report, rows, locations] = await Promise.all([
       timeReport(range, {
         userId,
         minActivity: readMinActivity(params.get("minActivity")),
         status: readStatus(params.get("status")),
       }),
       timesheet(range, userId),
+      teamLocationTotals(range, userId),
     ]);
 
     return Response.json(
@@ -79,6 +81,7 @@ export async function GET(request: Request): Promise<Response> {
         range: { key: range.key, from: range.fromDay, to: range.toDay, label: range.label },
         report,
         timesheet: rows,
+        locations,
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );

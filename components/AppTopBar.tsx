@@ -6,9 +6,11 @@ import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import SessionTimer from "./SessionTimer";
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
+import WorkLocationBadge from "./WorkLocationBadge";
 import { usePortalStats } from "./PortalStatsProvider";
 import { isTrackedRole, type SessionUser } from "@/lib/access";
 import { type NavMode } from "@/lib/navPreference";
+import { isLocationTracked } from "@/lib/workLocationRules";
 
 /**
  * The top bar: where you are on the left, the state of the workspace on the
@@ -214,6 +216,9 @@ export default function AppTopBar({
          * still beats, because the heartbeat is what keeps `work_sessions`
          * honest for everyone. Only the readout is role-specific. */}
         {isTrackedRole(user.role) && <SessionTimer />}
+        {/* Office or remote — agents and contributors, and only once the server has
+            said which (`WorkLocationBadge` draws nothing without a status). */}
+        {isLocationTracked(user.role) && <WorkLocationBadge />}
 
         <p className="hidden text-caption text-fg-3 2xl:block">{longDate(today)}</p>
 

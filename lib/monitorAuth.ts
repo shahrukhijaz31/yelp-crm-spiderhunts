@@ -1,7 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import { TRACKED_ROLES, type Role, type SessionUser } from "./access";
+import { clientIp } from "./loginThrottle";
 import { prisma } from "./prisma";
+import { recordPresence } from "./workLocation";
 import { touchMonitorLiveness } from "./workSessions";
 
 /**
@@ -322,6 +324,14 @@ export async function getDeviceContext(request: Request): Promise<DeviceContext 
    * promise in a serverless request is a write that may simply never happen.
    */
   await touchMonitorLiveness(device.user.id);
+
+  // The same request also says where a contributor's workstation is — the one
+  // laptop they carry between the office and home (`lib/workLocation.ts`).
+  // Throttled inside to a write a minute; a no-op for any other role.
+  await recordPresence(
+    { id: device.user.id, role: device.user.role as Role },
+    clientIp(request),
+  );
 
   return {
     deviceId: device.id,

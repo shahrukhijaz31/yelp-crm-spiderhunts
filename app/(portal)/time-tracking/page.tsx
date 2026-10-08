@@ -1,9 +1,12 @@
 import { connection } from "next/server";
 
 import TimeTrackingPanel from "@/components/TimeTrackingPanel";
+import WorkLocationCard from "@/components/WorkLocationCard";
 import { requireUser } from "@/lib/authz";
 import { resolveRange } from "@/lib/performanceRules";
 import { agentTimeTracking } from "@/lib/timeTracking";
+import { locationSummary } from "@/lib/workLocation";
+import { isLocationTracked } from "@/lib/workLocationRules";
 
 /**
  * Time tracking — every signed-in user, their own record only.
@@ -32,9 +35,27 @@ export default async function TimeTrackingPage() {
     resolveRange("last7"),
   );
 
+  // Office and remote, for an agent or a contributor — the same two windows as above.
+  const today = resolveRange("today");
+  const week = resolveRange("last7");
+  const location = isLocationTracked(user.role)
+    ? await Promise.all([locationSummary(user.id, today), locationSummary(user.id, week)])
+    : null;
+
   return (
     <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
       <TimeTrackingPanel tracking={tracking} name={user.name} />
+      {location && (
+        <div className="mx-auto mt-5 w-full max-w-5xl">
+          <WorkLocationCard
+            periods={[
+              { label: "Today", summary: location[0] },
+              { label: "Last 7 days", summary: location[1] },
+            ]}
+            listTitle="Today"
+          />
+        </div>
+      )}
     </main>
   );
 }

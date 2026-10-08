@@ -234,8 +234,11 @@ function normaliseIp(value: string | null | undefined): string | null {
  * A caller can still *shorten* the list (send no header at all), and that is
  * fine: the result is {@link UNKNOWN_IP}, a bucket shared with every other
  * caller in the same position, which is more restrictive than their own.
+ *
+ * Takes anything with `headers.get`, so a server component can pass
+ * `{ headers: await headers() }` and get the same answer a route handler would.
  */
-export function clientIp(request: Request): string {
+export function clientIp(request: { headers: { get(name: string): string | null } }): string {
   const hops = trustedProxyHops();
   if (hops === 0) return UNKNOWN_IP;
 

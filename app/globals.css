@@ -210,6 +210,13 @@
   --c-st-teal-bg: #0c2422;
   --c-st-teal-line: #1a4340;
 
+  /* Office and remote, in the time charts. A blue and an orange chosen by the
+     palette validator rather than borrowed from the status hues: sky and teal
+     are too alike to tell apart as two halves of one bar. Not red — red is the
+     accent. Each mode has its own step, validated against its own surface. */
+  --c-viz-office: #3987e5;
+  --c-viz-remote: #d95926;
+
   /*
    * SOURCE HUES — which directory a lead was scraped out of.
    *
@@ -454,6 +461,9 @@
   --c-st-teal-bg: #e7f5f3;
   --c-st-teal-line: #a7d8d3;
 
+  --c-viz-office: #2a78d6;
+  --c-viz-remote: #eb6834;
+
   --c-src-yelp: #93356b;
   --c-src-yelp-bg: #fceef6;
   --c-src-yelp-line: #eec3dc;
@@ -607,6 +617,8 @@
   --color-st-gold: var(--c-st-gold);
   --color-st-gold-bg: var(--c-st-gold-bg);
   --color-st-gold-line: var(--c-st-gold-line);
+  --color-viz-office: var(--c-viz-office);
+  --color-viz-remote: var(--c-viz-remote);
   --color-st-sky: var(--c-st-sky);
   --color-st-sky-bg: var(--c-st-sky-bg);
   --color-st-sky-line: var(--c-st-sky-line);

@@ -1,4 +1,6 @@
 import { apiUser } from "@/lib/authz";
+import { clientIp } from "@/lib/loginThrottle";
+import { recordPresence } from "@/lib/workLocation";
 import { HEARTBEAT_SECONDS } from "@/lib/performanceRules";
 import { getWorkClock, heartbeatWorkSession } from "@/lib/workSessions";
 
@@ -28,8 +30,12 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const clock = await heartbeatWorkSession(auth.id);
+    // Office or remote, for a contributor — after the shift is open, so the
+    // first beat of a shift already has a stretch to start. Null for everyone
+    // else, and never throws (see `lib/workLocation.ts`).
+    const location = await recordPresence(auth, clientIp(request));
     return Response.json(
-      { clock, heartbeatSeconds: HEARTBEAT_SECONDS },
+      { clock, location, heartbeatSeconds: HEARTBEAT_SECONDS },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
