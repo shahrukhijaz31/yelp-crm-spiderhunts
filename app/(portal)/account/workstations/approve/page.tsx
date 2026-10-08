@@ -18,11 +18,12 @@ export const metadata: Metadata = {
  * (`safeCallbackUrl` returns the path and its query untouched), and approves
  * then. There is no version of this page that works without a session.
  *
- * The request is described here on the server. `describePairing` returns null
- * for unknown, expired and already-handled alike — a page that told those
- * apart would turn the request id into a way of asking whether somebody else's
- * pairing exists — and the panel renders the same "nothing to connect" state
- * for all of them.
+ * The request is described here on the server, and the four states it can be
+ * in are four different sentences. The one that matters most is "connected":
+ * an agent who approves and then reloads the page — or follows the link in the
+ * email afterwards — needs to be told it worked, not that nothing is waiting.
+ * Unknown and expired stay collapsed into one answer, because there is no
+ * reason for this page to confirm that a stranger's request ever existed.
  *
  * What crosses to the client is what the workstation said about itself when it
  * asked: a name, a platform, a version and two instants. No user id, because a
@@ -39,11 +40,11 @@ export default async function ApproveWorkstationPage({
     `/account/workstations/approve${request ? `?request=${encodeURIComponent(request)}` : ""}`,
   );
 
-  const pairing = request ? await describePairing(request) : null;
+  const pairing = await describePairing(request ?? "");
 
   return (
     <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
-      <ApproveWorkstationPanel request={pairing} />
+      <ApproveWorkstationPanel view={pairing} />
     </main>
   );
 }

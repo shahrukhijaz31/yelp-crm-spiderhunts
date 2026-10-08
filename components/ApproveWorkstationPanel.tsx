@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Laptop, Loader2, ShieldCheck } from "lucide-react";
 
+import type { PairingView } from "@/lib/monitorPairing";
 import type { PairingRequestInfo } from "@/lib/monitorPairingRules";
 import { approveWorkstation, denyWorkstation } from "@/lib/workstationsClient";
 
@@ -24,12 +25,10 @@ import { approveWorkstation, denyWorkstation } from "@/lib/workstationsClient";
  * Layout follows Change password and Downloads: a title, an intro that says
  * what the screen does, and one `panel` holding the work.
  */
-export default function ApproveWorkstationPanel({
-  request,
-}: {
-  request: PairingRequestInfo | null;
-}) {
+export default function ApproveWorkstationPanel({ view }: { view: PairingView }) {
   const router = useRouter();
+
+  const request = view.state === "pending" ? view.request : null;
 
   const [working, setWorking] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +90,50 @@ export default function ApproveWorkstationPanel({
     setWorking(null);
   }
 
+  /*
+   * The states an agent reaches without pressing anything on this page: they
+   * approved and the browser reloaded, they followed the link in the email
+   * afterwards, or they came back to a request that is no longer live. Each
+   * gets the sentence that answers the question they actually have.
+   */
+  if (view.state === "connected") {
+    return (
+      <Shell>
+        <section className="panel flex flex-col gap-4 px-6 py-6">
+          <Message
+            tone="good"
+            icon={<CheckCircle2 className="mt-px h-4 w-4 shrink-0" strokeWidth={1.75} />}
+          >
+            <strong className="font-medium">
+              {view.deviceName ?? "That computer"}
+            </strong>{" "}
+            is connected to your account. You can close this page — the Monitor
+            on that computer picks it up on its own.
+          </Message>
+          <a href="/account/workstations" className="ui-btn ui-btn-ghost self-start">
+            See your workstations
+          </a>
+        </section>
+      </Shell>
+    );
+  }
+
+  if (view.state === "denied") {
+    return (
+      <Shell>
+        <section className="panel flex flex-col gap-4 px-6 py-6">
+          <Message
+            tone="quiet"
+            icon={<ShieldCheck className="mt-px h-4 w-4 shrink-0" strokeWidth={1.75} />}
+          >
+            That request was refused and nothing was connected. If you did not
+            start it yourself and it keeps happening, tell an administrator.
+          </Message>
+        </section>
+      </Shell>
+    );
+  }
+
   if (!request) {
     return (
       <Shell>
@@ -103,6 +146,9 @@ export default function ApproveWorkstationPanel({
             minutes — press <strong className="font-medium">Connect</strong> in
             SpiderHunts Monitor again and this page will open fresh.
           </Message>
+          <a href="/account/workstations" className="ui-btn ui-btn-ghost self-start">
+            See your workstations
+          </a>
         </section>
       </Shell>
     );

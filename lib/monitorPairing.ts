@@ -134,14 +134,29 @@ export async function startPairing(
 /* -------------------------------------------------------------------------- */
 
 /**
- * What the approval page shows, or null when there is nothing to show.
+ * What the approval page is looking at.
  *
- * Read-only and grants nothing. Null covers unknown, expired and already
- * handled alike: a page that distinguished them would turn the request id into
- * a way of asking whether somebody else's pairing exists.
+ * Read-only, and grants nothing. The four outcomes exist because the screen
+ * has four genuinely different things to say, and the agent most often reaches
+ * it twice — once to approve, and once more when the browser reloads the page
+ * behind them. Telling them "there is nothing waiting" at that second moment
+ * was both true and useless, because what they want to know is whether it
+ * worked.
+ *
+ * Unknown and expired are still collapsed into one answer. The id is 32 random
+ * bytes, so holding one is already proof of having been sent it — but there is
+ * no reason for this to confirm that a stranger's request ever existed, and
+ * "that is not waiting any more" is the same sentence either way.
  */
-export async function describePairing(requestId: string): Promise<PairingRequestInfo | null> {
-  if (!requestId) return null;
+export type PairingView =
+  | { state: "pending"; request: PairingRequestInfo }
+  /** Approved, whether or not the workstation has collected its tokens yet. */
+  | { state: "connected"; deviceName: string | null }
+  | { state: "denied" }
+  | { state: "gone" };
+
+export async function describePairing(requestId: string): Promise<PairingView> {
+  if (!requestId) return { state: "gone" };
 
   const row = await prisma.monitorPairing
     .findUnique({
@@ -160,17 +175,26 @@ export async function describePairing(requestId: string): Promise<PairingRequest
     })
     .catch(() => null);
 
-  if (!row) return null;
-  if (row.approvedAt || row.deniedAt || row.consumedAt) return null;
-  if (row.expiresAt <= new Date()) return null;
+  if (!row) return { state: "gone" };
+  if (row.deniedAt) return { state: "denied" };
+  if (row.approvedAt || row.consumedAt) {
+    return { state: "connected", deviceName: row.deviceName };
+  }
+
+  // Expiry last, so a request that was dealt with keeps saying what happened
+  // to it rather than turning into "that expired" five minutes later.
+  if (row.expiresAt <= new Date()) return { state: "gone" };
 
   return {
-    requestId: row.publicId,
-    deviceName: row.deviceName,
-    platform: row.platform,
-    appVersion: row.appVersion,
-    requestedAt: row.createdAt.toISOString(),
-    expiresAt: row.expiresAt.toISOString(),
+    state: "pending",
+    request: {
+      requestId: row.publicId,
+      deviceName: row.deviceName,
+      platform: row.platform,
+      appVersion: row.appVersion,
+      requestedAt: row.createdAt.toISOString(),
+      expiresAt: row.expiresAt.toISOString(),
+    },
   };
 }
 

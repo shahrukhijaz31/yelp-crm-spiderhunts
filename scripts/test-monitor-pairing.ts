@@ -467,6 +467,38 @@ async function main(): Promise<void> {
     `got ${JSON.stringify(sameAddress)}`,
   );
 
+  /* --- what the approval page says afterwards ------------------------------ */
+  section("The approval page says what happened");
+
+  // The states an agent reaches by reloading the page or following the link in
+  // the email, which is how "there is nothing waiting" came to be shown after
+  // a connection that had in fact succeeded.
+  const { describePairing } = await import("../lib/monitorPairing");
+
+  const afterConnecting = await describePairing(requestId);
+  check(
+    "a connected request reads as connected, not as nothing waiting",
+    afterConnecting.state === "connected",
+    `got ${afterConnecting.state}`,
+  );
+  check(
+    "and it names the workstation",
+    afterConnecting.state === "connected" && afterConnecting.deviceName === "PAIRTEST-DESKTOP",
+  );
+
+  const afterDenying = await describePairing(denyId);
+  check("a denied request reads as denied", afterDenying.state === "denied", `got ${afterDenying.state}`);
+
+  const afterExpiring = await describePairing(staleId);
+  check("an expired request reads as gone", afterExpiring.state === "gone", `got ${afterExpiring.state}`);
+
+  const neverExisted = await describePairing(randomBytes(32).toString("base64url"));
+  check(
+    "an unknown id is indistinguishable from an expired one",
+    neverExisted.state === "gone",
+    `got ${neverExisted.state}`,
+  );
+
   /* --- a contributor ------------------------------------------------------- */
   section("Contributors connect workstations too");
 
