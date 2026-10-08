@@ -87,6 +87,12 @@ npm run dev   # http://localhost:3000
   classified as productive or unproductive** — the feature reports time and
   makes no judgement, and it does not touch the activity percentage or the
   productivity score. See **App usage tracking** below.
+- **Connecting a workstation** — an agent authorises SpiderHunts Monitor from
+  the portal they are already signed in to, in one click, instead of typing the
+  same password and a second emailed code into a desktop application. Connecting
+  is once per machine, and `/account/workstations` lists the machines reporting
+  under their account with a Disconnect button for each. See **Connecting a
+  workstation** below.
 - **Themes** — dark (graphite + signal red) and light (cool slate), toggled from
   the nav bar and persisted to localStorage via next-themes. Colour lives in one
   place: every token is a `--c-*` variable defined twice in `app/globals.css`
@@ -1013,6 +1019,102 @@ usage, users, time tracking and the monitor session endpoint all still answer as
 before. It creates throwaway accounts (`dltest-*`) and removes everything it
 made, including after a failure — and it never deletes an installer it did not
 itself write.
+
+## Connecting a workstation
+
+Signing in to the portal is what starts an agent's shift — the Monitor can
+neither open nor close one. So the portal already knows who is at the desk by
+the time the desktop client asks, and asking them for a password and a second
+emailed code was duplicated typing rather than a second check.
+
+An agent now connects the Monitor from the portal they are already signed in to:
+
+```
+Monitor                         Portal                      Their browser
+POST /api/monitor/pairing/start  →  a request naming nobody
+opens the portal ------------------------------------------>  "Connect DESKTOP-7F3K?"
+POST /api/monitor/pairing/poll   →  pending…                   [ Connect ]
+                                                          ←--  POST /api/account/workstations/approve
+                                    approved → device tokens, and an email
+POST /api/monitor/pairing/poll   →  access + refresh tokens
+```
+
+**A pairing names nobody until somebody claims it.** `start` takes no username,
+no email and no password; `user_id` is written from the approving session and
+from nowhere else. A workstation therefore cannot ask to be connected *as*
+someone, and the endpoint cannot be used to discover which accounts exist.
+
+**The approval half is not in `/api/monitor/*`.** That group never
+authenticates a browser session — the rule that keeps `monitor_devices` and
+`sessions` from being confused for one another — so `approve`, `deny` and
+`disconnect` live under `/api/account/workstations/`, behind `apiUser()` with
+the session cookie and the same-origin check.
+
+### Why there is no code to type
+
+A code the agent reads off the Monitor and types into the portal would be the
+strongest answer, because a phishing page cannot show a code it does not have.
+It was weighed and dropped: this happens once per workstation and the friction
+is paid by every agent, while the attack it prevents yields a credential that
+can pollute monitoring data and reach nothing else — not the portal, not leads.
+Three things carry that decision:
+
+- **The same network.** The approval must come from the address the pairing
+  started from. The Monitor and the browser are one machine, so this is
+  invisible in use, and a link sent from outside the office fails on it. When
+  `TRUSTED_PROXY_HOPS` is 0 there are no addresses to compare and the check is
+  skipped — that is development, where there is nothing to phish.
+- **An unguessable request, briefly.** 32 random bytes, five minutes, one use.
+- **Telling the agent.** Every connection emails them, naming the machine, with
+  a link to the screen where one click disconnects it.
+
+If that trade ever stops being the right one, a typed code goes into
+`approvePairing` and nothing else in the design changes.
+
+### Your workstations
+
+`/account/workstations`, in the account menu for agents and contributors. One
+row per connected machine — name, platform, version, when it connected, when it
+was last seen — and a Disconnect button behind a confirmation that says what it
+does *not* do: it does not end a shift and does not sign anybody out of the
+portal.
+
+The list is read server-side from the session's own user id, so there is no
+`GET /api/account/workstations` to exist and nothing that could be asked about
+another agent. Disconnect puts `user_id` in the `where` clause, so naming a
+colleague's device returns the same 404 a missing one does.
+
+This screen is also why a Monitor credential is allowed to renew itself
+indefinitely: see `lib/monitorAuth.ts`. The refresh window slides thirty days
+forward on every rotation and stops at 180 days from the day the workstation
+connected, so an agent connects once rather than monthly — and a credential
+that should not exist is something they can see and end.
+
+**Administrators get no view of this.** Disabling an account already revokes
+every workstation on it, and the admin dashboard already reports per-device
+capture health. A per-device admin revoke would be a new power over a named
+agent's machine with no requirement behind it.
+
+### Testing it
+
+```
+npm run dev                   # in one terminal
+npm run test:monitor-pairing  # in another
+```
+
+34 checks against the real routes and the real database: that the start reply
+carries no identity of any kind and the row it writes belongs to nobody; that
+polling yields nothing until an approval; that approving needs a session and
+the portal's own origin; that an administrator is refused and no device row
+appears; the whole round trip, with the workstation recorded under the name it
+gave at `start`; that collecting twice is refused and exactly one device row
+exists; that a denial and an expiry are both final; that a contributor can
+connect; and that a disconnect reaches only the caller's own machines. Two
+checks call the library directly and say why — expiry would otherwise need the
+test to wait five minutes, and the same-network rule has no two addresses to
+compare on a development machine.
+
+`npm run test:monitor-refresh` covers the sliding window beside it.
 
 ## Expected CSV columns
 

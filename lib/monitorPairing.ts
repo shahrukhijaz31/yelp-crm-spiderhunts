@@ -290,7 +290,15 @@ export async function denyPairing(requestId: string): Promise<void> {
 
 export type RedeemResult =
   | { state: "pending" }
-  | { state: "approved"; tokens: DeviceTokens; user: SessionUser; userId: string }
+  | {
+      state: "approved";
+      tokens: DeviceTokens;
+      user: SessionUser;
+      userId: string;
+      /** Carried out so the route can name the machine in the agent's email. */
+      deviceName: string | null;
+      platform: string | null;
+    }
   | {
       state: "failed";
       code:
@@ -358,7 +366,14 @@ export async function redeemPairing(deviceCode: string): Promise<RedeemResult> {
 
   if (!issued.ok) return { state: "failed", code: issued.code };
 
-  return { state: "approved", tokens: issued.tokens, user: issued.user, userId: row.userId };
+  return {
+    state: "approved",
+    tokens: issued.tokens,
+    user: issued.user,
+    userId: row.userId,
+    deviceName: row.deviceName,
+    platform: row.platform,
+  };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, KeyRound, LogOut, MonitorDown } from "lucide-react";
+import { ChevronDown, KeyRound, Laptop, LogOut, MonitorDown } from "lucide-react";
 
 import { useWorkSession } from "./WorkSessionProvider";
 import { LOGIN_PATH, isTrackedRole, type SessionUser } from "@/lib/access";
@@ -226,6 +226,28 @@ export default function UserMenu({ user }: { user: SessionUser }) {
             <MonitorDown className="h-4 w-4 shrink-0 text-fg-4" strokeWidth={1.75} aria-hidden="true" />
             Download Monitor
           </Link>
+
+          {/*
+           * The computers reporting under this account, and the button that
+           * disconnects one.
+           *
+           * Gated the same way `SessionRow` above is, and for the same reason
+           * rather than as a permission: `MONITOR_ROLES` admits agents and
+           * contributors, so an administrator cannot have connected a
+           * workstation and the entry would lead to an empty page. The page
+           * itself is open to every role and shows what is true for them.
+           */}
+          {isTrackedRole(user.role) && (
+            <Link
+              href="/account/workstations"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-ui text-fg-2 transition-colors hover:bg-hover hover:text-fg focus-visible:bg-hover focus-visible:text-fg"
+            >
+              <Laptop className="h-4 w-4 shrink-0 text-fg-4" strokeWidth={1.75} aria-hidden="true" />
+              Your workstations
+            </Link>
+          )}
 
           <button
             type="button"

@@ -1,7 +1,9 @@
 import { clientIp } from "@/lib/loginThrottle";
+import { sendMail } from "@/lib/mail";
 import { prunePairings, redeemPairing } from "@/lib/monitorPairing";
 import { pruneExpiredDevices } from "@/lib/monitorAuth";
 import { MONITOR_PAIRING_POLL_LIMIT, rateLimitRefusal } from "@/lib/rateLimit";
+import { buildWorkstationConnectedEmail } from "@/lib/workstationEmail";
 
 /**
  * POST /api/monitor/pairing/poll — has the agent approved this workstation yet?
@@ -94,10 +96,51 @@ export async function POST(request: Request): Promise<Response> {
 
   console.info(`workstation connected by pairing for user ${result.userId}`);
 
+  /*
+   * Tell the agent, and do not let it matter whether the telling worked.
+   *
+   * This email is what stands in for a code the agent would otherwise have
+   * typed: connecting takes one click, so noticing is part of the defence. But
+   * it is detection, not a gate — refusing to connect because SMTP is down
+   * would turn a notification into a dependency, and would strand an agent
+   * whose approval already succeeded.
+   */
+  void sendMail(
+    buildWorkstationConnectedEmail({
+      to: result.user.email,
+      deviceName: result.deviceName,
+      platform: result.platform,
+      portalUrl: portalUrlFor(request),
+      connectedAt: new Date(),
+    }),
+  ).catch(() => {});
+
   return Response.json(
     { ok: true, state: "approved", tokens: result.tokens, user: result.user },
     { headers: noStore },
   );
+}
+
+/**
+ * Where to point the one link in the notification email.
+ *
+ * `APP_ORIGIN` when the deployment sets it, because that is already this
+ * application's statement of what it is called from outside. Otherwise the
+ * request's own `Host`, which nginx constrains to this vhost's `server_name`
+ * before anything reaches us — and `https`, because the app sits behind that
+ * proxy on loopback and its own view of the scheme is always `http`.
+ *
+ * Deliberately not a new environment variable: `.env.example` promises that
+ * authentication adds none, and this is a link in an email rather than
+ * anything a decision rests on.
+ */
+function portalUrlFor(request: Request): string {
+  const configured = process.env.APP_ORIGIN?.split(",")[0]?.trim();
+  if (configured) return configured;
+
+  const host = request.headers.get("host") ?? "localhost:3000";
+  const scheme = host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
+  return `${scheme}://${host}`;
 }
 
 function statusFor(code: string): number {
