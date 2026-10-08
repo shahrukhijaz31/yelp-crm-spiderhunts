@@ -1,9 +1,10 @@
 import { TRACKED_ROLES, type Role } from "./access";
-import type { DateRange } from "./performanceRules";
+import { addDays, workdayStart, type DateRange } from "./performanceRules";
 import { prisma } from "./prisma";
 import {
   isLocationTracked,
   summariseLocations,
+  type DayLocationTotals,
   type PersonLocationTotals,
   type WorkLocation,
   type WorkLocationStatus,
@@ -14,34 +15,23 @@ import {
  * Office or remote, for everybody whose time is tracked (agents and
  * contributors).
  *
- * A contributor carries one laptop between the office and home, sometimes on
- * the same day, so the machine cannot say where it is — the network can. The
- * office line has a fixed public address (`office_networks`); a request from it
- * is office, a request from anywhere else is remote.
+ * **Chosen, not detected.** The team works through a VPN in the office and at
+ * home alike, so every request reaches the portal from the VPN's address and
+ * the network cannot tell the two apart. So the person says where they are: the
+ * portal asks at the start of every shift ("Where are you working today?") and
+ * they switch from the top-bar badge when they move. A choice belongs to one
+ * shift (`users.location_session_id`) and is asked again on the next.
  *
- * **What this observes.** The two liveness signals a shift already has: the
+ * **What is recorded.** The two liveness signals a shift already has — the
  * portal heartbeat (once a minute while a tab is open) and every authenticated
- * Monitor request. Each one, from a contributor with an open shift, extends the
- * shift's current stretch if the place is unchanged, or starts a new stretch if
- * it moved. No new traffic, nothing for the contributor to press.
+ * Monitor request — extend the shift's current stretch in the chosen place;
+ * choosing a different place starts a new stretch. Time before the first
+ * choice of a shift is not labelled at all rather than guessed.
  *
  * **What it cannot do.** Open, close or lengthen a shift, or change any figure
- * that existed before it. It writes `work_location_segments` and the two
- * override columns on `users`, and nothing else.
- *
- * **When the network is wrong** — a home VPN that exits at the office, the
- * office line down and a phone hotspot in use — the contributor corrects it
- * from the badge. The correction is held only while the network still reads as
- * it did when they made it (`locationOverrideBasis`), so it lapses by itself
- * when they move and can never outlive the situation it was for.
- *
- * The address used is `clientIp` (`lib/loginThrottle.ts`), which trusts only
- * what nginx wrote. A request whose address cannot be established records
- * nothing rather than guessing.
+ * that existed before it. It writes `work_location_segments` and the choice on
+ * `users`, and nothing else.
  */
-
-/** How long the office list is reused before it is read again. */
-const OFFICE_CACHE_MS = 60_000;
 
 /**
  * How often one person's stretch is written. The Monitor makes several
@@ -50,85 +40,32 @@ const OFFICE_CACHE_MS = 60_000;
  */
 const TOUCH_MS = 60_000;
 
-let officeCache: { at: number; ips: Set<string> } | null = null;
-
 /** Per-process memory of the last write per person, for the throttle above. */
-const lastWrite = new Map<string, { at: number; status: WorkLocationStatus }>();
+const lastWrite = new Map<string, { at: number; location: WorkLocation }>();
 
-/** The office addresses, cached for a minute. */
-async function officeIps(): Promise<Set<string>> {
-  if (officeCache && Date.now() - officeCache.at < OFFICE_CACHE_MS) return officeCache.ips;
-  const rows = await prisma.officeNetwork.findMany({ select: { ip: true } });
-  officeCache = { at: Date.now(), ips: new Set(rows.map((row) => row.ip)) };
-  return officeCache.ips;
+/** The open shift's id, or null when they are not on the clock. */
+async function openSessionId(userId: string): Promise<string | null> {
+  const session = await prisma.workSession.findFirst({
+    where: { userId, endedAt: null },
+    orderBy: { startedAt: "desc" },
+    select: { id: true },
+  });
+  return session?.id ?? null;
 }
 
-/** Forget the cached list — called when an administrator edits it. */
-export function invalidateOfficeNetworks(): void {
-  officeCache = null;
-  lastWrite.clear();
-}
-
-/** `::ffff:39.60.232.90` is how an IPv4 client can appear on a dual-stack socket. */
-function canonicalIp(ip: string): string {
-  const value = ip.trim().toLowerCase();
-  return value.startsWith("::ffff:") && value.includes(".") ? value.slice(7) : value;
-}
-
-/**
- * Development only: the address to pretend a request came from.
- *
- * `next dev` has no nginx in front of it, so `clientIp` rightly reads every
- * request as "unknown" and nothing would ever be recorded on a laptop.
- * `DEV_CLIENT_IP` in `.env.local` stands in for it — set it to an office
- * address to see Office, anything else to see Remote. Ignored entirely in
- * production, where only what nginx wrote is believed.
- */
-function devIp(ip: string): string {
-  if (ip !== "unknown" || process.env.NODE_ENV === "production") return ip;
-  return process.env.DEV_CLIENT_IP?.trim() || ip;
-}
-
-/** What the network says, or null when the address is unknown. */
-export async function detectLocation(ip: string): Promise<WorkLocation | null> {
-  if (!ip || ip === "unknown") return null;
-  return (await officeIps()).has(canonicalIp(ip)) ? "office" : "remote";
-}
-
-/**
- * What is being recorded for this person on this network, applying (or
- * lapsing) their correction. Writes only when a correction has lapsed.
- */
-async function resolveStatus(
-  userId: string,
-  detected: WorkLocation,
-): Promise<WorkLocationStatus> {
+/** Where they said they are, if they said it for this shift. */
+async function choiceFor(userId: string, sessionId: string): Promise<WorkLocation | null> {
   const row = await prisma.user.findUnique({
     where: { id: userId },
-    select: { locationOverride: true, locationOverrideBasis: true },
+    select: { locationOverride: true, locationSessionId: true },
   });
-
-  if (row?.locationOverride) {
-    if (row.locationOverrideBasis === detected) {
-      return {
-        location: row.locationOverride,
-        detected,
-        manual: row.locationOverride !== detected,
-      };
-    }
-    // They have moved since they made the correction: it no longer applies.
-    await prisma.user.update({
-      where: { id: userId },
-      data: { locationOverride: null, locationOverrideBasis: null },
-    });
-  }
-
-  return { location: detected, detected, manual: false };
+  return row?.locationOverride && row.locationSessionId === sessionId ? row.locationOverride : null;
 }
 
 /**
- * Record one signal of life from a contributor. Returns the status the badge
- * should show, or null for anyone not tracked or an unknown address.
+ * Record one signal of life. Returns the status the badge should show — the
+ * chosen place, or `needsChoice` when this shift has no choice yet — or null
+ * for anyone not tracked.
  *
  * Never throws: this rides on the heartbeat and on Monitor requests, and
  * neither may fail because a bookkeeping write did.
@@ -138,63 +75,51 @@ export async function recordPresence(
   ip: string,
 ): Promise<WorkLocationStatus | null> {
   if (!isLocationTracked(user.role)) return null;
-  ip = devIp(ip);
 
   try {
-    const detected = await detectLocation(ip);
-    if (!detected) return null;
-
-    // Within a minute of the last write and on the same network, nothing can
-    // have changed: a correction clears this entry when it is made, and only a
-    // change of network can lapse one. So no read at all on most requests.
+    // Within a minute of the last write nothing needs saying: a new choice
+    // clears this entry when it is made. So no read at all on most requests.
     const now = Date.now();
     const last = lastWrite.get(user.id);
-    if (last && now - last.at < TOUCH_MS && last.status.detected === detected) {
-      return last.status;
+    if (last && now - last.at < TOUCH_MS) {
+      return { location: last.location, needsChoice: false };
     }
 
-    const status = await resolveStatus(user.id, detected);
+    const sessionId = await openSessionId(user.id);
+    if (!sessionId) return { location: null, needsChoice: false };
 
-    const session = await prisma.workSession.findFirst({
-      where: { userId: user.id, endedAt: null },
-      orderBy: { startedAt: "desc" },
-      select: { id: true },
-    });
-    // Not on the clock: nothing to describe. The badge still says where they
-    // are, so a contributor can see it before their shift starts.
-    if (!session) {
-      lastWrite.set(user.id, { at: now, status });
-      return status;
-    }
+    const location = await choiceFor(user.id, sessionId);
+    if (!location) return { location: null, needsChoice: true };
 
     const latest = await prisma.workLocationSegment.findFirst({
-      where: { workSessionId: session.id },
+      where: { workSessionId: sessionId },
       orderBy: { startedAt: "desc" },
-      select: { id: true, location: true, manual: true },
+      select: { id: true, location: true },
     });
 
     const at = new Date(now);
-    if (latest && latest.location === status.location && latest.manual === status.manual) {
+    const address = ip === "unknown" ? null : ip;
+    if (latest && latest.location === location) {
       await prisma.workLocationSegment.update({
         where: { id: latest.id },
-        data: { lastSeenAt: at, ip },
+        data: { lastSeenAt: at, ip: address },
       });
     } else {
       await prisma.workLocationSegment.create({
         data: {
           userId: user.id,
-          workSessionId: session.id,
-          location: status.location,
-          manual: status.manual,
-          ip,
+          workSessionId: sessionId,
+          location,
+          manual: true,
+          ip: address,
           startedAt: at,
           lastSeenAt: at,
         },
       });
     }
 
-    lastWrite.set(user.id, { at: now, status });
-    return status;
+    lastWrite.set(user.id, { at: now, location });
+    return { location, needsChoice: false };
   } catch (error) {
     console.error(`Recording work location for ${user.id} failed:`, error);
     return null;
@@ -205,27 +130,16 @@ export async function recordPresence(
  * Where this person is right now, without recording anything — the badge's
  * first paint, before the first heartbeat.
  */
-export async function currentLocationStatus(
-  user: { id: string; role: Role },
-  ip: string,
-): Promise<WorkLocationStatus | null> {
+export async function currentLocationStatus(user: {
+  id: string;
+  role: Role;
+}): Promise<WorkLocationStatus | null> {
   if (!isLocationTracked(user.role)) return null;
-  ip = devIp(ip);
   try {
-    const detected = await detectLocation(ip);
-    if (!detected) return null;
-    const row = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { locationOverride: true, locationOverrideBasis: true },
-    });
-    if (row?.locationOverride && row.locationOverrideBasis === detected) {
-      return {
-        location: row.locationOverride,
-        detected,
-        manual: row.locationOverride !== detected,
-      };
-    }
-    return { location: detected, detected, manual: false };
+    const sessionId = await openSessionId(user.id);
+    if (!sessionId) return { location: null, needsChoice: false };
+    const location = await choiceFor(user.id, sessionId);
+    return { location, needsChoice: location === null };
   } catch {
     return null;
   }
@@ -234,11 +148,10 @@ export async function currentLocationStatus(
 export class WorkLocationError extends Error {}
 
 /**
- * A contributor correcting where they are. Choosing what the network already
- * says clears the correction. Starts the new stretch straight away rather than
- * at the next heartbeat.
+ * Say where you are working, for this shift. Starts the new stretch straight
+ * away rather than at the next heartbeat.
  */
-export async function setLocationOverride(
+export async function setLocationChoice(
   user: { id: string; role: Role },
   ip: string,
   location: WorkLocation,
@@ -246,24 +159,18 @@ export async function setLocationOverride(
   if (!isLocationTracked(user.role)) {
     throw new WorkLocationError("Location is only tracked for agents and contributors.");
   }
-  ip = devIp(ip);
-  const detected = await detectLocation(ip);
-  if (!detected) {
-    throw new WorkLocationError("Your network address could not be read, so nothing was changed.");
+  const sessionId = await openSessionId(user.id);
+  if (!sessionId) {
+    throw new WorkLocationError("Your shift has not started yet. Reload the page and try again.");
   }
 
   await prisma.user.update({
     where: { id: user.id },
-    data:
-      location === detected
-        ? { locationOverride: null, locationOverrideBasis: null }
-        : { locationOverride: location, locationOverrideBasis: detected },
+    data: { locationOverride: location, locationSessionId: sessionId },
   });
 
   lastWrite.delete(user.id);
-  return (
-    (await recordPresence(user, ip)) ?? { location, detected, manual: location !== detected }
-  );
+  return (await recordPresence(user, ip)) ?? { location, needsChoice: false };
 }
 
 /** Office and remote time for one person over one window. */
@@ -333,10 +240,50 @@ export async function teamLocationTotals(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The office list, for the Settings page. */
-export async function listOfficeNetworks() {
-  return prisma.officeNetwork.findMany({
-    orderBy: { createdAt: "asc" },
-    select: { id: true, ip: true, label: true, createdAt: true },
+/**
+ * Office and remote time per working day, for the `days` days ending with
+ * `lastDay` — the Timesheets day gauges. One person, or everybody tracked added
+ * together. Every day is present, oldest first, with zeros for a day nobody
+ * worked, so the row of gauges always has one gauge per day.
+ *
+ * Days are working days (11:00–11:00 Pakistan time, `workdayStart`), the same
+ * days the timesheet table below the gauges is grouped by.
+ */
+export async function dailyLocationTotals(
+  lastDay: string,
+  days: number,
+  userId: string | null,
+): Promise<DayLocationTotals[]> {
+  const dayList = Array.from({ length: days }, (_, index) => addDays(lastDay, index - (days - 1)));
+  const from = workdayStart(dayList[0]);
+  const to = workdayStart(addDays(lastDay, 1));
+
+  const rows = await prisma.workLocationSegment.findMany({
+    where: {
+      ...(userId ? { userId } : {}),
+      user: { role: { in: [...TRACKED_ROLES] } },
+      startedAt: { lt: to },
+      lastSeenAt: { gt: from },
+    },
+    orderBy: { startedAt: "asc" },
+    select: { id: true, userId: true, location: true, manual: true, startedAt: true, lastSeenAt: true },
+  });
+
+  const byUser = new Map<string, typeof rows>();
+  for (const row of rows) byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row]);
+
+  // Per person and then added up, so one person's overlapping stretches are
+  // counted once while two people's time on the same day adds together.
+  return dayList.map((day) => {
+    const dayFrom = workdayStart(day);
+    const dayTo = workdayStart(addDays(day, 1));
+    let officeSeconds = 0;
+    let remoteSeconds = 0;
+    for (const own of byUser.values()) {
+      const summary = summariseLocations(own, dayFrom, dayTo);
+      officeSeconds += summary.officeSeconds;
+      remoteSeconds += summary.remoteSeconds;
+    }
+    return { day, officeSeconds, remoteSeconds };
   });
 }

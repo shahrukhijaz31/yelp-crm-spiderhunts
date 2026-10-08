@@ -4,26 +4,26 @@ import { clientIp } from "@/lib/loginThrottle";
 import {
   WorkLocationError,
   currentLocationStatus,
-  setLocationOverride,
+  setLocationChoice,
 } from "@/lib/workLocation";
 import { WORK_LOCATIONS, type WorkLocation } from "@/lib/workLocationRules";
 
 /**
  * GET  /api/work-location — where the signed-in person is being recorded.
- * POST /api/work-location — `{ "location": "office" | "remote" }`, their own
- *                            correction when the network has it wrong.
+ * POST /api/work-location — `{ "location": "office" | "remote" }`: where they
+ *                            are working, for the shift they are on.
  *
  * Agents and contributors — the roles tracked for location
  * (`isLocationTracked`). Both act on the session's own user — there is no
- * parameter that names anybody else — and the network is read from the
- * request by `clientIp`, never from the body. A correction is held only while
- * the network stays as it was (see `lib/workLocation.ts`).
+ * parameter that names anybody else. A choice belongs to the open shift and is
+ * asked for again on the next one (see `lib/workLocation.ts`). The address is
+ * recorded beside the stretch for the record only; it decides nothing.
  */
 export async function GET(request: Request): Promise<Response> {
   const auth = await apiRole([...TRACKED_ROLES], request);
   if (auth instanceof Response) return auth;
 
-  const location = await currentLocationStatus(auth, clientIp(request));
+  const location = await currentLocationStatus(auth);
   return Response.json({ location }, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -50,7 +50,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const status = await setLocationOverride(auth, clientIp(request), location as WorkLocation);
+    const status = await setLocationChoice(auth, clientIp(request), location as WorkLocation);
     return Response.json({ location: status }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof WorkLocationError) {

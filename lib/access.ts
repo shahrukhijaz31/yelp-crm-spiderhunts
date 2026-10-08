@@ -336,8 +336,6 @@ const ADMIN_PREFIXES = [
   "/api/screenshots",
   "/api/time-adjustments",
   "/api/users",
-  // The office address list behind "office or remote" (`lib/workLocation.ts`).
-  "/api/office-networks",
 ] as const;
 
 export function isPublicPath(pathname: string): boolean {

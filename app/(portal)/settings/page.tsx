@@ -1,13 +1,9 @@
-import { headers } from "next/headers";
 import { connection } from "next/server";
 
 import AccessDenied from "@/components/AccessDenied";
-import OfficeNetworksPanel from "@/components/OfficeNetworksPanel";
 import ProductivitySettingsPanel from "@/components/ProductivitySettingsPanel";
 import { requireRole } from "@/lib/authz";
-import { clientIp } from "@/lib/loginThrottle";
 import { readProductivityConfig } from "@/lib/productivity";
-import { listOfficeNetworks } from "@/lib/workLocation";
 
 /**
  * Settings — ADMIN only, and now with something real on it.
@@ -31,11 +27,7 @@ export default async function SettingsPage() {
 
   await connection();
 
-  const [productivityConfig, officeNetworks] = await Promise.all([
-    readProductivityConfig(),
-    listOfficeNetworks(),
-  ]);
-  const yourIp = clientIp({ headers: await headers() });
+  const productivityConfig = await readProductivityConfig();
 
   const PLANNED = [
     {
@@ -64,11 +56,6 @@ export default async function SettingsPage() {
         </header>
 
         <ProductivitySettingsPanel initialConfig={productivityConfig} />
-
-        <OfficeNetworksPanel
-          initialNetworks={officeNetworks.map(({ id, ip, label }) => ({ id, ip, label }))}
-          yourIp={yourIp}
-        />
 
         <ul className="panel flex flex-col gap-px overflow-hidden bg-line">
           {PLANNED.map((item) => (

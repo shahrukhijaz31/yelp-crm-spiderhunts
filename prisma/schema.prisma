@@ -663,12 +663,18 @@ model User {
   /// recordings.
   demoWebsiteEdits DemoWebsite[] @relation("DemoWebsiteEditor")
 
-  /// A contributor's own correction of where they are working, when the
-  /// network got it wrong (a home VPN that exits at the office, say). Held
-  /// only while the network still reads as `locationOverrideBasis` — the
-  /// location detected when they set it — so it lapses by itself the moment
-  /// they move, and detection takes over again. See `lib/workLocation.ts`.
-  locationOverride      WorkLocation? @map("location_override")
+  /// Where this person said they are working, and the shift they said it for
+  /// (`locationSessionId`). Asked at the start of every shift and changed from
+  /// the top-bar badge when they move; a choice made for an earlier shift does
+  /// not carry over. See `lib/workLocation.ts`.
+  ///
+  /// Chosen rather than detected: the team works through a VPN in the office
+  /// and at home alike, so the network address cannot tell the two apart.
+  locationOverride  WorkLocation? @map("location_override")
+  locationSessionId String?       @map("location_session_id")
+  /// Unused since location became a choice — it held the network reading a
+  /// correction was made against. Left in place so the release before this one
+  /// keeps working during a deploy's switchover; safe to drop in a later one.
   locationOverrideBasis WorkLocation? @map("location_override_basis")
 
   locationSegments WorkLocationSegment[]
@@ -1618,11 +1624,10 @@ enum WorkLocation {
   @@map("work_location")
 }
 
-/// A public address that means "in the office". Requests from any other
-/// address are remote. Edited on the Settings page by an administrator.
-///
-/// Exact addresses only: an office line has one fixed public IP, and a range
-/// is a way to accidentally call half a city "the office".
+/// A public address that meant "in the office". **Unused**: location is now
+/// chosen by the person rather than detected, because the team's VPN makes the
+/// office and home look identical from here. Kept so the previous release runs
+/// during a deploy's switchover; safe to drop in a later migration.
 model OfficeNetwork {
   id    String @id @default(cuid())
   ip    String @unique
@@ -1637,12 +1642,12 @@ model OfficeNetwork {
 
 /// One unbroken stretch of a contributor's shift in one place.
 ///
-/// Written from the liveness signals the shift already has — the portal
-/// heartbeat and every Monitor request — tagged with where the request came
-/// from (`lib/workLocation.ts`). The same place on consecutive signals extends
-/// the stretch; a different place starts a new one. So a day of office in the
-/// morning and home in the afternoon is two rows, with nobody pressing
-/// anything.
+/// The place is the one the person chose for this shift (`users.location_override`,
+/// asked at the start of every shift and changed from the top-bar badge). The
+/// liveness signals the shift already has — the portal heartbeat and every
+/// Monitor request — extend the current stretch; choosing a different place
+/// starts a new one. So office in the morning and home in the afternoon is two
+/// rows.
 ///
 /// **Visibility only.** Nothing here opens, closes or lengthens a shift, and no
 /// figure that existed before reads it. Its length is `lastSeenAt - startedAt`;
@@ -1657,10 +1662,11 @@ model WorkLocationSegment {
   workSession   WorkSession @relation(fields: [workSessionId], references: [id], onDelete: Cascade)
 
   location WorkLocation
-  /// True when the contributor chose it rather than the network saying so.
+  /// True for every stretch written since location became a choice; false
+  /// only on the few written while it was still detected from the network.
   manual   Boolean  @default(false)
-  /// The address last seen in this stretch, for an administrator checking why
-  /// a stretch reads the way it does.
+  /// The address last seen in this stretch. Recorded for the record only — it
+  /// decides nothing, since a VPN makes it the same everywhere.
   ip       String?
 
   startedAt  DateTime @map("started_at")

@@ -5,7 +5,9 @@ import TimesheetsPanel from "@/components/TimesheetsPanel";
 import { resolveTimesheetRange } from "@/lib/activityRules";
 import { requireRole } from "@/lib/authz";
 import { timeReport, timesheet } from "@/lib/timeTracking";
-import { teamLocationTotals } from "@/lib/workLocation";
+import { todayWorkday } from "@/lib/performanceRules";
+import { dailyLocationTotals, teamLocationTotals } from "@/lib/workLocation";
+import { LOCATION_DAY_OPTIONS, isLocationTracked } from "@/lib/workLocationRules";
 import { listUsers } from "@/lib/userDb";
 
 /**
@@ -37,6 +39,13 @@ export default async function TimesheetsPage() {
     teamLocationTotals(range, null),
   ]);
 
+  // The office/remote gauges show one person at a time; they open on the first
+  // tracked person in the list the employee picker offers.
+  const tracked = users.filter((user) => isLocationTracked(user.role));
+  const locationDays = tracked[0]
+    ? await dailyLocationTotals(todayWorkday(), LOCATION_DAY_OPTIONS[0], tracked[0].id)
+    : [];
+
   return (
     <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-6">
       <TimesheetsPanel
@@ -46,6 +55,7 @@ export default async function TimesheetsPage() {
           timesheet: rows,
           locations,
         }}
+        initialLocationDays={locationDays}
         // Names and roles only. The picker needs enough to label a filter and
         // nothing more, so no email address or account state travels to a screen
         // that has no use for one.

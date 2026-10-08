@@ -35,14 +35,23 @@ export interface PersonLocationTotals {
   remoteSeconds: number;
 }
 
-/** Where someone is right now, as the badge shows it. */
+/** How many days the Timesheets day gauges can show. Seven at the least. */
+export const LOCATION_DAY_OPTIONS = [7, 14, 30] as const;
+
+/** Office and remote time on one working day (11:00–11:00 Pakistan time). */
+export interface DayLocationTotals {
+  /** `YYYY-MM-DD`, the working day. */
+  day: string;
+  officeSeconds: number;
+  remoteSeconds: number;
+}
+
+/** Where someone is working right now, as the badge shows it. */
 export interface WorkLocationStatus {
-  /** What is being recorded. */
-  location: WorkLocation;
-  /** What the network says, whatever the person chose. */
-  detected: WorkLocation;
-  /** True when `location` is the person's own correction of `detected`. */
-  manual: boolean;
+  /** What they chose for this shift, or null before they have chosen. */
+  location: WorkLocation | null;
+  /** True when on the clock with no choice yet — the portal asks. */
+  needsChoice: boolean;
 }
 
 /** One stretch in one place, clipped to the window being reported. */
@@ -118,23 +127,4 @@ export function summariseLocations(
     remoteSeconds: Math.round(totals.remote),
     stretches,
   };
-}
-
-/**
- * Whether a string is an IP address an administrator could mean: dotted IPv4,
- * or IPv6 (which always contains a colon and only hex digits and colons, with
- * at most one `::`). Deliberately strict — a typo here would silently make the
- * office "remote" for everyone.
- */
-export function isIpAddress(value: string): boolean {
-  const v4 = value.split(".");
-  if (v4.length === 4) {
-    return v4.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
-  }
-  return (
-    value.includes(":") &&
-    /^[0-9a-f:]+$/i.test(value) &&
-    value.split("::").length <= 2 &&
-    value.length <= 39
-  );
 }

@@ -3,10 +3,11 @@
  *
  *   npm run test:work-location
  *
- * A contributor with an open shift sends signals from the office address, then
- * from home; corrects one; moves network so the correction lapses. Checks the
- * stretches written, the status returned each time, and the summary's totals.
- * An administrator is checked to record nothing; an agent is tracked too.
+ * Location is chosen, not detected (the team's VPN makes office and home look
+ * the same). A contributor starts a shift and is asked; chooses office; moves
+ * home; a new shift asks again. Checks the status returned each time, the
+ * stretches written, and every total the screens read. An administrator is
+ * checked to record nothing; an agent is asked like anyone else.
  *
  * Everything it creates is deleted at the end, pass or fail.
  */
@@ -16,9 +17,6 @@ import { config as loadEnv } from "dotenv";
 
 loadEnv({ path: ".env.local", quiet: true });
 loadEnv({ quiet: true });
-// The test sends its own addresses; the development stand-in would hide the
-// "unknown address" case it checks.
-delete process.env.DEV_CLIENT_IP;
 
 let failures = 0;
 function check(label: string, condition: boolean): void {
@@ -26,24 +24,22 @@ function check(label: string, condition: boolean): void {
   if (!condition) failures += 1;
 }
 
-const OFFICE = "39.60.232.90";
-const HOME = "203.0.113.50";
+const IP = "203.0.113.50";
 
 async function main(): Promise<void> {
   const { prisma } = await import("../lib/prisma");
   const loc = await import("../lib/workLocation");
-  const { summariseLocations, isIpAddress } = await import("../lib/workLocationRules");
+  const { summariseLocations } = await import("../lib/workLocationRules");
+  const { todayWorkday } = await import("../lib/performanceRules");
 
   // --- pure rules ---
-  check("an IPv4 address is accepted", isIpAddress("39.60.232.90"));
-  check("a typo is refused", !isIpAddress("39.60.232") && !isIpAddress("39.60.232.900"));
   const t = (minutes: number) => new Date(Date.UTC(2026, 9, 10, 9, minutes));
   const summary = summariseLocations(
     [
-      { id: "a", location: "office", manual: false, startedAt: t(0), lastSeenAt: t(60) },
+      { id: "a", location: "office", manual: true, startedAt: t(0), lastSeenAt: t(60) },
       // Overlaps the first — counted once, not twice.
-      { id: "b", location: "office", manual: false, startedAt: t(30), lastSeenAt: t(90) },
-      { id: "c", location: "remote", manual: false, startedAt: t(120), lastSeenAt: t(180) },
+      { id: "b", location: "office", manual: true, startedAt: t(30), lastSeenAt: t(90) },
+      { id: "c", location: "remote", manual: true, startedAt: t(120), lastSeenAt: t(180) },
     ],
     t(0),
     t(150),
@@ -71,29 +67,39 @@ async function main(): Promise<void> {
     const admin = await make("ADMIN", "locadmin");
     users.push(contributor.id, agent.id, admin.id);
 
-    check("an administrator records nothing", (await loc.recordPresence(admin, OFFICE)) === null);
-    check("an agent is tracked too", (await loc.recordPresence(agent, HOME))?.location === "remote");
-    check("an unknown address records nothing", (await loc.recordPresence(contributor, "unknown")) === null);
+    check("an administrator records nothing", (await loc.recordPresence(admin, IP)) === null);
 
-    const before = await loc.recordPresence(contributor, OFFICE);
-    check("off the clock, the badge still says office", before?.location === "office");
-    check(
-      "off the clock, no stretch is written",
-      (await prisma.workLocationSegment.count({ where: { userId: contributor.id } })) === 0,
-    );
+    const offClock = await loc.recordPresence(contributor, IP);
+    check("off the clock, nothing is asked", offClock?.location === null && !offClock.needsChoice);
+
+    let refused = false;
+    try {
+      await loc.setLocationChoice(contributor, IP, "office");
+    } catch (error) {
+      refused = error instanceof loc.WorkLocationError;
+    }
+    check("a choice needs a shift to belong to", refused);
 
     const session = await prisma.workSession.create({
       data: { userId: contributor.id, startedAt: new Date(), lastSeenAt: new Date() },
       select: { id: true },
     });
-    loc.invalidateOfficeNetworks(); // drop the throttle entry from the off-clock signal
 
-    await loc.recordPresence(contributor, OFFICE);
-    await loc.recordPresence(contributor, OFFICE); // same place, within a minute: no new row
-    const home = await loc.recordPresence(contributor, HOME);
-    check("moving home is detected", home?.location === "remote" && !home.manual);
+    const asked = await loc.recordPresence(contributor, IP);
+    check("a new shift asks where they are", asked?.needsChoice === true && asked.location === null);
+    check(
+      "until they answer, nothing is recorded",
+      (await prisma.workLocationSegment.count({ where: { workSessionId: session.id } })) === 0,
+    );
+    check("the first paint asks too", (await loc.currentLocationStatus(contributor))?.needsChoice === true);
 
-    let stretches = await prisma.workLocationSegment.findMany({
+    const office = await loc.setLocationChoice(contributor, IP, "office");
+    check("choosing office records office", office.location === "office" && !office.needsChoice);
+    await loc.recordPresence(contributor, IP); // within a minute: no new row
+    const home = await loc.setLocationChoice(contributor, IP, "remote");
+    check("moving home is recorded", home.location === "remote");
+
+    const stretches = await prisma.workLocationSegment.findMany({
       where: { workSessionId: session.id },
       orderBy: { startedAt: "asc" },
     });
@@ -101,52 +107,43 @@ async function main(): Promise<void> {
       "office then home is two stretches",
       stretches.map((s) => s.location).join() === "office,remote",
     );
+    check("every stretch is marked as chosen", stretches.every((s) => s.manual));
 
-    // A home VPN that exits at the office: on "office", they say remote.
-    await loc.recordPresence(contributor, OFFICE);
-    const corrected = await loc.setLocationOverride(contributor, OFFICE, "remote");
-    check("a correction is recorded as manual", corrected.location === "remote" && corrected.manual);
-    check("the network is still reported as detected", corrected.detected === "office");
-
-    // They move to a network that says remote: the correction lapses.
-    loc.invalidateOfficeNetworks();
-    const moved = await loc.recordPresence(contributor, HOME);
-    const row = await prisma.user.findUnique({
-      where: { id: contributor.id },
-      select: { locationOverride: true },
+    // A new shift asks again: yesterday's answer does not carry over.
+    await prisma.workSession.update({ where: { id: session.id }, data: { endedAt: new Date() } });
+    await prisma.workSession.create({
+      data: { userId: contributor.id, startedAt: new Date(), lastSeenAt: new Date() },
     });
-    check("the correction lapses when the network changes", !moved?.manual && row?.locationOverride === null);
+    const nextShift = await loc.currentLocationStatus(contributor);
+    check("the next shift asks again", nextShift?.needsChoice === true);
 
-    stretches = await prisma.workLocationSegment.findMany({
-      where: { workSessionId: session.id },
-      orderBy: { startedAt: "asc" },
+    await prisma.workSession.create({
+      data: { userId: agent.id, startedAt: new Date(), lastSeenAt: new Date() },
     });
-    check(
-      "every change of place started a stretch",
-      stretches.map((s) => `${s.location}${s.manual ? "*" : ""}`).join() ===
-        "office,remote,office,remote*,remote",
-    );
+    check("an agent is asked too", (await loc.recordPresence(agent, IP))?.needsChoice === true);
 
-    // Every stretch above is a few milliseconds long. Give the first office
-    // one ten minutes so the summary has something to add up.
+    // Give the office stretch ten minutes so the totals have something to add.
     await prisma.workLocationSegment.update({
       where: { id: stretches[0].id },
       data: { lastSeenAt: new Date(stretches[0].startedAt.getTime() + 600_000) },
     });
-    const total = await loc.locationSummary(contributor.id, {
-      from: new Date(Date.now() - 3600_000),
-      to: new Date(Date.now() + 3600_000),
-    });
-    check("the summary adds up office time", total.officeSeconds >= 600 && total.officeSeconds < 620);
-    check("the summary lists the stretch", total.stretches.some((s) => s.seconds >= 600));
+    const window = { from: new Date(Date.now() - 3600_000), to: new Date(Date.now() + 3600_000) };
+    const total = await loc.locationSummary(contributor.id, window);
+    check("My time adds up office time", total.officeSeconds >= 600 && total.officeSeconds < 620);
 
-    const team = await loc.teamLocationTotals(
-      { from: new Date(Date.now() - 3600_000), to: new Date(Date.now() + 3600_000) },
-      contributor.id,
-    );
+    const team = await loc.teamLocationTotals(window, contributor.id);
     check(
       "Timesheets totals carry the same office time",
       team.length === 1 && team[0].officeSeconds === total.officeSeconds,
+    );
+
+    const daily = await loc.dailyLocationTotals(todayWorkday(), 7, contributor.id);
+    check("the day gauges always have seven days", daily.length === 7);
+    check("the last day is today", daily[6].day === todayWorkday());
+    check(
+      "today's gauge carries the same office time",
+      daily[6].officeSeconds === total.officeSeconds &&
+        daily.slice(0, 6).every((d) => d.officeSeconds === 0),
     );
   } finally {
     if (users.length > 0) {

@@ -40,7 +40,7 @@ export default function WorkLocationCard({
     <section className="panel overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-3">
         <h2 className="text-caption font-medium text-fg-2">Office and remote</h2>
-        <p className="text-meta text-fg-4">from the network each signal came from</p>
+        <p className="text-meta text-fg-4">as chosen at the start of each shift</p>
       </div>
 
       <div className="grid grid-cols-1 gap-px bg-line sm:grid-cols-2">
@@ -112,7 +112,6 @@ function StretchRow({ stretch }: { stretch: LocationStretch }) {
       <span className="tnum font-mono text-caption text-fg-2">
         {formatDuration(stretch.seconds)}
       </span>
-      {stretch.manual && <span className="text-meta text-fg-4">set by hand</span>}
     </li>
   );
 }

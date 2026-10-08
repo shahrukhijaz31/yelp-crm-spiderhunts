@@ -9,7 +9,7 @@ import { ActivityPill } from "./TimeTrackingPanel";
 import type { TimesheetRow } from "@/lib/activityRules";
 import { formatDuration, RANGE_LABELS, type RangeKey } from "@/lib/performanceRules";
 import type { TimeReport, TimeReportFilters } from "@/lib/timeTracking";
-import type { PersonLocationTotals } from "@/lib/workLocationRules";
+import type { DayLocationTotals, PersonLocationTotals } from "@/lib/workLocationRules";
 import { formatClock } from "@/lib/portalTime";
 
 /**
@@ -53,9 +53,12 @@ export interface TimesheetPayload {
 
 export default function TimesheetsPanel({
   initialPayload,
+  initialLocationDays,
   agents,
 }: {
   initialPayload: TimesheetPayload;
+  /** The office/remote day gauges' first paint: seven days, everybody. */
+  initialLocationDays: DayLocationTotals[];
   agents: Array<{ id: string; name: string; role: string }>;
 }) {
   const [payload, setPayload] = useState(initialPayload);
@@ -122,6 +125,13 @@ export default function TimesheetsPanel({
           nothing here is an estimate and nothing is counted in the browser.
         </p>
       </header>
+
+      {/* --- office and remote: one gauge per day, with its own filters --- */}
+      <LocationGauges
+        initialDays={initialLocationDays}
+        // The same order the page opened the gauges on (`listUsers`).
+        people={agents.filter((agent) => agent.role !== "ADMIN")}
+      />
 
       {/* --- filters ------------------------------------------------------ */}
       <section
@@ -211,9 +221,6 @@ export default function TimesheetsPanel({
           )}
         </p>
       </section>
-
-      {/* --- office and remote, as gauges -------------------------------- */}
-      <LocationGauges people={locations} busy={busy} />
 
       {/* --- per-employee summary ---------------------------------------- */}
       <section className={`panel overflow-hidden ${busy ? "opacity-60" : ""}`}>
