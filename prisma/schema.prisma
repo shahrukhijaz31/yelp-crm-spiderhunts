@@ -627,6 +627,10 @@ model User {
   /// this agent has connected. Not sessions — see `MonitorDevice`.
   monitorDevices MonitorDevice[]
 
+  /// Workstations this agent approved, or is in the middle of approving. Only
+  /// the approved ones point here: a pending pairing belongs to nobody yet.
+  monitorPairings MonitorPairing[]
+
   /// Desktop screenshots captured by those workstations.
   screenshots Screenshot[]
 
@@ -1329,6 +1333,77 @@ model LoginOtp {
   @@index([userId])
   @@index([expiresAt])
   @@map("login_otps")
+}
+
+/// A workstation asking to be connected, waiting for its agent to say yes.
+///
+/// The desktop client's equivalent of {@link LoginOtp}, and built to the same
+/// rules: short-lived, single-use, only hashes at rest, and kept after use so a
+/// replay reads "already used" rather than "no such thing". It exists so an
+/// agent who is already signed in to the portal can authorise the Monitor from
+/// there, instead of typing the same password and a second emailed code into a
+/// desktop application. See `lib/monitorPairing.ts`.
+///
+/// **A pairing names nobody until it is approved.** `user_id` is null for the
+/// whole of its pending life and is written from the approving session, never
+/// from anything a workstation sent. So `POST /api/monitor/pairing/start`
+/// carries no username, no email and no password — there is no account for it
+/// to be wrong about, and it cannot be used to find out which accounts exist.
+model MonitorPairing {
+  id String @id @default(cuid())
+
+  /// What travels in the approval URL. 32 random bytes rather than the row's
+  /// cuid, because this one is handed to a browser: a guessable or enumerable
+  /// identifier here would be a way to find somebody else's pending request.
+  publicId String @unique @map("public_id")
+
+  /// SHA-256 hex of the device code — 32 random bytes the Monitor keeps in
+  /// main-process memory and never writes to disk. The same construction as
+  /// `monitor_devices.refresh_token_hash`. Unique, so one code can never
+  /// resolve to two pairings.
+  deviceCodeHash String @unique @map("device_code_hash")
+
+  /// The address `start` was called from, compared against the address the
+  /// approval comes from.
+  ///
+  /// Unlike `sessions.ip_address` this is not a label: it is the check that
+  /// makes a phishing link useless, because the attacker's request starts from
+  /// their address and the victim approves from another. It is never shown to
+  /// anybody and the row is gone within the hour.
+  startIp String? @map("start_ip")
+
+  /// Who claimed it. **Null until approval**, then the approving session's user
+  /// id. A denial leaves it null: the column means "the account this was
+  /// approved for", and a refusal approved nothing.
+  userId String? @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  approvedAt DateTime? @map("approved_at")
+  deniedAt   DateTime? @map("denied_at")
+
+  /// Stamped by the guarded update that mints the device tokens, so two polls
+  /// racing each other produce one workstation and the loser is told the
+  /// pairing was already used rather than quietly sharing a credential.
+  consumedAt DateTime? @map("consumed_at")
+
+  /// Five minutes from issue. Enforced on the server at approval and on every
+  /// poll — long enough to walk to the browser, short enough that a stale
+  /// request is not left lying around.
+  expiresAt DateTime @map("expires_at")
+
+  /// What the workstation called itself, recorded here at `start` rather than
+  /// read from the poll, so it cannot show the agent one name on the approval
+  /// screen and register another. Labels only; nothing is authorized by them.
+  deviceName String? @map("device_name")
+  platform   String?
+  appVersion String? @map("app_version")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The only range query: the opportunistic sweep. Both lookups are by a
+  /// unique column.
+  @@index([expiresAt])
+  @@map("monitor_pairings")
 }
 
 /// A signed-in browser.

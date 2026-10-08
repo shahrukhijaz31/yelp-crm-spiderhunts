@@ -6,8 +6,11 @@ a separate directory). It will eventually capture screenshots during a work
 session; today it authenticates an agent and reports whether the portal says
 they are on the clock.
 
-Nothing here is reachable from a browser session, and nothing in the web app
-calls it.
+Nothing here authenticates a browser session, and nothing in the web app calls
+it. The one place the two meet is pairing, and even there the halves stay apart:
+the workstation talks to `/pairing/*` below, the browser talks to
+`/api/account/workstations/*`, and neither endpoint accepts the other's
+credential. See "Connecting a workstation".
 
 ## Why a separate route group at all
 
@@ -51,6 +54,8 @@ working.
 
 | | |
 | --- | --- |
+| `POST /pairing/start` | no body worth the name → a request id and a device code. Names nobody. |
+| `POST /pairing/poll` | device code → `pending`, or access + refresh tokens once an agent has approved it |
 | `POST /auth/login` | email/username + password → challenge token. Never a session. |
 | `POST /auth/verify` | challenge token + code → access + refresh tokens |
 | `POST /auth/resend` | challenge token → a fresh code |
@@ -64,6 +69,46 @@ working.
 `POST /api/maintenance/screenshot-retention` is *not* in this group and is not
 reachable by a workstation — it is the box's cron deleting aged screenshots. See
 the Retention section below.
+
+## Connecting a workstation
+
+The primary way the Monitor is authorised, and the reason an agent no longer
+types a password and a second emailed code into a desktop application. Signing
+in to the portal is what starts their shift, so by the time the Monitor asked,
+the portal already knew who was at that desk.
+
+    Monitor                        Portal                     Browser
+    POST /pairing/start      -->   a row naming nobody
+    opens the portal  ----------------------------------->    /account/workstations/approve?request=…
+    POST /pairing/poll (5s)  -->   pending…                    agent clicks Connect
+                                                         -->   POST /api/account/workstations/approve
+                                   approved → issueDeviceTokens
+    POST /pairing/poll       -->   access + refresh tokens
+
+**The approval endpoints are not in this route group.** They are
+`/api/account/workstations/{approve,deny,disconnect}`, behind `apiUser()` with
+a session cookie and the same-origin rule — the opposite of everything this
+group is. Putting them here would have broken the one rule the group exists to
+keep.
+
+There is no code for the agent to type. What stands in for it:
+
+- **The same network.** The approval must come from the address the pairing was
+  started from. The Monitor and the browser are the same machine, so this is
+  invisible in ordinary use, and a phishing link fails because the attacker's
+  pairing starts from their address and the victim approves from another. When
+  `TRUSTED_PROXY_HOPS` is 0 there are no addresses to compare and the check is
+  skipped — that is development, where there is nothing to phish.
+- **An unguessable id, briefly.** 32 random bytes, five minutes, single use.
+- **Telling the agent.** Every connection emails them, with a link to the screen
+  where one click disconnects it. Detection, where a typed code would have been
+  prevention.
+
+The residual risk is an attacker on the same network who phishes an agent, and
+what they gain is the ability to pollute that agent's monitoring data — not
+portal access and not leads. If that ever needs preventing rather than
+detecting, a code the agent types goes into `approvePairing` and nothing else
+in the design changes.
 
 ## Screenshots
 
@@ -202,9 +247,14 @@ one of them. `npm run screenshots:retention` runs the same code by hand.
   and again on every authenticated request, because a role can change in
   between. Every Monitor sign-in requires the emailed code — as, since the
   administrator bypass was removed, does every web sign-in.
-- **No path to a token except through the code.** `issueDeviceTokens` is reached
-  only from `/auth/verify`, and only after `verifyLoginOtpForChallenge` has
-  returned a user id.
+- **No path to a token except through a human.** `issueDeviceTokens` is reached
+  from exactly two places, and both of them require a person to have proved who
+  they are: `/auth/verify`, after `verifyLoginOtpForChallenge` has returned a
+  user id, and `/pairing/poll`, after an authenticated portal session approved
+  that pairing (`lib/monitorPairing.ts`). A pairing names nobody until that
+  approval, so the second path cannot be walked by a workstation alone — and
+  the account it produces a credential for is the approving session's, never
+  anything the workstation sent.
 - **Role and `isActive` are read from Postgres on every request**, exactly as
   `getSessionUser` does for the browser — so a demoted or disabled agent's
   workstation stops working on its next call, not at token expiry.

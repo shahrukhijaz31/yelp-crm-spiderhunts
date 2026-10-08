@@ -117,6 +117,27 @@ const PUBLIC_PATHS = new Set<string>([
   "/api/monitor/auth/logout",
   "/api/monitor/session",
   /*
+   * Connecting a workstation from a browser that is already signed in.
+   *
+   * These two are the only entries on this list that are exempt from the cookie
+   * check *and* carry no credential of their own at the moment they are called
+   * — `start` because the caller has nothing yet, which is what it is there to
+   * fix, and `poll` because the device code it presents is not a credential
+   * until an agent approves the pairing it belongs to.
+   *
+   * That is safe because neither one can produce anything by itself. `start`
+   * takes no username and writes a row that names nobody; `poll` answers
+   * "pending" until an authenticated session has claimed that row from the
+   * portal side, and the claiming endpoint is `/api/account/workstations/*`,
+   * which is not on this list and is behind `apiUser()`. So the only path from
+   * these two to a credential runs through a signed-in human.
+   *
+   * Both are bounded by source address (`lib/rateLimit.ts`) and both write rows
+   * that expire in five minutes.
+   */
+  "/api/monitor/pairing/start",
+  "/api/monitor/pairing/poll",
+  /*
    * The screenshot upload. Bearer-authenticated by `monitorDevice()` inside the
    * handler, which resolves the token against `monitor_devices` and re-reads
    * role and `isActive` from Postgres — so "public" here means the same thing

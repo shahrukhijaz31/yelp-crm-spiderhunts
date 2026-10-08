@@ -170,6 +170,54 @@ export const PASSWORD_RESET_REQUEST_IP_LIMIT: RateLimitRule = {
   windowSeconds: 60 * 60,
 };
 
+/**
+ * `POST /api/monitor/pairing/start`, by source address.
+ *
+ * The one unauthenticated *write* the pairing flow adds, and the subject has to
+ * be the address because a pairing names nobody — that is the design, not an
+ * oversight. Ten in ten minutes is far past an agent whose first attempt timed
+ * out, and well short of anything that fills a table whose rows expire in five
+ * minutes anyway. Higher than the per-account rules above for the usual reason:
+ * a whole office shares one NAT address.
+ */
+export const MONITOR_PAIRING_START_LIMIT: RateLimitRule = {
+  action: "monitor-pairing-start",
+  limit: 10,
+  windowSeconds: 10 * 60,
+};
+
+/**
+ * `POST /api/monitor/pairing/poll`, by source address.
+ *
+ * Checked before the device code is looked up, so an unknown code cannot buy an
+ * unlimited stream of indexed reads. A workstation polls every five seconds for
+ * at most five minutes, which is sixty polls; 600 leaves room for a shared
+ * address with several agents connecting at once, plus retries and jitter.
+ */
+export const MONITOR_PAIRING_POLL_LIMIT: RateLimitRule = {
+  action: "monitor-pairing-poll",
+  limit: 600,
+  windowSeconds: 10 * 60,
+};
+
+/**
+ * `POST /api/account/workstations/approve`, by session user id.
+ *
+ * Nothing here is guessable — the request id is 32 random bytes — so this is
+ * not a brake on finding a pairing. It bounds what a stolen or borrowed session
+ * can do with the endpoint at all, and it is deliberately well above any real
+ * use: twenty connections in ten minutes is more workstations than anybody has.
+ *
+ * Deny and disconnect get no rule. Both are idempotent single-row updates
+ * scoped to the caller's own account, so a flood of them changes nothing and
+ * costs a write to refuse — and `consumeRateLimit` fails open regardless.
+ */
+export const WORKSTATION_APPROVE_LIMIT: RateLimitRule = {
+  action: "workstation-approve",
+  limit: 20,
+  windowSeconds: 10 * 60,
+};
+
 export interface RateLimitVerdict {
   allowed: boolean;
   /** Seconds until the current window closes. Sent as `Retry-After`. */
