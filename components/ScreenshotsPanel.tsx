@@ -1033,19 +1033,31 @@ function Timeline({
               className="absolute inset-x-0 bottom-3 h-px bg-line-2"
             />
 
-            {axis.ticks.map((tick) => (
-              <div
-                key={tick.at}
-                aria-hidden="true"
-                className="absolute bottom-3 flex -translate-x-1/2 flex-col items-center"
-                style={{ left: `${tick.percent}%` }}
-              >
-                <span className="tnum mb-1 font-mono text-meta text-fg-4">
-                  {tick.label}
-                </span>
-                <span className="h-1.5 w-px bg-line-2" />
-              </div>
-            ))}
+            {axis.ticks.map((tick) => {
+              // A label at either end of the ruler hangs inwards from its tick
+              // instead of centring on it, so "3:00 AM" at 0% and "5:00 AM" at
+              // 100% stay inside the panel. The tick mark itself does not move.
+              const edge = tick.percent < 6 ? "start" : tick.percent > 94 ? "end" : "middle";
+              return (
+                <div
+                  key={tick.at}
+                  aria-hidden="true"
+                  className={`absolute bottom-3 flex flex-col ${
+                    edge === "start"
+                      ? "items-start"
+                      : edge === "end"
+                        ? "-translate-x-full items-end"
+                        : "-translate-x-1/2 items-center"
+                  }`}
+                  style={{ left: `${tick.percent}%` }}
+                >
+                  <span className="tnum mb-1 whitespace-nowrap font-mono text-meta text-fg-4">
+                    {tick.label}
+                  </span>
+                  <span className="h-1.5 w-px bg-line-2" />
+                </div>
+              );
+            })}
 
             {/* The dots. Absolutely positioned on the same line as the ruler,
                 slightly transparent so a cluster reads as a denser mark rather
