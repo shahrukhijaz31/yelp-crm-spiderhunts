@@ -1,6 +1,7 @@
 import { LOGIN_PATH } from "@/lib/access";
 import { csrfRefusal } from "@/lib/csrf";
 import { destroyAllSessionsFor, destroySession, getSessionUser } from "@/lib/session";
+import { revokeAllDevicesFor } from "@/lib/monitorAuth";
 import { endWorkSessionForLogout } from "@/lib/workSessions";
 
 /**
@@ -31,10 +32,13 @@ import { endWorkSessionForLogout } from "@/lib/workSessions";
  *      elsewhere would otherwise heartbeat a new shift into existence within a
  *      minute, and a forgotten one used to keep the old shift running for
  *      hours;
- *   4. close the shift. The SpiderHunts Monitor stays paired and stops
- *      capturing on its next poll, when the portal tells it there is no shift.
+ *   4. disconnect every SpiderHunts Monitor workstation the person has. Each
+ *      one is refused on its next poll (within a minute), stops capturing and
+ *      goes back to its connect screen; connecting it again is the usual
+ *      approve-from-the-portal step;
+ *   5. close the shift.
  *
- * Steps 3 and 4 cannot fail the logout: each swallows its own errors, and a
+ * Steps 3 to 5 cannot fail the logout: each swallows its own errors, and a
  * shift left open by a database hiccup is closed by the next reconciliation
  * sweep at its last heartbeat.
  */
@@ -50,6 +54,9 @@ export async function POST(request: Request): Promise<Response> {
     await destroyAllSessionsFor(user.id).catch((error) => {
       console.error(`Could not end the other sessions for ${user.id}:`, error);
     });
+    // Every SpiderHunts Monitor this agent has goes too: its next request is
+    // refused, it drops its credential and returns to its connect screen.
+    await revokeAllDevicesFor(user.id);
     await endWorkSessionForLogout(user.id);
   }
 

@@ -22,8 +22,8 @@ import type { WorkLocationStatus } from "@/lib/workLocationRules";
  * Two figures, and why they cannot double-count
  * ---------------------------------------------------------------------------
  *
- *   currentSessionSeconds  the shift so far: completedSecondsToday + now −
- *                          startedAt. Null when nothing is running.
+ *   currentSessionSeconds  now − startedAt: since this sign-in. Null when
+ *                          nothing is running.
  *   todayTotalSeconds      completedSecondsToday + the running session's part
  *                          of today.
  *
@@ -38,13 +38,13 @@ import type { WorkLocationStatus } from "@/lib/workLocationRules";
  * Signing out and back in
  * ---------------------------------------------------------------------------
  *
- * Signing back in on the same working day **continues the day's shift**, so
- * neither figure restarts at zero. Each sign-in is still its own row, and the
- * time between sign-out and sign-in is in no row at all — the gap is never
- * counted — but the shift clock is the day's closed rows plus the running one,
- * so it picks up where it stopped. It differs from today's total only for a
- * row that began before the working day did, which the shift clock counts
- * whole and today's total clamps.
+ * The **current session** restarts at zero on each sign-in — it is the time
+ * since this one. **Today's total does not**: it is a sum over every session
+ * that started today, so signing out and back in the same working day carries
+ * on from where the day was. The time between sign-out and sign-in is in no
+ * row at all and is never counted. (The two figures were briefly made equal,
+ * the shift clock showing the day's total, and that only put the same number
+ * on screen twice.)
  *
  * ---------------------------------------------------------------------------
  * Whose clock
@@ -302,12 +302,8 @@ export function WorkSessionProvider({
     const serverNowMs = nowMs - state.skewMs;
 
     const startedMs = clock.startedAt ? new Date(clock.startedAt).getTime() : null;
-    // The shift, not the row: the day's earlier sign-ins plus this one, so
-    // signing out and back in continues the clock instead of zeroing it.
     const currentSessionSeconds =
-      startedMs === null
-        ? null
-        : clock.completedSecondsToday + Math.max(0, Math.floor((serverNowMs - startedMs) / 1000));
+      startedMs === null ? null : Math.max(0, Math.floor((serverNowMs - startedMs) / 1000));
 
     // The running session's contribution to *today* — clamped at the start of
     // the working day (11:00 Pakistan time), so the total means "worked today"

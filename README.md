@@ -624,11 +624,12 @@ whatever they are browsing from, kept after it ends.
   wait for the sweep: an un-swept shift is clamped to the same instant on read.
 - **Logout** closes the shift, always, and signs the person out of every
   browser — otherwise another open tab's heartbeat would start a new shift on
-  its next beat. Sign out in the SpiderHunts Monitor does the same
-  (`POST /api/monitor/sign-out`) and leaves the workstation paired, so it
-  resumes on its own at the next sign-in. Signing back in on the same working
+  its next beat. It also disconnects every SpiderHunts Monitor the person has,
+  which returns to its connect screen within a minute. Sign out in the Monitor
+  does the same (`POST /api/monitor/sign-out`). Signing back in on the same working
   day continues the day's shift: the gap is not counted, but the office/remote
-  choice carries over and the clocks show the day's time rather than zero.
+  choice carries over and today's total carries on; the current session
+  restarts at each sign-in.
   Sweeping happens opportunistically at login, beside `pruneExpiredSessions`,
   because this app has no cron.
 - **Active time vs login time.** The heartbeat currently means "a portal tab is

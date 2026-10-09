@@ -57,8 +57,8 @@ import { prisma } from "./prisma";
  * **Signing back in the same working day continues that day's shift.** The
  * time between is not counted — it is a new row, opened at the sign-in — but
  * the place chosen for the day carries over rather than being asked again
- * ({@link openOrResumeWorkSession}), and the clocks show the shift as the
- * day's worked time so far rather than restarting at zero.
+ * ({@link openOrResumeWorkSession}), and today's total carries on from the
+ * day's earlier sign-ins. The current-session clock restarts at each sign-in.
  *
  * ---------------------------------------------------------------------------
  * Two liveness signals, and why there has to be more than one

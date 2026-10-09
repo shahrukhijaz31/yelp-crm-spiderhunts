@@ -8,9 +8,9 @@ import { revokeDevice } from "@/lib/monitorAuth";
  * sessions, not their work session, not their clock. An agent who closes the
  * desktop application is still sitting at their desk with the worklist open,
  * and ending their shift here would silently lose them the rest of the day.
- * The two authentication contexts are separate in both directions — signing out
- * of the portal likewise leaves a connected workstation alone, until its own
- * tokens expire.
+ * The reverse is not true: signing out of the portal disconnects every one of
+ * the agent's workstations as well (`/api/auth/logout`), because a sign-out is
+ * the agent saying they have stopped work.
  *
  * Accepts either token in the body, because the client may hold only one by the
  * time it gets here, and always answers 200: signing out is idempotent, and

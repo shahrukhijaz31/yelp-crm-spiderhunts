@@ -762,13 +762,12 @@ model ProductivitySettings {
 /// A workstation running the SpiderHunts Monitor desktop application.
 ///
 /// **Why this is not a row in `sessions`.** It was the obvious first idea, and
-/// it is wrong for a specific, load-bearing reason: signing out ends every row
-/// in `sessions` for the person (`destroyAllSessionsFor`), and a desktop client
-/// stored there would be disconnected by every browser sign-out — re-pairing
-/// the workstation each morning. Keeping the desktop credential in its own
-/// table means `sessions` contains exactly what that table is for: browsers.
-/// Signing out ends the shift and the browsers; the workstation stays paired,
-/// goes quiet, and resumes when the portal next opens a shift.
+/// it is wrong: the two credentials have different lifetimes, different
+/// rotation and different revocation, and `sessions` is read throughout the
+/// portal as "the browsers this person is signed in on". Keeping the desktop
+/// credential in its own table keeps that true. Signing out — from the portal
+/// or the Monitor — ends both: every browser session, every one of the agent's
+/// workstations (`revokeAllDevicesFor`), and the shift.
 ///
 /// The same separation answers the second requirement: connecting the Monitor
 /// must not start a shift, and cannot, because nothing on this path calls

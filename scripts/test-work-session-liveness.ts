@@ -679,9 +679,14 @@ async function main(): Promise<void> {
   check("logout ended the shift anyway", afterLogout?.endedAt !== null);
   check("as a logout", afterLogout?.endedReason === "logout");
 
+  // Signing out disconnects every workstation as well (`/api/auth/logout`):
+  // the Monitor's next request is refused and it returns to its connect screen.
   const pollAfterLogout = await monitorPoll(aliceDevice2.accessToken);
-  const sessionAfterLogout = pollAfterLogout.body.workSession as Record<string, unknown> | undefined;
-  check("the Monitor is told it is off the clock", sessionAfterLogout?.active === false);
+  check(
+    "the Monitor is disconnected by the sign-out",
+    pollAfterLogout.status === 401,
+    `status ${pollAfterLogout.status}`,
+  );
   check(
     "and cannot reopen the closed shift",
     (await sessionById(secondShiftId))?.endedAt !== null,
@@ -695,7 +700,7 @@ async function main(): Promise<void> {
   );
   check(
     "tracking stops when the shift ends",
-    trackingAfterLogout.status === 409,
+    trackingAfterLogout.status === 401,
     `status ${trackingAfterLogout.status}`,
   );
 
