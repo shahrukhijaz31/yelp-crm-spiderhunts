@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
+import { LOGIN_PATH } from "@/lib/access";
 import { HEARTBEAT_SECONDS, type WorkClock } from "@/lib/performanceRules";
 import type { WorkLocationStatus } from "@/lib/workLocationRules";
 
@@ -21,7 +22,8 @@ import type { WorkLocationStatus } from "@/lib/workLocationRules";
  * Two figures, and why they cannot double-count
  * ---------------------------------------------------------------------------
  *
- *   currentSessionSeconds  now − startedAt. Zero when nothing is running.
+ *   currentSessionSeconds  the shift so far: completedSecondsToday + now −
+ *                          startedAt. Null when nothing is running.
  *   todayTotalSeconds      completedSecondsToday + the running session's part
  *                          of today.
  *
@@ -36,12 +38,13 @@ import type { WorkLocationStatus } from "@/lib/workLocationRules";
  * Signing out and back in
  * ---------------------------------------------------------------------------
  *
- * The **current session** restarts at zero, because it is a new session — that
- * is what the row means, and each login's row is kept permanently. **Today's
- * total does not**, because it is a sum over every session that started today,
- * not a property of the one in progress. That is the whole of the reported bug:
- * the clock was right, but the only figure on screen was the one that is
- * supposed to restart.
+ * Signing back in on the same working day **continues the day's shift**, so
+ * neither figure restarts at zero. Each sign-in is still its own row, and the
+ * time between sign-out and sign-in is in no row at all — the gap is never
+ * counted — but the shift clock is the day's closed rows plus the running one,
+ * so it picks up where it stopped. It differs from today's total only for a
+ * row that began before the working day did, which the shift clock counts
+ * whole and today's total clamps.
  *
  * ---------------------------------------------------------------------------
  * Whose clock
@@ -198,6 +201,13 @@ export function WorkSessionProvider({
         method: "POST",
         credentials: "same-origin",
       });
+      // Signed out elsewhere — Sign out ends every browser and the shift — so
+      // this tab's clock is counting a shift that no longer exists. Go to the
+      // sign-in form rather than tick on from the old start.
+      if (response.status === 401) {
+        window.location.assign(LOGIN_PATH);
+        return;
+      }
       if (!response.ok) return;
 
       const payload = (await response.json()) as {
@@ -292,8 +302,12 @@ export function WorkSessionProvider({
     const serverNowMs = nowMs - state.skewMs;
 
     const startedMs = clock.startedAt ? new Date(clock.startedAt).getTime() : null;
+    // The shift, not the row: the day's earlier sign-ins plus this one, so
+    // signing out and back in continues the clock instead of zeroing it.
     const currentSessionSeconds =
-      startedMs === null ? null : Math.max(0, Math.floor((serverNowMs - startedMs) / 1000));
+      startedMs === null
+        ? null
+        : clock.completedSecondsToday + Math.max(0, Math.floor((serverNowMs - startedMs) / 1000));
 
     // The running session's contribution to *today* — clamped at the start of
     // the working day (11:00 Pakistan time), so the total means "worked today"

@@ -92,8 +92,11 @@ async function activityAggregate(
       count(DISTINCT a.lead_id) FILTER (WHERE a.kind = 'call_logged')::int          AS leads_worked,
       count(*) FILTER (WHERE a.kind = 'call_logged')::int                           AS calls,
       count(*) FILTER (WHERE a.kind = 'call_logged' AND a.status IN ${ANSWERED})::int AS contacts,
-      count(*) FILTER (WHERE a.kind = 'call_logged' AND a.status = 'interested')::int AS interested,
-      count(*) FILTER (WHERE a.kind = 'call_logged' AND a.status IN ${DECIDED})::int  AS decided,
+      -- Leads, not saves: the rates divide these by leads_worked, a count of
+      -- distinct leads, and a lead saved as interested twice counted twice
+      -- (two of two leads, three interested saves: 150%).
+      count(DISTINCT a.lead_id) FILTER (WHERE a.kind = 'call_logged' AND a.status = 'interested')::int AS interested,
+      count(DISTINCT a.lead_id) FILTER (WHERE a.kind = 'call_logged' AND a.status IN ${DECIDED})::int  AS decided,
       count(*) FILTER (WHERE a.kind = 'callback_scheduled')::int                    AS callbacks,
       count(*) FILTER (WHERE a.kind = 'meeting_booked')::int                        AS meetings_booked,
       count(*) FILTER (WHERE a.kind = 'meeting_completed')::int                      AS meetings_completed

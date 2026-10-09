@@ -11,8 +11,15 @@ import {
 } from "@/lib/userDb";
 
 /**
- * PATCH /api/users/:id — change a role, disable an account, rename, reset a
- * password. ADMIN only.
+ * PATCH /api/users/:id — change a role, disable an account, rename. ADMIN only.
+ *
+ * **No password.** An administrator never chooses a password for an existing
+ * account, their own included: a password an admin set is one they know, and
+ * everything done with it is recorded against the person it belongs to. The
+ * one way to help is `POST /api/users/:id/password-reset`, a one-time code the
+ * person exchanges for a password of their own; changing your own is
+ * `/api/account/password`, which asks for the current one. (Creating an
+ * account still takes an initial password — `POST /api/users`.)
  *
  * Two guards that are not about the caller's role:
  *
@@ -55,11 +62,22 @@ export async function PATCH(
   }
 
   const payload = body as Record<string, unknown>;
+
+  if (payload.password !== undefined) {
+    return Response.json(
+      {
+        error: "password_not_settable",
+        message:
+          "Passwords cannot be set here. Use Reset password to issue a one-time code, or Change password in your own profile menu.",
+      },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
   const edits: UserEdits = {};
   if (payload.role !== undefined) edits.role = payload.role as UserEdits["role"];
   if (payload.isActive !== undefined) edits.isActive = payload.isActive as boolean;
   if (payload.name !== undefined) edits.name = String(payload.name);
-  if (payload.password !== undefined) edits.password = String(payload.password);
   // Booleans only, and only if actually boolean: `moduleEditsFrom` ignores
   // anything else rather than coercing it, so `{"canAccessLeads": "false"}` is
   // not a way to grant a module by sending a truthy string.

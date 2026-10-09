@@ -4,7 +4,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { config as loadEnv } from "dotenv";
 
 import { PrismaClient } from "../lib/generated/prisma/client";
+import { TRACKED_ROLES } from "../lib/access";
 import { hashPassword } from "../lib/password";
+import { addDays, todayWorkday, workdayStart } from "../lib/performanceRules";
 import type {
   AgentProductivityDetail,
   AgentProductivityRow,
@@ -209,21 +211,17 @@ const DEFAULTS = {
 let originalConfig: Record<string, number> | null = null;
 let configWasDefault = true;
 
-function isoDay(date: Date): string {
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 10);
-}
 
 async function main(): Promise<void> {
   console.log(`Agent productivity — end-to-end against ${BASE_URL}\n`);
 
   /* --- a window inside today --------------------------------------------- */
-  // Every fixture has to sit inside the server's *local* today, because that is
-  // what the "Today" preset resolves to. Anchored to local midnight rather than
-  // to `now - 3h`, which would fall into yesterday for a run just after
-  // midnight and quietly make every count zero.
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
+  // Every fixture has to sit inside the working day in progress, because that
+  // is what the "Today" preset resolves to — 11:00 Pakistan time, not local
+  // midnight (`workdayStart`). Anchored to it rather than to `now - 3h`, which
+  // would fall into the previous working day for a run just after 11:00 and
+  // quietly make every count zero.
+  const dayStart = workdayStart(todayWorkday());
   const shiftStart = new Date(Math.max(dayStart.getTime() + 60_000, Date.now() - 3 * 3600_000));
   const shiftEnd = new Date(Math.min(Date.now() - 60_000, shiftStart.getTime() + 2 * 3600_000));
   const shiftSeconds = Math.round((shiftEnd.getTime() - shiftStart.getTime()) / 1000);
@@ -605,13 +603,13 @@ async function main(): Promise<void> {
 
   const week = await get("/api/reports/productivity?range=last7", adminCookie);
   const month = await get("/api/reports/productivity?range=last30", adminCookie);
-  const yesterday = isoDay(new Date(Date.now() - 86_400_000));
+  const yesterday = addDays(todayWorkday(), -1);
   const custom = await get(
     `/api/reports/productivity?range=custom&from=${yesterday}&to=${yesterday}`,
     adminCookie,
   );
   const customToday = await get(
-    `/api/reports/productivity?range=custom&from=${isoDay(new Date())}&to=${isoDay(new Date())}`,
+    `/api/reports/productivity?range=custom&from=${todayWorkday()}&to=${todayWorkday()}`,
     adminCookie,
   );
 
@@ -798,7 +796,11 @@ async function main(): Promise<void> {
   const adminPage = await getPage(`/reports/productivity/${adminId}`, adminCookie);
   check(
     "the detail screen 404s for an administrator",
-    adminPage.status === 404,
+    // Behind `(portal)/loading.tsx` the page streams, and a streamed response
+    // has already sent its 200 when `notFound()` runs — so the not-found screen
+    // arrives with 200. What matters is that no score is rendered.
+    (adminPage.status === 404 || adminPage.status === 200) &&
+      !adminPage.html.includes("How this score was calculated"),
     `got ${adminPage.status}`,
   );
 
@@ -896,7 +898,9 @@ async function main(): Promise<void> {
   check(`…and the report still returns quickly (${elapsed}ms)`, elapsed < 5000, `${elapsed}ms`);
   check(
     "the response is one row per agent, never one per lead or per call",
-    (big.body.agents ?? []).length <= (await prisma.user.count({ where: { role: "AGENT" } })),
+    // Every tracked role is scored — contributors as well as agents.
+    (big.body.agents ?? []).length <=
+      (await prisma.user.count({ where: { role: { in: [...TRACKED_ROLES] } } })),
   );
   check(
     "no raw lead, interval or screenshot data is in the payload",

@@ -91,7 +91,14 @@ export function describeLeadActivity(
   const timeAdded = "meetingTime" in changes && nextTime !== null && nextTime !== before.meetingTime;
   const dateAdded = "callbackDate" in changes && nextDate !== null && nextDate !== before.callbackDate;
 
-  if (nextDate !== null && timeAdded) {
+  // Moving a meeting that already exists is a reschedule, not a second
+  // booking — and not a callback either, though its date may have changed.
+  const wasMeeting = before.callbackDate !== null && before.meetingTime !== null;
+  const isMeeting = nextDate !== null && nextTime !== null;
+
+  if (isMeeting && wasMeeting) {
+    // Rescheduled (or re-saved): nothing new happened in anybody's diary.
+  } else if (nextDate !== null && timeAdded) {
     drafts.push({ kind: "meeting_booked", status: null });
   } else if (dateAdded) {
     drafts.push({ kind: "callback_scheduled", status: null });

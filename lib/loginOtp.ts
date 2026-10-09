@@ -439,15 +439,34 @@ export async function verifyLoginOtpForChallenge(
   // this is only reachable by a request that raced the one that hit it.
   if (row.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, code: "too_many_attempts" };
 
+  /*
+   * Spend the attempt *before* comparing, in one guarded write.
+   *
+   * The comparison is a deliberately slow scrypt, and the check above reads a
+   * row loaded before it. Counting the attempt afterwards let every request
+   * that arrived during that window through to a full comparison: twenty
+   * parallel guesses were twenty comparisons, and a right code among them was
+   * accepted after the cap had been passed. Reserving it here, conditional on
+   * the cap, expiry and use, bounds the comparisons at the cap however many
+   * requests arrive at once.
+   */
+  const reserved = await prisma.loginOtp.updateMany({
+    where: {
+      id: row.id,
+      usedAt: null,
+      expiresAt: { gt: now },
+      attempts: { lt: OTP_MAX_ATTEMPTS },
+    },
+    data: { attempts: { increment: 1 } },
+  });
+  if (reserved.count === 0) return { ok: false, code: "too_many_attempts", attemptsRemaining: 0 };
+
   const code = normaliseOtp(rawCode);
   const matches = code.length === OTP_LENGTH && (await verifyPassword(code, row.codeHash));
 
   if (!matches) {
-    // Incremented in the database rather than from the value read above, so
-    // parallel guesses each cost an attempt instead of overwriting each other.
-    const updated = await prisma.loginOtp.update({
+    const updated = await prisma.loginOtp.findUniqueOrThrow({
       where: { id: row.id },
-      data: { attempts: { increment: 1 } },
       select: { attempts: true },
     });
 
@@ -467,8 +486,10 @@ export async function verifyLoginOtpForChallenge(
     };
   }
 
+  // Still unexpired at the claim: a parallel wrong guess that reached the cap
+  // destroys the code by expiring it, and that must hold for this one too.
   const claimed = await prisma.loginOtp.updateMany({
-    where: { id: row.id, usedAt: null },
+    where: { id: row.id, usedAt: null, expiresAt: { gt: new Date() } },
     data: { usedAt: now },
   });
   if (claimed.count === 0) return { ok: false, code: "no_pending" };

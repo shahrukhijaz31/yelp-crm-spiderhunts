@@ -16,9 +16,10 @@ export const metadata: Metadata = {
  *
  * Two jobs beyond rendering the form:
  *
- *   Already signed in? Go to the workspace. The proxy makes the same redirect
- *   on the cheap signal (a cookie exists); this one asks the database whether
- *   that cookie is a live session, which is the answer that counts.
+ *   Already signed in? Go to the workspace. This is the only place that
+ *   redirect is made: it asks the database whether the cookie is a live
+ *   session. The proxy used to make it on the cheap signal (a cookie exists),
+ *   which looped a browser whose session had been ended elsewhere.
  *
  *   Sanitise `?callbackUrl=`. It arrives from the address bar, so it is
  *   attacker-controlled by definition. `safeCallbackUrl` reduces it to an

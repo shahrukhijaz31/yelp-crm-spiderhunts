@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { sendMail } from "./mail";
+import { revokeAllDevicesFor } from "./monitorAuth";
 import { describePasswordProblem, hashPassword, verifyPassword } from "./password";
 import { prisma } from "./prisma";
 import { buildResetEmail } from "./resetEmail";
@@ -223,6 +224,9 @@ export async function issueResetCode(userId: string, issuedById: string): Promis
   // anybody out. The account's password is already dead at this point, so the
   // ordering costs nothing.
   await destroyAllSessionsFor(userId);
+  // And every workstation: a Monitor credential is a credential for this
+  // account too, and the reason for a reset is that somebody else may hold one.
+  await revokeAllDevicesFor(userId);
 
   return { code: minted.code, expiresAt: minted.expiresAt };
 }
@@ -422,6 +426,7 @@ export async function completeReset(
   // code ended them all), but a reset finishing with a clean slate is the
   // property worth stating in code rather than inferring.
   await destroyAllSessionsFor(user.id);
+  await revokeAllDevicesFor(user.id);
 
   return { name: user.name, username: user.username };
 }

@@ -231,12 +231,19 @@ export default function AppTopBar({
   );
 }
 
-/** `2026-08-04` -> `Tue, 4 Aug`. */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * `2026-08-04` -> `Tue, 4 Aug`.
+ *
+ * Spelled out rather than `toLocaleDateString`: this renders on the server and
+ * again in the browser, and their ICU data disagree about the comma (Node 24
+ * writes `Fri 9 Oct`, Chromium `Fri, 9 Oct`). React rejected the mismatch on
+ * every page load and threw the server HTML away.
+ */
 function longDate(iso: string): string {
   const [year, month, day] = iso.split("-").map(Number);
-  return new Date(year, (month ?? 1) - 1, day ?? 1).toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
+  const date = new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1));
+  return `${WEEKDAYS[date.getUTCDay()]}, ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
 }

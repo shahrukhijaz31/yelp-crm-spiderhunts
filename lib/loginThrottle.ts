@@ -11,7 +11,9 @@
  * on top of scrypt already costing ~100ms per attempt.
  *
  * Successful sign-ins clear the identifier's record, so a user who mistyped
- * their password four times is not punished after getting it right.
+ * their password four times is not punished after getting it right. Every
+ * attempt is counted as it is admitted, not after its slow check — see
+ * {@link beginLoginAttempt}.
  */
 
 interface Window {
@@ -85,23 +87,88 @@ function check(key: string, limit: number): ThrottleVerdict {
   return { allowed: true, retryAfterSeconds: 0 };
 }
 
-/** Called before checking a password. */
-export function checkLoginAllowed(identifier: string, ip: string): ThrottleVerdict {
-  const byIdentifier = check(`id:${identifier.toLowerCase()}`, MAX_PER_IDENTIFIER);
-  if (!byIdentifier.allowed) return byIdentifier;
-  return check(`ip:${ip}`, MAX_PER_IP);
+/**
+ * One guess, from the moment it is let in until it is known to be right or
+ * wrong.
+ *
+ * **Why a reservation and not "check, then record".** The check used to run
+ * before the slow scrypt comparison and the failure was recorded after it, so
+ * every request in a parallel burst read the same, not-yet-updated window and
+ * was let in: twenty simultaneous guesses were twenty guesses against a limit
+ * of eight. Now the attempt is counted *when it is admitted*, in the same
+ * synchronous step as the check — nothing else in this process runs between
+ * the two — so a burst sees its own earlier members and stops at the limit.
+ *
+ * The caller then settles it exactly once:
+ *
+ *   fail()     the guess was wrong. The reserved attempt stands as a failure.
+ *   succeed()  the guess was right. The identifier's record is cleared, as a
+ *              successful sign-in always has, and the attempt is given back to
+ *              the IP window — a right password is not a guess against the
+ *              address, and an office behind one NAT signs in all morning.
+ *   release()  neither: a database error, or a refusal that says nothing about
+ *              whether the guess was right (a weak new password). The attempt
+ *              is given back to both windows.
+ *
+ * An attempt that is never settled stays counted as a failure. That is the safe
+ * way for a forgotten exit path to fail — a little stricter, never looser.
+ * Settling twice is a no-op.
+ */
+export interface LoginAttempt extends ThrottleVerdict {
+  fail(): void;
+  succeed(): void;
+  release(): void;
 }
 
-/** Called after a password check fails. */
-export function recordLoginFailure(identifier: string, ip: string): void {
-  const now = Date.now();
-  windowFor(`id:${identifier.toLowerCase()}`).failures.push(now);
-  windowFor(`ip:${ip}`).failures.push(now);
+const REFUSED: Omit<LoginAttempt, keyof ThrottleVerdict> = {
+  fail: () => {},
+  succeed: () => {},
+  release: () => {},
+};
+
+/** Remove one specific reservation from a window, if it is still there. */
+function giveBack(key: string, at: number): void {
+  const window = windows.get(key);
+  if (!window) return;
+  const index = window.failures.indexOf(at);
+  if (index !== -1) window.failures.splice(index, 1);
 }
 
-/** Called after a password check succeeds. */
-export function clearLoginFailures(identifier: string): void {
-  windows.delete(`id:${identifier.toLowerCase()}`);
+/** Called before checking a password, a reset code or a current password. */
+export function beginLoginAttempt(identifier: string, ip: string): LoginAttempt {
+  const idKey = `id:${identifier.toLowerCase()}`;
+  const ipKey = `ip:${ip}`;
+
+  const byIdentifier = check(idKey, MAX_PER_IDENTIFIER);
+  if (!byIdentifier.allowed) return { ...byIdentifier, ...REFUSED };
+  const byIp = check(ipKey, MAX_PER_IP);
+  if (!byIp.allowed) return { ...byIp, ...REFUSED };
+
+  // Reserved now, in the same synchronous step as the check above.
+  const at = Date.now();
+  windowFor(idKey).failures.push(at);
+  windowFor(ipKey).failures.push(at);
+
+  let settled = false;
+  const settle = (action: () => void) => () => {
+    if (settled) return;
+    settled = true;
+    action();
+  };
+
+  return {
+    allowed: true,
+    retryAfterSeconds: 0,
+    fail: settle(() => {}),
+    succeed: settle(() => {
+      windows.delete(idKey);
+      giveBack(ipKey, at);
+    }),
+    release: settle(() => {
+      giveBack(idKey, at);
+      giveBack(ipKey, at);
+    }),
+  };
 }
 
 /* ========================================================================== *

@@ -622,10 +622,15 @@ whatever they are browsing from, kept after it ends.
   **at its own last heartbeat**, not at the moment anybody noticed, so a closed
   laptop costs minutes rather than a clock that runs forever. Reports do not
   wait for the sweep: an un-swept shift is clamped to the same instant on read.
-- **Logout** closes the shift — but only when no other live authentication
-  session remains, so signing out of a phone does not stop the clock on the desk
-  someone is still sitting at. Sweeping happens opportunistically at login,
-  beside `pruneExpiredSessions`, because this app has no cron.
+- **Logout** closes the shift, always, and signs the person out of every
+  browser — otherwise another open tab's heartbeat would start a new shift on
+  its next beat. Sign out in the SpiderHunts Monitor does the same
+  (`POST /api/monitor/sign-out`) and leaves the workstation paired, so it
+  resumes on its own at the next sign-in. Signing back in on the same working
+  day continues the day's shift: the gap is not counted, but the office/remote
+  choice carries over and the clocks show the day's time rather than zero.
+  Sweeping happens opportunistically at login, beside `pruneExpiredSessions`,
+  because this app has no cron.
 - **Active time vs login time.** The heartbeat currently means "a portal tab is
   open and visible", so a duration is authenticated session time. Real idle
   detection changes only what the client beats *on*; neither the table nor any

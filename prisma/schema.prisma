@@ -762,20 +762,20 @@ model ProductivitySettings {
 /// A workstation running the SpiderHunts Monitor desktop application.
 ///
 /// **Why this is not a row in `sessions`.** It was the obvious first idea, and
-/// it is wrong for a specific, load-bearing reason: `endWorkSessionForLogout`
-/// decides whether to stop an agent's shift clock by *counting the live rows in
-/// `sessions`*. A desktop client that stays connected all day would be one of
-/// them, so signing out of the browser would never close the shift, and every
-/// agent's day would run until the staleness sweep or midnight. The clock would
-/// be quietly, permanently wrong — in the direction of over-reporting hours.
-/// Keeping the desktop credential in its own table means `sessions` still
-/// contains exactly what that function believes it contains: browsers.
+/// it is wrong for a specific, load-bearing reason: signing out ends every row
+/// in `sessions` for the person (`destroyAllSessionsFor`), and a desktop client
+/// stored there would be disconnected by every browser sign-out — re-pairing
+/// the workstation each morning. Keeping the desktop credential in its own
+/// table means `sessions` contains exactly what that table is for: browsers.
+/// Signing out ends the shift and the browsers; the workstation stays paired,
+/// goes quiet, and resumes when the portal next opens a shift.
 ///
 /// The same separation answers the second requirement: connecting the Monitor
 /// must not start a shift, and cannot, because nothing on this path calls
 /// `completeSignIn`. The Monitor *observes* the work session (`getWorkClock`)
-/// and never opens, extends or closes one. The portal remains the only thing
-/// that decides whether an agent is working.
+/// and never opens or extends one; the one thing it can do is end it, when the
+/// agent presses Sign out in the Monitor (`/api/monitor/sign-out`). The portal
+/// remains the only thing that decides when an agent starts working.
 ///
 /// **Two tokens, one row.** A short-lived access token is what every request
 /// carries; a long-lived refresh token buys a new pair. Both are 32 random

@@ -1,9 +1,4 @@
-import {
-  checkLoginAllowed,
-  clearLoginFailures,
-  clientIp,
-  recordLoginFailure,
-} from "@/lib/loginThrottle";
+import { beginLoginAttempt, clientIp } from "@/lib/loginThrottle";
 import { completeReset, pruneExpiredResetCodes, ResetError } from "@/lib/passwordReset";
 
 /**
@@ -54,8 +49,8 @@ export async function POST(request: Request): Promise<Response> {
 
   const ip = clientIp(request);
   const throttleKey = `reset:${username.toLowerCase()}`;
-  const verdict = checkLoginAllowed(throttleKey, ip);
-  if (!verdict.allowed) {
+  const attempt = beginLoginAttempt(throttleKey, ip);
+  if (!attempt.allowed) {
     return Response.json(
       {
         error: "too_many_attempts",
@@ -65,7 +60,7 @@ export async function POST(request: Request): Promise<Response> {
         status: 429,
         headers: {
           "Cache-Control": "no-store",
-          "Retry-After": String(verdict.retryAfterSeconds),
+          "Retry-After": String(attempt.retryAfterSeconds),
         },
       },
     );
@@ -74,7 +69,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const user = await completeReset(username, code, newPassword);
 
-    clearLoginFailures(throttleKey);
+    attempt.succeed();
     // Same opportunistic housekeeping the login route does for sessions: this
     // app has no cron, and a completed reset is a natural moment to sweep.
     void pruneExpiredResetCodes();
@@ -90,12 +85,14 @@ export async function POST(request: Request): Promise<Response> {
       // A password that is merely too short is a mistake, not an attempt to
       // break in, and counting it towards a lockout would punish someone who
       // is holding a valid code and typing carefully.
-      if (error.code !== "weak_password") recordLoginFailure(throttleKey, ip);
+      if (error.code === "weak_password") attempt.release();
+      else attempt.fail();
       return Response.json(
         { error: error.code, message: error.message },
         { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
+    attempt.release();
     console.error("POST /api/auth/reset/complete failed:", error);
     return Response.json(
       { error: "database_unavailable", message: "Could not set your new password." },

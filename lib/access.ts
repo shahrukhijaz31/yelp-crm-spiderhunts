@@ -117,6 +117,14 @@ const PUBLIC_PATHS = new Set<string>([
   "/api/monitor/auth/logout",
   "/api/monitor/session",
   /*
+   * Signing the agent out from the Monitor: ends the shift and every browser
+   * session, and leaves the workstation paired. Bearer-authenticated by
+   * `monitorUser()` inside the handler, exactly as `/api/monitor/session` is —
+   * unlike `/logout`, this one acts on the *account*, so it does need a live
+   * credential.
+   */
+  "/api/monitor/sign-out",
+  /*
    * Connecting a workstation from a browser that is already signed in.
    *
    * These two are the only entries on this list that are exempt from the cookie

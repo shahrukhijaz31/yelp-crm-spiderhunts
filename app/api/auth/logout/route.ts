@@ -1,6 +1,6 @@
 import { LOGIN_PATH } from "@/lib/access";
 import { csrfRefusal } from "@/lib/csrf";
-import { destroySession, getSessionUser } from "@/lib/session";
+import { destroyAllSessionsFor, destroySession, getSessionUser } from "@/lib/session";
 import { endWorkSessionForLogout } from "@/lib/workSessions";
 
 /**
@@ -21,23 +21,22 @@ import { endWorkSessionForLogout } from "@/lib/workSessions";
  * Always 200, even with no session to destroy. Signing out is idempotent and
  * "you were not signed in" is not an error worth showing anyone.
  *
- * **The work session is closed here too**, and the order of the three steps is
- * the whole design:
+ * **Signing out ends the shift, and every other browser goes with it.** The
+ * order of the steps is the design:
  *
  *   1. resolve who is signing out, while the cookie still means something;
- *   2. destroy the authentication session, which is the part that must happen
+ *   2. destroy this authentication session, which is the part that must happen
  *      whatever else does;
- *   3. close the shift.
+ *   3. destroy every other browser session the person has — an open tab
+ *      elsewhere would otherwise heartbeat a new shift into existence within a
+ *      minute, and a forgotten one used to keep the old shift running for
+ *      hours;
+ *   4. close the shift. The SpiderHunts Monitor stays paired and stops
+ *      capturing on its next poll, when the portal tells it there is no shift.
  *
- * Step 3 last, and after step 2, because `endWorkSessionForLogout` decides
- * whether to stop the clock by counting the browsers that are *still* signed
- * in — so this one has to be gone before it counts. An agent signing out of
- * their phone while still working at their desk keeps their timer running;
- * signing out of the last browser stops it and writes the duration.
- *
- * It cannot fail the logout: it swallows its own errors, and a shift left open
- * by a database hiccup is closed by the next reconciliation sweep at its last
- * heartbeat.
+ * Steps 3 and 4 cannot fail the logout: each swallows its own errors, and a
+ * shift left open by a database hiccup is closed by the next reconciliation
+ * sweep at its last heartbeat.
  */
 export async function POST(request: Request): Promise<Response> {
   const crossSite = csrfRefusal(request);
@@ -47,7 +46,12 @@ export async function POST(request: Request): Promise<Response> {
 
   await destroySession();
 
-  if (user) await endWorkSessionForLogout(user.id);
+  if (user) {
+    await destroyAllSessionsFor(user.id).catch((error) => {
+      console.error(`Could not end the other sessions for ${user.id}:`, error);
+    });
+    await endWorkSessionForLogout(user.id);
+  }
 
   return Response.json(
     { ok: true, redirectTo: LOGIN_PATH },

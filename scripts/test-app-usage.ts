@@ -5,6 +5,7 @@ import { config as loadEnv } from "dotenv";
 
 import { PrismaClient } from "../lib/generated/prisma/client";
 import { hashPassword } from "../lib/password";
+import { todayWorkday, workdayStart } from "../lib/performanceRules";
 
 /**
  * End-to-end check of app usage tracking: the Monitor's submission API, the
@@ -745,7 +746,14 @@ async function main(): Promise<void> {
     where: { userId: alice.id, endedAt: null },
     select: { id: true, startedAt: true },
   });
-  const base = bulkShift!.startedAt.getTime();
+  // Inside the working day in progress (from 11:00 Pakistan time), which is
+  // what `range=today` reads — the shift itself opened hours ago and, run in the
+  // early afternoon, would put every row in the previous working day.
+  const base = Math.max(
+    bulkShift!.startedAt.getTime(),
+    workdayStart(todayWorkday()).getTime() + 60_000,
+    Date.now() - 5100 * 1000,
+  );
   await prisma.appUsage.createMany({
     data: Array.from({ length: 5000 }, (_, index) => ({
       userId: alice.id,

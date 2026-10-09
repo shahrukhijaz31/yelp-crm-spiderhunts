@@ -1,11 +1,6 @@
 import { safeCallbackUrl } from "@/lib/access";
 import { issueLoginOtp } from "@/lib/loginOtp";
-import {
-  checkLoginAllowed,
-  clearLoginFailures,
-  clientIp,
-  recordLoginFailure,
-} from "@/lib/loginThrottle";
+import { beginLoginAttempt, clientIp } from "@/lib/loginThrottle";
 import { isMailConfigured } from "@/lib/mail";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { findUserForLogin } from "@/lib/userDb";
@@ -99,8 +94,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const ip = clientIp(request);
-  const verdict = checkLoginAllowed(username, ip);
-  if (!verdict.allowed) {
+  const attempt = beginLoginAttempt(username, ip);
+  if (!attempt.allowed) {
     return Response.json(
       {
         error: "too_many_attempts",
@@ -110,7 +105,7 @@ export async function POST(request: Request): Promise<Response> {
         status: 429,
         headers: {
           "Cache-Control": "no-store",
-          "Retry-After": String(verdict.retryAfterSeconds),
+          "Retry-After": String(attempt.retryAfterSeconds),
         },
       },
     );
@@ -120,6 +115,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     user = await findUserForLogin(username);
   } catch (error) {
+    attempt.release();
     console.error("POST /api/auth/login: database lookup failed:", error);
     return Response.json(
       {
@@ -132,13 +128,13 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!user) {
     await equaliseTiming(password);
-    recordLoginFailure(username, ip);
+    attempt.fail();
     return invalid();
   }
 
   const passwordOk = await verifyPassword(password, user.passwordHash);
   if (!passwordOk) {
-    recordLoginFailure(username, ip);
+    attempt.fail();
     return invalid();
   }
 
@@ -146,6 +142,7 @@ export async function POST(request: Request): Promise<Response> {
   // answer, but only to someone who already knew its password. Checking first
   // would turn the endpoint into a way to test which accounts exist.
   if (!user.isActive) {
+    attempt.release();
     return Response.json(
       {
         error: "account_disabled",
@@ -165,6 +162,7 @@ export async function POST(request: Request): Promise<Response> {
   // future path ever sets the flag on an account whose password still works,
   // the flag will still mean what it says.
   if (user.requirePasswordChange) {
+    attempt.release();
     return Response.json(
       {
         error: "password_change_required",
@@ -189,7 +187,7 @@ export async function POST(request: Request): Promise<Response> {
    * code is bounded by its own, tighter limits (five attempts, five minutes,
    * one use) inside `lib/loginOtp.ts`.
    */
-  clearLoginFailures(username);
+  attempt.succeed();
 
   /*
    * Checked here rather than at the top of the route, and only once there is

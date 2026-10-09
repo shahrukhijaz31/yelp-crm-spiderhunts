@@ -67,7 +67,6 @@ export default function UsersPanel({
   const [notice, setNotice] = useState<Notice>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [settingPasswordId, setSettingPasswordId] = useState<string | null>(null);
   /** The row whose reset dialog is open, if any. */
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
   /**
@@ -75,8 +74,8 @@ export default function UsersPanel({
    *
    * Two steps rather than a `window.confirm`: the confirmation names the person
    * and says plainly that it cannot be undone, which a browser dialog cannot do
-   * in the app's own voice. It is inline for the same reason "Set password" is —
-   * the action belongs to one row, and a modal would hide the list it is about.
+   * in the app's own voice. It is inline because the action belongs to one
+   * row, and a modal would hide the list it is about.
    */
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
@@ -280,8 +279,9 @@ export default function UsersPanel({
                 {user.isActive ? "Disable" : "Enable"}
               </button>
 
-              {/* The recovery path: no password is chosen here, and none is
-                  shown. It is refused on your own row — an administrator who
+              {/* The recovery path, and the only password control on this
+                  screen: no password is chosen here, and none is shown — the
+                  person picks their own with the code. It is refused on your own row — an administrator who
                   reset themselves would be signed out mid-action, holding a
                   code on a screen they are about to lose. Changing your own
                   password lives in the profile menu, where it belongs. */}
@@ -299,37 +299,6 @@ export default function UsersPanel({
                 <KeyRound className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
                 Reset password
               </button>
-
-              {/* Allowed on your own row, unlike role and disable: setting your
-                  own password is not a way to lock yourself out. */}
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  setSettingPasswordId(settingPasswordId === user.id ? null : user.id)
-                }
-                aria-expanded={settingPasswordId === user.id}
-                className="ui-btn ui-btn-ghost"
-              >
-                Set password
-              </button>
-
-              {settingPasswordId === user.id && (
-                <SetPasswordForm
-                  userName={user.name}
-                  busy={busy}
-                  onSubmit={(password) => {
-                    void patchUser(
-                      user.id,
-                      { password },
-                      // Their sessions end with the change, so whoever is using
-                      // the old password is signed out rather than left on a
-                      // page that will start refusing them.
-                      `${user.name}'s password has been changed. They have been signed out.`,
-                    ).then(() => setSettingPasswordId(null));
-                  }}
-                />
-              )}
 
               {/* Delete. Last in the row and the only ghost-to-danger control
                   on the screen, because it is the one action here with no way
@@ -597,58 +566,6 @@ function ModuleAccess({
 function humanJoin(items: string[]): string {
   if (items.length === 1) return items[0];
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
-
-/**
- * "Set password", opened under one row at a time.
- *
- * A component rather than markup inline in the row loop, and the reason is the
- * password itself. `PasswordField` is controlled, so the value has to live in
- * React state — and state held by `UsersPanel` would outlive this form, so
- * closing it under one person and opening it under the next would show the
- * first one's half-typed password in the second one's box. Here it is owned by
- * a component that only exists while the form is open, so closing it is what
- * destroys the value; there is nothing left to leak into the next row.
- */
-function SetPasswordForm({
-  userName,
-  busy,
-  onSubmit,
-}: {
-  userName: string;
-  busy: boolean;
-  /** The password to set. The caller owns the request and the closing. */
-  onSubmit: (password: string) => void;
-}) {
-  const [password, setPassword] = useState("");
-
-  return (
-    <form
-      className="flex w-full items-end gap-2 border-t border-line pt-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit(password);
-      }}
-    >
-      {/* The field carries the flex-grow rather than `PasswordField` itself,
-          which has no opinion about the row it sits in. */}
-      <div className="flex-1">
-        <PasswordField
-          label={`New password for ${userName} (${PASSWORD_MIN_LENGTH}+ characters)`}
-          value={password}
-          onChange={setPassword}
-          autoComplete="new-password"
-          disabled={busy}
-          placeholder=""
-          required
-          compact
-        />
-      </div>
-      <button type="submit" disabled={busy} className="ui-btn ui-btn-primary">
-        Set
-      </button>
-    </form>
-  );
 }
 
 function NewUserForm({

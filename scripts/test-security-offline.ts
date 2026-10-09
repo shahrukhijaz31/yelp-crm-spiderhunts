@@ -6,10 +6,8 @@ import * as XLSX from "xlsx";
 import { isSameOriginRequest, isStateChangingMethod, csrfRefusal } from "../lib/csrf";
 import { EXPORT_COLUMN_HEADERS, neutraliseFormula, toExportRows } from "../lib/exportLeads";
 import {
-  checkLoginAllowed,
-  clearLoginFailures,
+  beginLoginAttempt,
   clientIp,
-  recordLoginFailure,
   resetTrustedProxyHopsCache,
 } from "../lib/loginThrottle";
 import type { Lead } from "../lib/types";
@@ -210,10 +208,10 @@ function lp01(): void {
 
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const ip = clientIp(spoofed(attempt % 250));
-      recordLoginFailure(`throttle-probe-${attempt}`, ip);
+      beginLoginAttempt(`throttle-probe-${attempt}`, ip).fail();
     }
 
-    const afterSpoof = checkLoginAllowed(
+    const afterSpoof = beginLoginAttempt(
       "throttle-probe-final",
       clientIp(spoofed(251)),
     );
@@ -223,7 +221,7 @@ function lp01(): void {
       `allowed=${afterSpoof.allowed}`,
     );
 
-    const other = checkLoginAllowed("throttle-probe-final", "203.0.113.200");
+    const other = beginLoginAttempt("throttle-probe-final", "203.0.113.200");
     check(
       "a genuinely different address is unaffected",
       other.allowed,
@@ -235,20 +233,78 @@ function lp01(): void {
   withHops("1", () => {
     const who = "lp01-identifier-probe";
     const ip = "198.51.100.50";
-    for (let attempt = 0; attempt < 8; attempt += 1) recordLoginFailure(who, ip);
+    for (let attempt = 0; attempt < 8; attempt += 1) beginLoginAttempt(who, ip).fail();
 
     // A brand-new address every time: the identifier window must close anyway.
-    const verdict = checkLoginAllowed(who, "203.0.113.77");
+    const verdict = beginLoginAttempt(who, "203.0.113.77");
     check(
       "8 failures close the identifier window whatever the address",
       !verdict.allowed,
       `allowed=${verdict.allowed}`,
     );
 
-    clearLoginFailures(who);
+    const mistyper = "lp01-mistyper-probe";
+    for (let attempt = 0; attempt < 7; attempt += 1) beginLoginAttempt(mistyper, ip).fail();
+    beginLoginAttempt(mistyper, "203.0.113.78").succeed();
+    const fresh = Array.from({ length: 7 }, () => beginLoginAttempt(mistyper, "203.0.113.79"));
     check(
       "a successful sign-in clears it",
-      checkLoginAllowed(who, "203.0.113.78").allowed,
+      fresh.every((attempt) => attempt.allowed),
+    );
+    fresh.forEach((attempt) => attempt.release());
+  });
+  section("QA-05  parallel guesses cannot outrun the throttle");
+
+  withHops("1", () => {
+    // Twenty guesses admitted before any of them has been checked — what a
+    // parallel burst looks like to this process, since each request reaches
+    // the slow password comparison only after it has been let in.
+    const burst = Array.from({ length: 20 }, () =>
+      beginLoginAttempt("qa05-burst-target", "198.51.100.150"),
+    );
+    const admitted = burst.filter((attempt) => attempt.allowed).length;
+    check(
+      "a burst of 20 unsettled guesses at one account admits only 8",
+      admitted === 8,
+      `${admitted} admitted`,
+    );
+    burst.forEach((attempt) => attempt.fail());
+
+    const ipBurst = Array.from({ length: 50 }, (_, n) =>
+      beginLoginAttempt(`qa05-ip-${n}`, "198.51.100.151"),
+    );
+    const ipAdmitted = ipBurst.filter((attempt) => attempt.allowed).length;
+    check(
+      "a burst of 50 guesses across accounts from one address admits only 30",
+      ipAdmitted === 30,
+      `${ipAdmitted} admitted`,
+    );
+
+    // An office behind one NAT: forty correct sign-ins in a row are not
+    // forty guesses against the address.
+    const office = "198.51.100.152";
+    for (let n = 0; n < 40; n += 1) beginLoginAttempt(`qa05-agent-${n}`, office).succeed();
+    check(
+      "40 successful sign-ins from one office address do not lock it",
+      beginLoginAttempt("qa05-agent-late", office).allowed,
+    );
+
+    // Server errors and non-guess refusals give the attempt back.
+    for (let n = 0; n < 20; n += 1) beginLoginAttempt("qa05-released", "198.51.100.153").release();
+    check(
+      "released attempts are not counted",
+      beginLoginAttempt("qa05-released", "198.51.100.153").allowed,
+    );
+
+    // Settling is once only.
+    const once = beginLoginAttempt("qa05-once", "198.51.100.154");
+    once.fail();
+    once.release();
+    const later = Array.from({ length: 8 }, () => beginLoginAttempt("qa05-once", "198.51.100.155"));
+    check(
+      "a settled attempt cannot be given back by settling it again",
+      later.filter((attempt) => attempt.allowed).length === 7,
+      `${later.filter((attempt) => attempt.allowed).length} admitted`,
     );
   });
 }

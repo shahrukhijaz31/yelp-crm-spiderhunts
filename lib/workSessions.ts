@@ -44,10 +44,21 @@ import { prisma } from "./prisma";
  * reasoning) and, so that a report is never wrong while waiting for someone to
  * sign in, are *also* clamped on read by {@link OPEN_SESSION_END_SQL}.
  *
- * **Logging out of one device while working on another.** Logout closes the
- * shift only when the person has no other live authentication session left
- * (see {@link endWorkSessionForLogout}). Signing out of a phone does not stop
- * the clock on the desk they are still sitting at.
+ * **Signing out ends the shift — everywhere.** Sign out, from the portal or
+ * from the Monitor, signs the person out of every browser and closes the shift
+ * at that instant (see {@link endWorkSessionForLogout}). It used to close the
+ * shift only when no other browser was still signed in, which sounded kind to
+ * someone signing out of a phone at their desk and in practice meant a tab
+ * forgotten on another machine — still "signed in" for up to twelve hours —
+ * kept the shift, and the Monitor, running after the agent had signed out. The
+ * other browsers have to go too: their heartbeat would otherwise open a new
+ * shift within the minute.
+ *
+ * **Signing back in the same working day continues that day's shift.** The
+ * time between is not counted — it is a new row, opened at the sign-in — but
+ * the place chosen for the day carries over rather than being asked again
+ * ({@link openOrResumeWorkSession}), and the clocks show the shift as the
+ * day's worked time so far rather than restarting at zero.
  *
  * ---------------------------------------------------------------------------
  * Two liveness signals, and why there has to be more than one
@@ -318,6 +329,22 @@ export async function openOrResumeWorkSession(
       // schedule and the reports below no longer list them.
       if (!user || !isTrackedRole(user.role)) return null;
 
+      // One opener at a time per person. Without it, two tabs beating at the
+      // same moment both read "no open shift" and both create one — six
+      // simultaneous beats were measured opening five — and every report sums
+      // the duplicates. Held to the end of this transaction.
+      await lockUserShift(tx, userId);
+
+      // Signed out while this beat was in flight: Sign out deletes every
+      // browser session before closing the shift, and a heartbeat that had
+      // already passed its auth check must not open a new one behind it. Both
+      // callers create or hold a session first, so a live one is always here
+      // when the open is legitimate.
+      const signedIn = await tx.session.count({
+        where: { userId, expiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
+      });
+      if (signedIn === 0) return null;
+
       const open = await tx.workSession.findFirst({
         where: { userId, endedAt: null },
         orderBy: { startedAt: "asc" },
@@ -348,12 +375,46 @@ export async function openOrResumeWorkSession(
         select: { id: true, startedAt: true },
       });
 
+      await carryLocationForward(tx, userId, created.id);
+
       return { id: created.id, startedAt: created.startedAt.toISOString() };
     })
     .catch((error) => {
       console.error(`Could not open a work session for ${userId}:`, error);
       return null;
     });
+}
+
+/**
+ * Signing back in on the same working day continues the day's shift, so the
+ * place chosen for it ("Where are you working today?") is not asked again.
+ *
+ * The choice is keyed to a work-session id (`users.location_session_id`); this
+ * moves it onto the row just opened when the row it named started inside the
+ * working day in progress. A choice from an earlier day is left where it is,
+ * and the question is asked as before.
+ */
+async function carryLocationForward(
+  tx: Pick<typeof prisma, "user" | "workSession">,
+  userId: string,
+  sessionId: string,
+): Promise<void> {
+  const user = await tx.user.findUnique({
+    where: { id: userId },
+    select: { locationOverride: true, locationSessionId: true },
+  });
+  if (!user?.locationOverride || !user.locationSessionId) return;
+
+  const previous = await tx.workSession.findUnique({
+    where: { id: user.locationSessionId },
+    select: { startedAt: true },
+  });
+  if (!previous || previous.startedAt < startOfToday()) return;
+
+  await tx.user.update({
+    where: { id: userId },
+    data: { locationSessionId: sessionId },
+  });
 }
 
 /** The shift currently running for this user, or null. Read on every page load. */
@@ -571,16 +632,15 @@ export async function touchMonitorLiveness(userId: string): Promise<void> {
 }
 
 /**
- * End the shift because somebody pressed Sign out.
+ * End the shift because somebody pressed Sign out — in the portal or in the
+ * Monitor.
  *
- * **Only if this was their last browser.** `destroySession` has already deleted
- * the row for the browser doing the signing out, so what is counted here is
- * what is left; if another live authentication session remains, the person is
- * still working somewhere else and the clock keeps running. Signing out of a
- * phone must not stop the timer on the desk they are sitting at.
- *
- * Ordering matters and is the caller's responsibility: this runs *after*
- * `destroySession`, which is why the current browser is not in the count.
+ * **Always.** Signing out is a statement that work has stopped, whatever other
+ * browsers are open. It used to wait for the last browser, and a session left
+ * behind on another machine kept the shift open for hours after the agent had
+ * gone. Callers sign the person out of every browser first
+ * (`destroyAllSessionsFor`), because an open tab's heartbeat would otherwise
+ * start a new shift on its next beat.
  *
  * **A connected Monitor does not save the shift here, and must not.** Signing
  * out is an explicit statement that work has stopped, and it outranks every
@@ -596,19 +656,21 @@ export async function endWorkSessionForLogout(userId: string): Promise<void> {
   try {
     const now = new Date();
 
-    const otherLiveSessions = await prisma.session.count({
-      where: { userId, expiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
-    });
-    if (otherLiveSessions > 0) return;
+    // Under the same lock as `openOrResumeWorkSession`, so a heartbeat that is
+    // mid-open either commits first (and its row is closed here) or runs after
+    // (and finds no browser session to open one for).
+    await prisma.$transaction(async (tx) => {
+      await lockUserShift(tx, userId);
 
-    const open = await prisma.workSession.findMany({
-      where: { userId, endedAt: null },
-      select: { id: true, startedAt: true },
-    });
+      const open = await tx.workSession.findMany({
+        where: { userId, endedAt: null },
+        select: { id: true, startedAt: true },
+      });
 
-    for (const session of open) {
-      await closeSessionTx(prisma, session.id, session.startedAt, now, "logout");
-    }
+      for (const session of open) {
+        await closeSessionTx(tx, session.id, session.startedAt, now, "logout");
+      }
+    });
   } catch (error) {
     // Signing out must always succeed. A shift left open here is closed by the
     // next sweep at its last heartbeat, which is the same answer a few minutes
@@ -711,6 +773,17 @@ async function collapseDuplicateOpenSessions(): Promise<void> {
  * so a clock that stepped backwards produces a zero-length shift rather than a
  * negative one that would subtract from somebody's day.
  */
+/**
+ * Serialise every open and close of one person's shift: a transaction-scoped
+ * Postgres advisory lock keyed on the user id, released at commit or rollback.
+ */
+async function lockUserShift(
+  tx: Pick<typeof prisma, "$queryRaw">,
+  userId: string,
+): Promise<void> {
+  await tx.$queryRaw`SELECT 1 FROM pg_advisory_xact_lock(hashtextextended(${userId}, 0))`;
+}
+
 async function closeSessionTx(
   client: Pick<typeof prisma, "workSession">,
   id: string,

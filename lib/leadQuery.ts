@@ -234,7 +234,13 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
 
 /** `YYYY-MM-DD` and nothing else — this string reaches a date comparison. */
 function isIsoDate(value: string | null): value is string {
-  return value !== null && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  // A real calendar day: `2026-02-30` passes the shape and then fails the
+  // `::date` cast in Postgres, which answered a typo with a 503.
+  return (
+    value !== null &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    new Date(Date.parse(`${value}T00:00:00Z`) || 0).toISOString().slice(0, 10) === value
+  );
 }
 
 function readOneOf<T extends string>(

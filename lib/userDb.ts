@@ -182,7 +182,9 @@ export interface UserEdits {
   role?: Role;
   isActive?: boolean;
   name?: string;
-  password?: string;
+  // No `password`: an existing account's password is never set by an
+  // administrator. Recovery is a reset code (`lib/passwordReset.ts`); a change
+  // is `changeOwnPassword`, which proves the current one.
   /**
    * Module access. Settable only through `PATCH /api/users/:id`, which is
    * behind `apiAdmin()` and refuses a self-edit of these two — so there is no
@@ -267,16 +269,6 @@ export async function updateUser(id: string, edits: UserEdits): Promise<PublicUs
     data.canAccessDemoWebsites = edits.canAccessDemoWebsites;
   }
 
-  if (edits.password !== undefined) {
-    const problem = describePasswordProblem(edits.password);
-    if (problem) throw new UserInputError(problem);
-    data.passwordHash = await hashPassword(edits.password);
-    // An administrator handing over a password they chose settles the account:
-    // the person can sign in with it, so leaving a "must change" flag standing
-    // from an earlier reset would lock them out of a password that works.
-    data.requirePasswordChange = false;
-  }
-
   const losingAnAdmin =
     target.role === "ADMIN" &&
     target.isActive &&
@@ -315,7 +307,7 @@ export function editEndsAccess(edits: UserEdits): boolean {
   // must not keep browsing on a session that was resolved under the old role.
   // Sessions carry no role, but signing them out makes the change unmissable
   // and removes any doubt about half-rendered pages from before the change.
-  return edits.isActive === false || edits.role !== undefined || edits.password !== undefined;
+  return edits.isActive === false || edits.role !== undefined;
 }
 
 /**

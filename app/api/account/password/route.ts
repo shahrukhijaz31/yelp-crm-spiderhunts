@@ -1,10 +1,6 @@
 import { apiUser } from "@/lib/authz";
-import {
-  checkLoginAllowed,
-  clearLoginFailures,
-  clientIp,
-  recordLoginFailure,
-} from "@/lib/loginThrottle";
+import { beginLoginAttempt, clientIp } from "@/lib/loginThrottle";
+import { revokeAllDevicesFor } from "@/lib/monitorAuth";
 import { destroyOtherSessionsFor } from "@/lib/session";
 import { changeOwnPassword, UserInputError } from "@/lib/userDb";
 
@@ -71,8 +67,8 @@ export async function POST(request: Request): Promise<Response> {
   // use this endpoint to lock the owner out of the *login* form as a side
   // effect — a denial of service dressed up as a brake.
   const throttleKey = `pwchange:${auth.id}`;
-  const verdict = checkLoginAllowed(throttleKey, ip);
-  if (!verdict.allowed) {
+  const attempt = beginLoginAttempt(throttleKey, ip);
+  if (!attempt.allowed) {
     return Response.json(
       {
         error: "too_many_attempts",
@@ -82,7 +78,7 @@ export async function POST(request: Request): Promise<Response> {
         status: 429,
         headers: {
           "Cache-Control": "no-store",
-          "Retry-After": String(verdict.retryAfterSeconds),
+          "Retry-After": String(attempt.retryAfterSeconds),
         },
       },
     );
@@ -92,12 +88,13 @@ export async function POST(request: Request): Promise<Response> {
     await changeOwnPassword(auth.id, currentPassword, newPassword);
   } catch (error) {
     if (error instanceof UserInputError) {
-      recordLoginFailure(throttleKey, ip);
+      attempt.fail();
       return Response.json(
         { error: "invalid_input", message: error.message },
         { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
+    attempt.release();
     console.error("POST /api/account/password failed:", error);
     return Response.json(
       { error: "database_unavailable", message: "Could not save the change." },
@@ -105,7 +102,7 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  clearLoginFailures(throttleKey);
+  attempt.succeed();
 
   // This browser keeps its session — being signed out of the tab you just used
   // to prove you know the password is a punishment for good behaviour. Every
@@ -114,6 +111,10 @@ export async function POST(request: Request): Promise<Response> {
   await destroyOtherSessionsFor(auth.id).catch((error) => {
     console.error("POST /api/account/password: could not end other sessions:", error);
   });
+  // Workstations too, for the same reason: the Monitor holds its own
+  // credential for this account, and it would otherwise outlive the password
+  // for up to 180 days. Reconnecting is one approval from this browser.
+  await revokeAllDevicesFor(auth.id);
 
   // Audit trail, such as it is: this app has no activity log, so the event goes
   // where the app's other operational events go. The id identifies the actor

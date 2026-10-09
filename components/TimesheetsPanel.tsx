@@ -430,14 +430,21 @@ function clock(iso: string): string {
   return formatClock(iso);
 }
 
-/** `2026-08-12` -> `Wed 12 Aug`. */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * `2026-08-12` -> `Wed 12 Aug`.
+ *
+ * Spelled out rather than `toLocaleDateString`: the panel renders on the
+ * server and hydrates in the browser, and their ICU data disagree about this
+ * format (Node writes `Wed 12 Aug`, Chromium `Wed, 12 Aug`), which failed
+ * hydration whenever the table had day rows.
+ */
 function longDay(iso: string): string {
   const [year, month, day] = iso.split("-").map(Number);
-  return new Date(year, (month ?? 1) - 1, day ?? 1).toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
+  const date = new Date(Date.UTC(year, (month ?? 1) - 1, day ?? 1));
+  return `${WEEKDAYS[date.getUTCDay()]} ${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
 }
 
 export type { TimeReportFilters };

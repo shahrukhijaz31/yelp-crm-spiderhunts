@@ -114,7 +114,12 @@ export function addDays(iso: string, delta: number): string {
 }
 
 function isIsoDay(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  // A real calendar day, not just the shape of one (`2026-02-31`).
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    new Date(Date.parse(`${value}T00:00:00Z`) || 0).toISOString().slice(0, 10) === value
+  );
 }
 
 /**

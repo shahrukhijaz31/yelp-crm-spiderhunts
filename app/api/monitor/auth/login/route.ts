@@ -1,10 +1,5 @@
 import { issueLoginOtpForChallenge } from "@/lib/loginOtp";
-import {
-  checkLoginAllowed,
-  clearLoginFailures,
-  clientIp,
-  recordLoginFailure,
-} from "@/lib/loginThrottle";
+import { beginLoginAttempt, clientIp } from "@/lib/loginThrottle";
 import { isMailConfigured } from "@/lib/mail";
 import { checkMonitorEligibility } from "@/lib/monitorAuth";
 import { hashPassword, verifyPassword } from "@/lib/password";
@@ -75,8 +70,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const ip = clientIp(request);
-  const verdict = checkLoginAllowed(username, ip);
-  if (!verdict.allowed) {
+  const attempt = beginLoginAttempt(username, ip);
+  if (!attempt.allowed) {
     return Response.json(
       {
         error: "too_many_attempts",
@@ -86,7 +81,7 @@ export async function POST(request: Request): Promise<Response> {
         status: 429,
         headers: {
           "Cache-Control": "no-store",
-          "Retry-After": String(verdict.retryAfterSeconds),
+          "Retry-After": String(attempt.retryAfterSeconds),
         },
       },
     );
@@ -96,6 +91,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     user = await findUserForLogin(username);
   } catch (error) {
+    attempt.release();
     console.error("POST /api/monitor/auth/login: database lookup failed:", error);
     return Response.json(
       {
@@ -108,13 +104,13 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!user) {
     await equaliseTiming(password);
-    recordLoginFailure(username, ip);
+    attempt.fail();
     return invalid();
   }
 
   const passwordOk = await verifyPassword(password, user.passwordHash);
   if (!passwordOk) {
-    recordLoginFailure(username, ip);
+    attempt.fail();
     return invalid();
   }
 
@@ -127,6 +123,7 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   if (eligibility === "account_disabled") {
+    attempt.release();
     return Response.json(
       {
         error: "account_disabled",
@@ -137,6 +134,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (eligibility === "role_not_permitted") {
+    attempt.release();
     return Response.json(
       {
         error: "role_not_permitted",
@@ -147,6 +145,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (user.requirePasswordChange) {
+    attempt.release();
     return Response.json(
       {
         error: "password_change_required",
@@ -160,7 +159,7 @@ export async function POST(request: Request): Promise<Response> {
   // the password has just been guessed correctly, and an agent must not be
   // locked out *between* the two steps of their own successful sign-in.
   // Guessing at the code is bounded by its own tighter limits.
-  clearLoginFailures(username);
+  attempt.succeed();
 
   if (!isMailConfigured()) {
     console.error("POST /api/monitor/auth/login: SMTP is not configured; sign-in refused.");

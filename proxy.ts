@@ -39,13 +39,12 @@ export function proxy(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
   const hasSessionCookie = Boolean(request.cookies.get(SESSION_COOKIE)?.value);
 
-  // Signed in and asking for the login form: send them to the workspace. The
-  // page itself repeats this check against the database, because a cookie
-  // being *present* is not the same as it being valid.
-  if (pathname === LOGIN_PATH && hasSessionCookie) {
-    return noStore(NextResponse.redirect(new URL("/", request.url)));
-  }
-
+  // No "signed in and asking for the login form" bounce here. A cookie being
+  // *present* is not the same as it being valid: a session ended elsewhere
+  // (sign out everywhere, a reset, a role change) leaves the cookie behind,
+  // `requireUser` sends it to the login form, and a cookie-only bounce back to
+  // `/` looped the browser until ERR_TOO_MANY_REDIRECTS. The login page makes
+  // the same redirect itself, against the database (`app/login/page.tsx`).
   if (isPublicPath(pathname)) return noStore(NextResponse.next());
 
   /*

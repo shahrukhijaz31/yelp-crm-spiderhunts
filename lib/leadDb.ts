@@ -1248,9 +1248,22 @@ function isMessageStatus(value: unknown): value is MessageStatus {
   return typeof value === "string" && (MESSAGE_STATUSES as readonly string[]).includes(value);
 }
 
+/**
+ * The longest free-text field a save may carry. Far beyond any real note, and
+ * there to stop one PATCH storing megabytes that every list page, export and
+ * history entry would then carry on.
+ */
+const MAX_FREE_TEXT = 20_000;
+
 /** `YYYY-MM-DD` and nothing else — this string reaches a date column. */
 function isIsoDate(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  // A real calendar day, not just the shape of one: `2026-02-30` would roll
+  // over to 2 March and `2026-13-01` would become null and erase the callback.
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    new Date(Date.parse(`${value}T00:00:00Z`) || 0).toISOString().slice(0, 10) === value
+  );
 }
 
 /** 24-hour `HH:MM`, matching what the meeting time input produces. */
@@ -1400,6 +1413,9 @@ export function parseLeadEdits(body: unknown): Partial<LeadEditableFields> {
   for (const key of ["notes", "meetingNotes"] as const) {
     if (key in input) {
       if (typeof input[key] !== "string") throw new LeadEditError(`${key} must be a string.`);
+      if ((input[key] as string).length > MAX_FREE_TEXT) {
+        throw new LeadEditError(`${key} must be at most ${MAX_FREE_TEXT} characters.`);
+      }
       edits[key] = input[key];
     }
   }
@@ -1423,6 +1439,9 @@ export function parseLeadEdits(body: unknown): Partial<LeadEditableFields> {
   if ("meetingAttendees" in input) {
     if (input.meetingAttendees !== null && typeof input.meetingAttendees !== "string") {
       throw new LeadEditError("meetingAttendees must be a string or null.");
+    }
+    if (typeof input.meetingAttendees === "string" && input.meetingAttendees.length > MAX_FREE_TEXT) {
+      throw new LeadEditError(`meetingAttendees must be at most ${MAX_FREE_TEXT} characters.`);
     }
     edits.meetingAttendees = input.meetingAttendees as string | null;
   }

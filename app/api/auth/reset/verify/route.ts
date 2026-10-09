@@ -1,8 +1,4 @@
-import {
-  checkLoginAllowed,
-  clientIp,
-  recordLoginFailure,
-} from "@/lib/loginThrottle";
+import { beginLoginAttempt, clientIp } from "@/lib/loginThrottle";
 import { checkResetCode, ResetError } from "@/lib/passwordReset";
 
 /**
@@ -45,8 +41,8 @@ export async function POST(request: Request): Promise<Response> {
 
   const ip = clientIp(request);
   const throttleKey = `reset:${username.toLowerCase()}`;
-  const verdict = checkLoginAllowed(throttleKey, ip);
-  if (!verdict.allowed) {
+  const attempt = beginLoginAttempt(throttleKey, ip);
+  if (!attempt.allowed) {
     return Response.json(
       {
         error: "too_many_attempts",
@@ -56,7 +52,7 @@ export async function POST(request: Request): Promise<Response> {
         status: 429,
         headers: {
           "Cache-Control": "no-store",
-          "Retry-After": String(verdict.retryAfterSeconds),
+          "Retry-After": String(attempt.retryAfterSeconds),
         },
       },
     );
@@ -64,6 +60,7 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const user = await checkResetCode(username, code);
+    attempt.succeed();
     return Response.json(
       { ok: true, name: user.name, username: user.username },
       { headers: { "Cache-Control": "no-store" } },
@@ -73,12 +70,13 @@ export async function POST(request: Request): Promise<Response> {
       // Expiry is counted as a failure too. It is only reachable with a real
       // code, but not counting it would leave a free lane for a guesser who
       // happened to find an old one.
-      recordLoginFailure(throttleKey, ip);
+      attempt.fail();
       return Response.json(
         { error: error.code, message: error.message },
         { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
+    attempt.release();
     console.error("POST /api/auth/reset/verify failed:", error);
     return Response.json(
       { error: "database_unavailable", message: "Could not reach the database." },

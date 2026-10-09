@@ -92,8 +92,13 @@ export function identityKeys(lead: LeadIdentity): string[] {
   const phone = normalisePhone(lead.phone);
   if (phone.length >= MIN_PHONE_DIGITS) keys.push(`phone:${phone}`);
 
+  // Only with an address to pair it with. A name alone is not an identity —
+  // "Subway" with no address and two different numbers is two branches, and
+  // keying them on `name|` dropped the second as a duplicate. Without an
+  // address the phone key above is the only evidence of sameness.
   const name = normaliseName(lead.name);
-  if (name) keys.push(`na:${name}|${normaliseAddress(lead.address)}`);
+  const address = normaliseAddress(lead.address);
+  if (name && address) keys.push(`na:${name}|${address}`);
 
   return keys;
 }
