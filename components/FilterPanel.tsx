@@ -111,8 +111,8 @@ export default function FilterPanel({
    */
   contributor?: boolean;
   /**
-   * An administrator's rail: one more checkbox under Source, for the leads a
-   * contributor added by hand.
+   * An administrator's rail: the "Added by" band above the columns, for the
+   * leads a contributor added by hand.
    */
   admin?: boolean;
 }) {
@@ -152,12 +152,11 @@ export default function FilterPanel({
   const canFilterByMessage = workState !== "new" && !contributor;
 
   /*
-   * Where Source sits. Under Status normally, where it shares a column because
-   * two checkboxes do not earn one. A contributor's rail has no Category column,
-   * which leaves the last track empty — so there Source takes it as a group of
-   * its own instead.
+   * Where Source sits. Under Message when that is drawn, because two
+   * checkboxes do not earn a column and the pair is about the same height as
+   * the lists beside it. Where there is no Message group — the New queue, a
+   * contributor's rail — Source is the column.
    */
-  const sourceApart = contributor && canFilterByStatus;
 
   /*
    * Nor by callback date, in the New queue, for the reason in `viewsFor`: a
@@ -311,36 +310,60 @@ export default function FilterPanel({
         </section>
       )}
 
-      {/* `gap-x-6` rather than 8: two of these columns hold wrapping labels,
-          and 16px of the gutter is better spent on the words. */}
-      {/* Three tracks rather than four once Callback date is gone, so the
-          remaining groups spread into the width instead of leaving a 210px
-          hole where the dropped column used to be. Both variants are written
-          out in full: Tailwind reads class names as literals and would not
-          generate one assembled at runtime. */}
-      <div
-        className={`grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2 xl:gap-y-4 ${
-          canFilterByCallback
-            ? "xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_minmax(190px,1fr)_210px]"
-            : "xl:grid-cols-[minmax(215px,1fr)_minmax(215px,1fr)_minmax(190px,1fr)]"
-        }`}
-      >
+      {/*
+        * --- Added by ---------------------------------------------------
+        *
+        * A band above the columns, like the demo one: it is a single switch
+        * over the whole list rather than one more list to tick through, and
+        * under Source it sat at the bottom of the tallest column where nobody
+        * would find it. No count beside it — the facets do not carry one.
+        */}
+      {admin && (
+        <section
+          aria-labelledby="filter-added-by"
+          className="panel-inset flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5"
+        >
+          <h3 id="filter-added-by" className="eyebrow">
+            Added by
+          </h3>
+          <button
+            type="button"
+            onClick={() =>
+              onChange({ ...filters, addedByContributor: !filters.addedByContributor })
+            }
+            aria-pressed={filters.addedByContributor}
+            title="Only the leads a contributor added by hand."
+            className={`rounded-md border px-2.5 py-1.5 text-caption transition-colors ${
+              filters.addedByContributor
+                ? "border-accent-line bg-accent-soft font-medium text-accent"
+                : "border-line bg-surface text-fg-2 hover:border-line-2 hover:text-fg"
+            }`}
+          >
+            Contributors only
+          </button>
+          <span className="text-caption text-fg-4">
+            Leads a contributor typed in, rather than the scraped pool
+          </span>
+        </section>
+      )}
+
+      {/* One track per group, as many as fit: the groups on screen change with
+          the queue and the role, and a fixed template left a hole wherever one
+          was dropped. `gap-x-6` rather than 8 — the labels wrap, and the width
+          is better spent on the words. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-x-6 gap-y-5">
       {/* --- Status: multi-select ------------------------------------- */}
+      {canFilterByStatus && (
       <Group
-        title={canFilterByStatus ? "Status" : "Source"}
+        title="Status"
         action={
-          canFilterByStatus
-            ? filters.statuses.length > 0 && (
-                <Reset onClick={() => onChange({ ...filters, statuses: [] })} />
-              )
-            : filters.sources.length > 0 && (
-                <Reset onClick={() => onChange({ ...filters, sources: [] })} />
-              )
+          filters.statuses.length > 0 && (
+            <Reset onClick={() => onChange({ ...filters, statuses: [] })} />
+          )
         }
       >
         {/* One column — see the note on this component. `Called - Owner not
             available` is the longest label in the app and it has to fit. */}
-        {canFilterByStatus && (
           <div className="flex flex-col gap-y-0.5">
             {CALL_STATUSES.map((status) => (
               <Check
@@ -364,27 +387,30 @@ export default function FilterPanel({
               </Check>
             ))}
           </div>
-        )}
+      </Group>
+      )}
 
-        {/*
-          * --- Message ---------------------------------------------------
-          *
-          * Under the call status and above Source, because that is the order
-          * the questions are asked in: what happened on the phone, then what
-          * happened on the thread, then where the lead came from. Three
-          * checkboxes do not earn a column of their own, and putting them here
-          * keeps "what have we done about this lead" in one place.
-          */}
+      {/*
+        * --- Message, with Source under it ------------------------------
+        *
+        * A column of their own rather than under Status: stacked there they
+        * made one column twice the height of every other and left the rest of
+        * the panel empty. Message first because it is the second half of "what
+        * have we done about this lead"; Source is where it came from.
+        */}
+      <Group
+        title={canFilterByMessage ? "Message" : "Source"}
+        action={
+          canFilterByMessage
+            ? filters.messageStatuses.length > 0 && (
+                <Reset onClick={() => onChange({ ...filters, messageStatuses: [] })} />
+              )
+            : filters.sources.length > 0 && (
+                <Reset onClick={() => onChange({ ...filters, sources: [] })} />
+              )
+        }
+      >
         {canFilterByMessage && (
-          <div className="mt-4">
-            <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
-              <h3 className="eyebrow">Message</h3>
-              {filters.messageStatuses.length > 0 && (
-                <span className="ml-auto">
-                  <Reset onClick={() => onChange({ ...filters, messageStatuses: [] })} />
-                </span>
-              )}
-            </div>
             <div className="flex flex-col gap-y-0.5">
               {MESSAGE_STATUSES.map((status) => (
                 <Check
@@ -405,7 +431,6 @@ export default function FilterPanel({
                 </Check>
               ))}
             </div>
-          </div>
         )}
 
         {/*
@@ -422,47 +447,22 @@ export default function FilterPanel({
           * ticking neither. Exclusive buttons would have needed a third "All"
           * option to say the same thing.
           */}
-        {/* Its own sub-heading only while Status is above it. Alone in the
+        {/* Its own sub-heading only while Message is above it. Alone in the
             column it *is* the group, and a heading repeating the group's own
             title is noise. */}
-        {!sourceApart && (
-          <div className={canFilterByStatus ? "mt-4" : ""}>
-            {canFilterByStatus && (
-              <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
-                <h3 className="eyebrow">Source</h3>
-                {filters.sources.length > 0 && (
-                  <span className="ml-auto">
-                    <Reset onClick={() => onChange({ ...filters, sources: [] })} />
-                  </span>
-                )}
-              </div>
-            )}
-            {sourceChecks}
-          </div>
-        )}
-
-        {/*
-          * --- Added by ---------------------------------------------------
-          *
-          * Under Source because it is the same question asked more narrowly:
-          * where did this lead come from. No count beside it — the facets do
-          * not carry one.
-          */}
-        {admin && (
-          <div className="mt-4">
+        <div className={canFilterByMessage ? "mt-4" : ""}>
+          {canFilterByMessage && (
             <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
-              <h3 className="eyebrow">Added by</h3>
+              <h3 className="eyebrow">Source</h3>
+              {filters.sources.length > 0 && (
+                <span className="ml-auto">
+                  <Reset onClick={() => onChange({ ...filters, sources: [] })} />
+                </span>
+              )}
             </div>
-            <Check
-              checked={filters.addedByContributor}
-              onChange={() =>
-                onChange({ ...filters, addedByContributor: !filters.addedByContributor })
-              }
-            >
-              <span className="min-w-0 flex-1 leading-snug">Contributors only</span>
-            </Check>
-          </div>
-        )}
+          )}
+          {sourceChecks}
+        </div>
       </Group>
 
       {/* --- Category / industry: multi-select ------------------------- */}
@@ -486,7 +486,7 @@ export default function FilterPanel({
           {/* Taller than it was: one column shows half as many rows at a time,
               and a five-row window over a hundred categories is a scrollbar with
               a list attached. */}
-          <div className="max-h-[232px] overflow-y-auto pr-1">
+          <div className="max-h-[248px] overflow-y-auto pr-1">
             {visibleCategories.length === 0 ? (
               <p className="py-2 text-ui text-fg-3">No matching category.</p>
             ) : (
@@ -663,19 +663,6 @@ export default function FilterPanel({
         </Group>
       )}
 
-      {/* --- Source, in its own column (contributors — see `sourceApart`) --- */}
-      {sourceApart && (
-        <Group
-          title="Source"
-          action={
-            filters.sources.length > 0 && (
-              <Reset onClick={() => onChange({ ...filters, sources: [] })} />
-            )
-          }
-        >
-          {sourceChecks}
-        </Group>
-      )}
       </div>
     </div>
   );
