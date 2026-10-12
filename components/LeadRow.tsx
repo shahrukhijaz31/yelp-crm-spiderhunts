@@ -378,8 +378,10 @@ export default function LeadRow({
         {contributor ? (
           <DateAdded iso={lead.createdAt ?? null} today={today} />
         ) : lead.callbackDate ? (
+          // Stacked, date over time: side by side they are wider than the
+          // column, and the "am" ran out past the edge of the table.
           <span
-            className={`tnum font-mono text-caption font-medium ${
+            className={`tnum flex flex-col whitespace-nowrap font-mono text-caption font-medium leading-tight ${
               state === "overdue"
                 ? "text-accent"
                 : state === "today"
@@ -389,7 +391,7 @@ export default function LeadRow({
           >
             {formatCallbackDate(lead.callbackDate, today)}
             {lead.meetingTime && (
-              <span className="text-fg-3"> {formatMeetingTime(lead.meetingTime)}</span>
+              <span className="text-fg-3">{formatMeetingTime(lead.meetingTime)}</span>
             )}
           </span>
         ) : (
