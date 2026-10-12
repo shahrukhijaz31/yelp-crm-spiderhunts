@@ -209,6 +209,8 @@ export function buildLeadSearchParams(query: LeadPageQuery): URLSearchParams {
   // thing that sets it, and a URL it produced must survive a copy-paste.
   if (filters.demo !== "all") params.set("demo", filters.demo);
 
+  if (filters.addedByContributor) params.set("added", "contributor");
+
   if (filters.callback !== "all") params.set("callback", filters.callback);
   if (filters.callback === "custom") {
     if (filters.callbackFrom) params.set("callbackFrom", filters.callbackFrom);
@@ -352,6 +354,9 @@ export function parseLeadSearchParams(
     callbackFrom: isIsoDate(callbackFrom) ? callbackFrom : null,
     callbackTo: isIsoDate(callbackTo) ? callbackTo : null,
     demo,
+    // Read for anyone here; the callers drop it for everybody but an
+    // administrator, because this file does not know who is asking.
+    addedByContributor: params.get("added") === "contributor",
   };
 
   const today = params.get("today");

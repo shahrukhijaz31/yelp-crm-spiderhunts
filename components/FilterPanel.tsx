@@ -83,6 +83,7 @@ export default function FilterPanel({
   demoCounts,
   workState,
   contributor = false,
+  admin = false,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
@@ -109,6 +110,11 @@ export default function FilterPanel({
    * other two (see the workspace's `contributorView`).
    */
   contributor?: boolean;
+  /**
+   * An administrator's rail: one more checkbox under Source, for the leads a
+   * contributor added by hand.
+   */
+  admin?: boolean;
 }) {
   const [categoryQuery, setCategoryQuery] = useState("");
 
@@ -432,6 +438,29 @@ export default function FilterPanel({
               </div>
             )}
             {sourceChecks}
+          </div>
+        )}
+
+        {/*
+          * --- Added by ---------------------------------------------------
+          *
+          * Under Source because it is the same question asked more narrowly:
+          * where did this lead come from. No count beside it — the facets do
+          * not carry one.
+          */}
+        {admin && (
+          <div className="mt-4">
+            <div className="mb-2.5 flex items-center gap-2 border-b border-line pb-1.5">
+              <h3 className="eyebrow">Added by</h3>
+            </div>
+            <Check
+              checked={filters.addedByContributor}
+              onChange={() =>
+                onChange({ ...filters, addedByContributor: !filters.addedByContributor })
+              }
+            >
+              <span className="min-w-0 flex-1 leading-snug">Contributors only</span>
+            </Check>
           </div>
         )}
       </Group>

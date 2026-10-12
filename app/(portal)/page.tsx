@@ -120,6 +120,7 @@ export default async function Home(props: PageProps<"/">) {
       canAddLeads={canAddLeads(user.role)}
       canEditDetails={canAddLeads(user.role)}
       contributorColumns={user.role === "CONTRIBUTOR"}
+      admin={user.role === "ADMIN"}
     />
   );
 }

@@ -44,6 +44,7 @@ export default function FilterToolbar({
   demoCounts,
   workState,
   contributor = false,
+  admin = false,
 }: {
   filters: LeadFilters;
   onChange: (filters: LeadFilters) => void;
@@ -62,6 +63,8 @@ export default function FilterToolbar({
   workState?: LeadWorkState;
   /** Straight through: a contributor's rail drops Category, Message and WhatsApp. */
   contributor?: boolean;
+  /** Straight through: an administrator's rail offers "Added by a contributor". */
+  admin?: boolean;
 }) {
   const chips = describeActiveFilters(filters);
   const isFiltered = chips.length > 0;
@@ -246,6 +249,7 @@ export default function FilterToolbar({
                 workState={workState}
                 demoCounts={demoCounts}
                 contributor={contributor}
+                admin={admin}
               />
             </div>
           </motion.div>

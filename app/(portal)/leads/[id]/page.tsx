@@ -77,6 +77,8 @@ export default async function LeadPage(props: PageProps<"/leads/[id]">) {
   const params = rawParams;
 
   const query = parseLeadSearchParams(params, todayIso());
+  // An administrator's filter, as in `GET /api/leads`.
+  if (user.role !== "ADMIN") query.filters.addedByContributor = false;
   const position = readLeadPosition(params.get("pos"));
 
   // Scoped: a contributor following a link to somebody else's lead meets the

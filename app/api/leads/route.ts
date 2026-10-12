@@ -112,6 +112,9 @@ export async function GET(request: Request): Promise<Response> {
    */
   const auth = await apiModule(demoSection ? "demoWebsites" : "leads");
   if (auth instanceof Response) return auth;
+  // An administrator's filter: nobody else has the control, so nobody else's
+  // URL may carry it.
+  if (auth.role !== "ADMIN") query.filters.addedByContributor = false;
   const wantCategories = url.searchParams.get("categories") === "1";
   const wantRows = url.searchParams.get("rows") !== "0";
 

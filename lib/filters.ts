@@ -128,6 +128,15 @@ export interface LeadFilters {
    * screen has no control to clear.
    */
   demo: DemoFilter;
+  /**
+   * Only the leads a contributor typed in by hand — `created_by_user_id`
+   * pointing at a user whose role is CONTRIBUTOR. Offered to administrators
+   * only, and read from the URL for them only (see `GET /api/leads`).
+   *
+   * Like `demo`, it is a join and so is evaluated in SQL only: a `Lead` does
+   * not carry its creator's role, and `matchesFilters` cannot answer it.
+   */
+  addedByContributor: boolean;
 }
 
 export const EMPTY_FILTERS: LeadFilters = {
@@ -142,6 +151,7 @@ export const EMPTY_FILTERS: LeadFilters = {
   callbackFrom: null,
   callbackTo: null,
   demo: "all",
+  addedByContributor: false,
 };
 
 // --- category options -------------------------------------------------------
@@ -428,6 +438,14 @@ export function describeActiveFilters(filters: LeadFilters): FilterChip[] {
       id: "demo",
       label: DEMO_FILTER_LABELS[filters.demo],
       next: { ...filters, demo: "all" },
+    });
+  }
+
+  if (filters.addedByContributor) {
+    chips.push({
+      id: "addedByContributor",
+      label: "Added by a contributor",
+      next: { ...filters, addedByContributor: false },
     });
   }
 

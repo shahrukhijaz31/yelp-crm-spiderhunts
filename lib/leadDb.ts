@@ -251,6 +251,17 @@ function leadFilterSql(query: LeadPageQuery, scope: LeadScope): Prisma.Sql {
     );
   }
 
+  // --- added by a contributor: the creator's role, read from `users` now
+  //     rather than stamped on the lead, so it follows a role change ---
+  if (filters.addedByContributor) {
+    clauses.push(
+      Prisma.sql`EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.id = l.created_by_user_id AND u.role::text = 'CONTRIBUTOR'
+      )`,
+    );
+  }
+
   // --- On WhatsApp: yes / no are the boolean, unknown is its NULL ---
   if (filters.whatsapp.length > 0) {
     const arms = filters.whatsapp.map((answer) =>

@@ -145,6 +145,7 @@ export default function Worklist({
   canAddLeads = false,
   canEditDetails = false,
   contributorColumns = false,
+  admin = false,
 }: {
   initialLeads: Lead[];
   initialMeta: LeadPageMeta;
@@ -184,6 +185,8 @@ export default function Worklist({
   canEditDetails?: boolean;
   /** Draw a contributor's columns — see `CONTRIBUTOR_COLUMNS`. */
   contributorColumns?: boolean;
+  /** Offer the administrator-only "Added by a contributor" filter. */
+  admin?: boolean;
 }) {
   const demoSection = section === "demo";
   const { stats, setStats } = usePortalStats();
@@ -1012,6 +1015,7 @@ export default function Worklist({
             workState={workState}
             demoCounts={demoCounts}
             contributor={contributorColumns}
+            admin={admin}
           />
         </div>
 
